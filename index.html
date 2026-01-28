@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Handyman LMS</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-copy">
+        <p class="eyebrow">Handyman Akademi</p>
+        <h1>LMS for opplæring av handyman-kunder</h1>
+        <p class="subtitle">
+          En praktisk læringsplattform som gir kundene dine trygge rutiner,
+          dokumentasjon og tydelige forventninger før første oppdrag.
+        </p>
+        <div class="header-actions">
+          <button class="primary" type="button">Inviter kunde</button>
+          <button class="ghost" type="button">Se onboarding-plan</button>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div>
+          <p class="meta-title">Neste kursstarter</p>
+          <p class="meta-value">Mandag 09:00</p>
+          <p class="meta-note">12 kunder er klare til oppstart</p>
+        </div>
+        <div>
+          <p class="meta-title">Kvalitetspoeng</p>
+          <p class="meta-value">4,7 / 5</p>
+          <p class="meta-note">Basert på 86 kunde-tilbakemeldinger</p>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Dashboard</h2>
+          <div class="search">
+            <input id="searchInput" type="search" placeholder="Søk etter kurs eller modul" />
+            <button id="resetSearch" type="button">Nullstill</button>
+          </div>
+        </div>
+        <div class="stats">
+          <article>
+            <h3>Aktive kunder</h3>
+            <p id="activeCustomers">0</p>
+            <span id="activeCustomersDelta">-</span>
+          </article>
+          <article>
+            <h3>Fullførte kurs</h3>
+            <p id="completedCourses">0</p>
+            <span id="completedCoursesDelta">-</span>
+          </article>
+          <article>
+            <h3>Åpne oppgaver</h3>
+            <p id="openTasks">0</p>
+            <span id="openTasksDelta">-</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Kursoversikt</h2>
+            <button class="ghost" type="button">Opprett nytt kurs</button>
+          </div>
+          <div id="courseList" class="course-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Læringsløp</h2>
+            <div class="panel-actions">
+              <span id="selectedCourseLabel" class="pill"></span>
+              <button class="ghost" type="button">Eksporter status</button>
+            </div>
+          </div>
+          <div id="moduleDetail" class="module-detail"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Oppfølging av kunder</h2>
+            <p class="muted">Hold orden på hvilke kunder som trenger støtte før neste oppdrag.</p>
+          </div>
+          <div class="filter-group" id="statusFilters">
+            <button class="filter active" type="button" data-filter="all">Alle</button>
+            <button class="filter" type="button" data-filter="warning">Trenger oppfølging</button>
+            <button class="filter" type="button" data-filter="info">Pågår</button>
+            <button class="filter" type="button" data-filter="success">Fullført</button>
+          </div>
+        </div>
+        <div class="table">
+          <div class="row header">
+            <span>Kunde</span>
+            <span>Kurs</span>
+            <span>Status</span>
+            <span>Kontakt</span>
+          </div>
+          <div id="customerRows"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Handyman Akademi · Laget for bedre kundeopplæring og drift.</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
