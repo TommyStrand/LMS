@@ -5,53 +5,58 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Parameter layout
 // ─────────────────────────────────────────────────────────────────────────────
-juce::AudioProcessorValueTreeState::ParameterLayout OmnisphereSynthProcessor::createLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout
+OmnisphereSynthProcessor::createLayout()
 {
     using namespace juce;
-    std::vector<std::unique_ptr<RangedAudioParameter>> params;
+    std::vector<std::unique_ptr<RangedAudioParameter>> p;
+    auto add = [&](auto* param){ p.push_back(std::unique_ptr<RangedAudioParameter>(param)); };
 
-    auto add = [&](auto* p){ params.push_back(std::unique_ptr<RangedAudioParameter>(p)); };
+    add(new AudioParameterInt   ("preset",      "Preset",           0, 8,      0));
+    add(new AudioParameterFloat ("reverb",      "Reverb",           0.f, 1.f,  0.65f));
+    add(new AudioParameterFloat ("delay_mix",   "Delay Mix",        0.f, 1.f,  0.3f));
+    add(new AudioParameterFloat ("delay_time",  "Delay Time",       0.05f,2.f, 0.375f));
+    add(new AudioParameterFloat ("cutoff",      "Filter Cutoff",
+        NormalisableRange<float>(20.f,20000.f,0.f,0.3f), 800.f));
+    add(new AudioParameterFloat ("resonance",   "Resonance",        0.f, 0.95f,0.3f));
+    add(new AudioParameterFloat ("attack",      "Attack",           0.001f,4.f,1.2f));
+    add(new AudioParameterFloat ("decay",       "Decay",            0.001f,4.f,0.5f));
+    add(new AudioParameterFloat ("sustain",     "Sustain",          0.f,  1.f, 0.8f));
+    add(new AudioParameterFloat ("release",     "Release",          0.01f,8.f, 2.0f));
+    add(new AudioParameterFloat ("lfo_rate",    "LFO Rate",         0.05f,10.f,0.3f));
+    add(new AudioParameterFloat ("lfo_depth",   "LFO Depth",        0.f,  1.f, 0.15f));
+    add(new AudioParameterFloat ("osc_mix",     "Osc Mix",          0.f,  1.f, 0.5f));
+    add(new AudioParameterFloat ("osc2_detune", "Osc2 Detune",     -24.f,24.f, 7.0f));
+    add(new AudioParameterFloat ("distortion",  "Distortion",       0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("shimmer",     "Shimmer",          0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("tremulant",   "Tremulant",        0.f,  1.f, 0.25f));
+    // New texture effects
+    add(new AudioParameterFloat ("lofi",        "Lo-Fi",            0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("vinyl",       "Vinyl",            0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("broken_tape", "Broken Tape",      0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("grit",        "Grit",             0.f,  1.f, 0.0f));
+    add(new AudioParameterFloat ("doubler",     "Doubler",          0.f,  1.f, 0.0f));
 
-    add (new AudioParameterInt   ("preset",     "Preset",       0, 6,    0));
-    add (new AudioParameterFloat ("reverb",     "Reverb",       0.0f, 1.0f, 0.65f));
-    add (new AudioParameterFloat ("delay_mix",  "Delay Mix",    0.0f, 1.0f, 0.3f));
-    add (new AudioParameterFloat ("delay_time", "Delay Time",   0.05f, 2.0f, 0.375f));
-    add (new AudioParameterFloat ("cutoff",     "Filter Cutoff",
-                                  NormalisableRange<float>(20.f, 20000.f, 0.f, 0.3f), 800.f));
-    add (new AudioParameterFloat ("resonance",  "Resonance",    0.0f, 0.95f, 0.3f));
-    add (new AudioParameterFloat ("attack",     "Attack",       0.001f, 4.0f, 1.2f));
-    add (new AudioParameterFloat ("decay",      "Decay",        0.001f, 4.0f, 0.5f));
-    add (new AudioParameterFloat ("sustain",    "Sustain",      0.0f,   1.0f, 0.8f));
-    add (new AudioParameterFloat ("release",    "Release",      0.01f,  8.0f, 2.0f));
-    add (new AudioParameterFloat ("lfo_rate",   "LFO Rate",     0.05f, 10.0f, 0.3f));
-    add (new AudioParameterFloat ("lfo_depth",  "LFO Depth",    0.0f,   1.0f, 0.15f));
-    add (new AudioParameterFloat ("osc_mix",    "Osc Mix",      0.0f,   1.0f, 0.5f));
-    add (new AudioParameterFloat ("osc2_detune","Osc2 Detune", -24.0f, 24.0f, 7.0f));
-    add (new AudioParameterFloat ("distortion", "Distortion",   0.0f,   1.0f, 0.0f));
-    add (new AudioParameterFloat ("shimmer",    "Shimmer",      0.0f,   1.0f, 0.0f));
-    add (new AudioParameterFloat ("tremulant",  "Tremulant",    0.0f,   1.0f, 0.25f));
-
-    return { params.begin(), params.end() };
+    return { p.begin(), p.end() };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constructor / destructor
 // ─────────────────────────────────────────────────────────────────────────────
 OmnisphereSynthProcessor::OmnisphereSynthProcessor()
     : AudioProcessor (BusesProperties()
                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "State", createLayout()),
-      delayLine (kMaxDelaySamples)
+      apvts (*this, nullptr, "State", createLayout())
 {
     presets = Presets::all();
     for (auto& a : waveRing) a.store (0.0f);
-    shiftReadB[0] = float (kGrainSize);
-    shiftReadB[1] = float (kGrainSize);
+    shiftReadB[0] = shiftReadB[1] = float (kGrainSize);
 
     for (int i = 0; i < kMaxVoices; ++i) {
         auto* v = new OmniVoice();
-        v->xyX = &xyX;
-        v->xyY = &xyY;
+        v->xyX           = &xyX;
+        v->xyY           = &xyY;
+        v->modWheelPtr   = &midiModWheel;
+        v->expressionPtr = &midiExpression;
+        v->leslieSpeedPtr= &midiLeslieSpd;
         v->setPreset (presets[0]);
         synth.addVoice (v);
     }
@@ -61,45 +66,43 @@ OmnisphereSynthProcessor::OmnisphereSynthProcessor()
 OmnisphereSynthProcessor::~OmnisphereSynthProcessor() {}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Preset loading — updates voice parameters and effect defaults
-// ─────────────────────────────────────────────────────────────────────────────
 void OmnisphereSynthProcessor::loadPreset (int index)
 {
     index = juce::jlimit (0, int (presets.size()) - 1, index);
     currentPresetIndex = index;
-    const auto& p = presets[index];
+    const auto& pr = presets[index];
 
     for (int i = 0; i < synth.getNumVoices(); ++i)
         if (auto* v = dynamic_cast<OmniVoice*> (synth.getVoice (i)))
-            v->setPreset (p);
+            v->setPreset (pr);
 
-    // Push preset defaults into APVTS (will update knobs in editor)
-    auto setValue = [&](const char* id, float v)
-    {
+    auto set = [&](const char* id, float val) {
         if (auto* param = apvts.getParameter (id))
-            param->setValueNotifyingHost (param->convertTo0to1 (v));
+            param->setValueNotifyingHost (param->convertTo0to1 (val));
     };
-
-    setValue ("reverb",     p.reverbMix);
-    setValue ("delay_mix",  p.delayMix);
-    setValue ("delay_time", p.delayTime);
-    setValue ("cutoff",     p.filterCutoff);
-    setValue ("resonance",  p.filterResonance);
-    setValue ("attack",     p.attack);
-    setValue ("decay",      p.decay);
-    setValue ("sustain",    p.sustain);
-    setValue ("release",    p.release);
-    setValue ("lfo_rate",   p.lfoRate);
-    setValue ("lfo_depth",  p.lfoDepth);
-    setValue ("osc_mix",    p.oscMix);
-    setValue ("osc2_detune",p.osc2Detune);
-    setValue ("distortion", p.distortionAmount);
-    setValue ("shimmer",    p.shimmerAmount);
-    setValue ("tremulant",  p.tremulantDepth);
+    set ("reverb",     pr.reverbMix);
+    set ("delay_mix",  pr.delayMix);
+    set ("delay_time", pr.delayTime);
+    set ("cutoff",     pr.filterCutoff);
+    set ("resonance",  pr.filterResonance);
+    set ("attack",     pr.attack);
+    set ("decay",      pr.decay);
+    set ("sustain",    pr.sustain);
+    set ("release",    pr.release);
+    set ("lfo_rate",   pr.lfoRate);
+    set ("lfo_depth",  pr.lfoDepth);
+    set ("osc_mix",    pr.oscMix);
+    set ("osc2_detune",pr.osc2Detune);
+    set ("distortion", pr.distortion);
+    set ("shimmer",    pr.shimmerAmount);
+    set ("tremulant",  pr.tremulantDepth);
+    set ("lofi",       pr.lofiAmount);
+    set ("vinyl",      pr.vinylAmount);
+    set ("broken_tape",pr.brokenTape);
+    set ("grit",       pr.gritAmount);
+    set ("doubler",    pr.doublerAmount);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Prepare
 // ─────────────────────────────────────────────────────────────────────────────
 void OmnisphereSynthProcessor::prepareToPlay (double sr, int blockSize)
 {
@@ -108,80 +111,70 @@ void OmnisphereSynthProcessor::prepareToPlay (double sr, int blockSize)
     juce::dsp::ProcessSpec spec { sr, uint32_t (blockSize), 2 };
     mainReverb.prepare (spec);
     shimmerReverb.prepare (spec);
-    delayLine.prepare (spec);
 
     juce::dsp::Reverb::Parameters shimP;
-    shimP.roomSize  = 0.95f;
-    shimP.damping   = 0.1f;
-    shimP.wetLevel  = 0.8f;
-    shimP.dryLevel  = 0.0f;
-    shimP.width     = 1.0f;
+    shimP.roomSize = 0.95f; shimP.damping = 0.1f;
+    shimP.wetLevel = 0.8f;  shimP.dryLevel = 0.0f; shimP.width = 1.0f;
     shimmerReverb.setParameters (shimP);
 
-    shimmerBuf.setSize (2, blockSize);
+    shimBuf.setSize (2, blockSize);
 
     std::memset (shiftBuffer, 0, sizeof (shiftBuffer));
     shiftReadA[0] = shiftReadA[1] = 0.0f;
     shiftReadB[0] = shiftReadB[1] = float (kGrainSize);
-    shiftWritePos = 0;
+    shiftWrite = 0;
 
-    applyEffectParams();
+    for (int ch = 0; ch < 2; ++ch) {
+        lofi[ch].reset();
+        vinyl[ch].prepare (sr);  vinyl[ch].reset();
+        tapeDelay[ch].prepare (sr, blockSize); // prepare sets internal buffer
+    }
+    doubler.prepare (sr);  doubler.reset();
+
+    applyReverbParams();
 }
 
 void OmnisphereSynthProcessor::releaseResources() {}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Update reverb / delay from APVTS each block
-// ─────────────────────────────────────────────────────────────────────────────
-void OmnisphereSynthProcessor::applyEffectParams()
+void OmnisphereSynthProcessor::applyReverbParams()
 {
-    const float rev  = *apvts.getRawParameterValue ("reverb");
+    const float rev = *apvts.getRawParameterValue ("reverb");
     juce::dsp::Reverb::Parameters rp;
-    rp.roomSize  = 0.8f;
-    rp.damping   = 0.4f;
-    rp.wetLevel  = rev * 0.85f;
-    rp.dryLevel  = 1.0f - rev * 0.4f;
-    rp.width     = 1.0f;
+    rp.roomSize = 0.8f; rp.damping = 0.4f;
+    rp.wetLevel = rev * 0.85f; rp.dryLevel = 1.0f - rev * 0.4f; rp.width = 1.0f;
     mainReverb.setParameters (rp);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Granular pitch-shifter (+1 octave) — per-channel, per-sample
+// Granular pitch-shift (+1 oct) for shimmer
 // ─────────────────────────────────────────────────────────────────────────────
-float OmnisphereSynthProcessor::pitchShiftSample (int ch, float input)
+float OmnisphereSynthProcessor::pitchShiftSample (int ch, float in)
 {
-    // Write into ring buffer
-    shiftBuffer[ch][shiftWritePos] = input;
+    shiftBuffer[ch][shiftWrite & (kShiftBuf - 1)] = in;
 
-    // Interpolated read from ring buffer
-    auto lerp = [&](float pos) -> float {
-        int i0 = int (pos) & (kShiftBuf - 1);
+    auto lerp = [&](float pos) {
+        int i0 = int(pos) & (kShiftBuf - 1);
         int i1 = (i0 + 1) & (kShiftBuf - 1);
         float f = pos - std::floor (pos);
         return shiftBuffer[ch][i0] * (1.0f - f) + shiftBuffer[ch][i1] * f;
     };
 
-    // Hann window for each grain
     const float pA = std::fmod (shiftReadA[ch], float (kGrainSize));
     const float pB = std::fmod (shiftReadB[ch], float (kGrainSize));
-    const float wA = 0.5f * (1.0f - std::cos (2.0f * float (M_PI) * pA / float (kGrainSize)));
-    const float wB = 0.5f * (1.0f - std::cos (2.0f * float (M_PI) * pB / float (kGrainSize)));
+    const float wA = 0.5f * (1.0f - std::cos (6.2832f * pA / float (kGrainSize)));
+    const float wB = 0.5f * (1.0f - std::cos (6.2832f * pB / float (kGrainSize)));
 
     const float out = lerp (shiftReadA[ch]) * wA + lerp (shiftReadB[ch]) * wB;
 
-    // Advance read at 2× (= +1 octave), wrap within buffer
     shiftReadA[ch] = std::fmod (shiftReadA[ch] + 2.0f, float (kShiftBuf));
     shiftReadB[ch] = std::fmod (shiftReadB[ch] + 2.0f, float (kShiftBuf));
-
-    // Advance write only once per channel 0 call (both channels share write pos)
-    if (ch == 1)
-        shiftWritePos = (shiftWritePos + 1) & (kShiftBuf - 1);
+    if (ch == 1) shiftWrite = (shiftWrite + 1) & (kShiftBuf - 1);
 
     return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Process block
+// processBlock
 // ─────────────────────────────────────────────────────────────────────────────
 void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midi)
@@ -190,9 +183,31 @@ void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int numSamples = buffer.getNumSamples();
     buffer.clear();
 
-    // Sync voice params from APVTS every block
+    // ── MIDI CC extraction (before synth renders) ─────────────────────────────
+    for (const auto& meta : midi) {
+        const auto m = meta.getMessage();
+        if (m.isController()) {
+            const float v = float (m.getControllerValue()) / 127.0f;
+            switch (m.getControllerNumber()) {
+                case 1:  midiModWheel.store (v); break;    // mod wheel
+                case 3:  midiLeslieSpd.store (v > 0.5f ? 1.0f : 0.0f); break; // Leslie
+                case 11: midiExpression.store (v); break;  // expression
+                case 74: {  // brightness → filter cutoff
+                    // map 0-1 → 100-16000 Hz (log)
+                    const float hz = 100.0f * std::pow (160.0f, v);
+                    if (auto* param = apvts.getParameter ("cutoff"))
+                        param->setValueNotifyingHost (param->convertTo0to1 (hz));
+                    break;
+                }
+                default: break;
+            }
+        }
+    }
+
+    // ── Sync voice params from APVTS ──────────────────────────────────────────
     {
-        SynthPreset vp;
+        const auto& base = presets[currentPresetIndex];
+        SynthPreset vp   = base;
         vp.filterCutoff    = *apvts.getRawParameterValue ("cutoff");
         vp.filterResonance = *apvts.getRawParameterValue ("resonance");
         vp.attack          = *apvts.getRawParameterValue ("attack");
@@ -205,27 +220,41 @@ void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         vp.osc2Detune      = *apvts.getRawParameterValue ("osc2_detune");
         vp.tremulantDepth  = *apvts.getRawParameterValue ("tremulant");
 
-        const auto& basePreset = presets[currentPresetIndex];
-        vp.isOrgan    = basePreset.isOrgan;
-        vp.osc1Wave   = basePreset.osc1Wave;
-        vp.osc2Wave   = basePreset.osc2Wave;
-        vp.lfoTarget  = basePreset.lfoTarget;
-
         for (int i = 0; i < synth.getNumVoices(); ++i)
             if (auto* v = dynamic_cast<OmniVoice*> (synth.getVoice (i)))
                 v->setPreset (vp);
     }
 
-    // Render voices
+    // ── Render voices ────────────────────────────────────────────────────────
     synth.renderNextBlock (buffer, midi, 0, numSamples);
 
-    applyEffectParams();
+    applyReverbParams();
 
-    // ── Distortion (tanh soft-clip, organic) ──────────────────────────────────
-    const float distAmt = *apvts.getRawParameterValue ("distortion");
+    // Read effect amounts once per block
+    const float distAmt  = *apvts.getRawParameterValue ("distortion");
+    const float shimAmt  = *apvts.getRawParameterValue ("shimmer");
+    const float lofiAmt  = *apvts.getRawParameterValue ("lofi");
+    const float vinylAmt = *apvts.getRawParameterValue ("vinyl");
+    const float tapeAmt  = *apvts.getRawParameterValue ("broken_tape");
+    const float gritAmt  = *apvts.getRawParameterValue ("grit");
+    const float dblAmt   = *apvts.getRawParameterValue ("doubler");
+    const float delMix   = *apvts.getRawParameterValue ("delay_mix");
+    const float delTime  = *apvts.getRawParameterValue ("delay_time");
+    const float dt       = 1.0f / float (getSampleRate());
+
+    // ── Grit (asymmetric saturation) ─────────────────────────────────────────
+    if (gritAmt > 0.01f) {
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+            auto* d = buffer.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                d[i] = grit.process (d[i], gritAmt);
+        }
+    }
+
+    // ── Organic distortion (tanh soft-clip) ───────────────────────────────────
     if (distAmt > 0.01f) {
-        const float drive    = 1.0f + distAmt * 17.0f;
-        const float invTanh  = 1.0f / std::tanh (drive);
+        const float drive   = 1.0f + distAmt * 17.0f;
+        const float invTanh = 1.0f / std::tanh (drive);
         for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
             auto* d = buffer.getWritePointer (ch);
             for (int i = 0; i < numSamples; ++i)
@@ -233,63 +262,76 @@ void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // ── Shimmer (parallel: long reverb → pitch shift +1 oct) ─────────────────
-    const float shimAmt = *apvts.getRawParameterValue ("shimmer");
-    if (shimAmt > 0.01f) {
-        shimmerBuf.setSize (buffer.getNumChannels(), numSamples, false, false, true);
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-            shimmerBuf.copyFrom (ch, 0, buffer, ch, 0, numSamples);
-
-        // Apply long plate reverb
-        juce::dsp::AudioBlock<float> shimBlock (shimmerBuf);
-        juce::dsp::ProcessContextReplacing<float> shimCtx (shimBlock);
-        shimmerReverb.process (shimCtx);
-
-        // Pitch-shift +1 octave and mix back
+    // ── Lo-fi (bit/rate crush) ───────────────────────────────────────────────
+    if (lofiAmt > 0.01f) {
         for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
-            auto* src = shimmerBuf.getReadPointer (ch);
+            auto* d = buffer.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                d[i] = lofi[ch].process (d[i], lofiAmt);
+        }
+    }
+
+    // ── Vinyl (wow/flutter/crackle) ──────────────────────────────────────────
+    if (vinylAmt > 0.01f) {
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+            auto* d = buffer.getWritePointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                d[i] = vinyl[ch].process (d[i], vinylAmt);
+        }
+    }
+
+    // ── Shimmer ───────────────────────────────────────────────────────────────
+    if (shimAmt > 0.01f) {
+        shimBuf.setSize (buffer.getNumChannels(), numSamples, false, false, true);
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+            shimBuf.copyFrom (ch, 0, buffer, ch, 0, numSamples);
+
+        juce::dsp::AudioBlock<float> sb (shimBuf);
+        shimmerReverb.process (juce::dsp::ProcessContextReplacing<float> (sb));
+
+        for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
             auto* dst = buffer.getWritePointer (ch);
+            auto* src = shimBuf.getReadPointer (ch);
             for (int i = 0; i < numSamples; ++i)
                 dst[i] += pitchShiftSample (ch, src[i]) * shimAmt * 0.45f;
         }
     }
 
-    // ── Main reverb ────────────────────────────────────────────────────────────
+    // ── Main reverb ───────────────────────────────────────────────────────────
     {
-        juce::dsp::AudioBlock<float> block (buffer);
-        juce::dsp::ProcessContextReplacing<float> ctx (block);
-        mainReverb.process (ctx);
+        juce::dsp::AudioBlock<float> blk (buffer);
+        mainReverb.process (juce::dsp::ProcessContextReplacing<float> (blk));
     }
 
-    // ── Delay ─────────────────────────────────────────────────────────────────
-    {
-        const float delMix  = *apvts.getRawParameterValue ("delay_mix");
-        const float delTime = *apvts.getRawParameterValue ("delay_time");
-        const int   delaySamples = int (delTime * getSampleRate());
-        delayLine.setDelay (float (delaySamples));
+    // ── Broken tape delay ─────────────────────────────────────────────────────
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+        auto* d = buffer.getWritePointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+            d[i] = tapeDelay[ch].process (d[i], delTime, 0.28f, delMix, tapeAmt);
+    }
 
-        for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
-            auto* d = buffer.getWritePointer (ch);
-            for (int i = 0; i < numSamples; ++i) {
-                const float delayed = delayLine.popSample (ch);
-                delayLine.pushSample (ch, d[i] + delayed * 0.28f);
-                d[i] += delayed * delMix;
-            }
+    // ── Doubler (stereo widener) ──────────────────────────────────────────────
+    if (dblAmt > 0.01f && buffer.getNumChannels() >= 2) {
+        auto* L = buffer.getWritePointer (0);
+        auto* R = buffer.getWritePointer (1);
+        for (int i = 0; i < numSamples; ++i) {
+            const float mono = (L[i] + R[i]) * 0.5f;
+            auto out = doubler.process (mono, dblAmt, dt);
+            L[i] = out.L;
+            R[i] = out.R;
         }
     }
 
-    // ── Feed waveform display ring ────────────────────────────────────────────
+    // ── Waveform display ring ─────────────────────────────────────────────────
     const auto* mono = buffer.getReadPointer (0);
-    int wPos = waveWritePos.load();
+    int wp = waveWritePos.load();
     for (int i = 0; i < numSamples; ++i) {
-        waveRing[wPos % kWaveSize].store (mono[i]);
-        ++wPos;
+        waveRing[wp % kWaveSize].store (mono[i]);
+        ++wp;
     }
-    waveWritePos.store (wPos % kWaveSize);
+    waveWritePos.store (wp % kWaveSize);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// State persistence
 // ─────────────────────────────────────────────────────────────────────────────
 void OmnisphereSynthProcessor::getStateInformation (juce::MemoryBlock& data)
 {
@@ -305,11 +347,10 @@ void OmnisphereSynthProcessor::setStateInformation (const void* data, int size)
     if (xml && xml->hasTagName (apvts.state.getType())) {
         auto tree = juce::ValueTree::fromXml (*xml);
         apvts.replaceState (tree);
-        loadPreset (tree.getProperty ("presetIndex", 0));
+        loadPreset ((int) tree.getProperty ("presetIndex", 0));
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 juce::AudioProcessorEditor* OmnisphereSynthProcessor::createEditor()
 {
     return new OmnisphereSynthEditor (*this);

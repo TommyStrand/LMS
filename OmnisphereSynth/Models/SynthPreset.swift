@@ -5,6 +5,9 @@ struct SynthPreset: Identifiable, Equatable {
     let name: String
     let color: String
 
+    // Voice type
+    var voiceMode: VoiceMode
+
     // Oscillator
     var osc1Waveform: Waveform
     var osc2Waveform: Waveform
@@ -27,17 +30,27 @@ struct SynthPreset: Identifiable, Equatable {
     var lfoDepth: Float
     var lfoTarget: LFOTarget
 
-    // Effects
+    // Classic effects
     var reverbMix: Float
     var delayMix: Float
     var delayTime: Float
     var chorusMix: Float
 
-    // Organ / FX extensions
-    var isOrgan: Bool
-    var distortionAmount: Float   // 0–1
-    var shimmerAmount: Float      // 0–1
-    var tremulantDepth: Float     // 0–1
+    // Organ / shimmer FX
+    var distortionAmount: Float
+    var shimmerAmount: Float
+    var tremulantDepth: Float
+
+    // Texture effects
+    var lofiAmount: Float
+    var vinylAmount: Float
+    var brokenTape: Float
+    var gritAmount: Float
+    var doublerAmount: Float
+
+    var isOrgan: Bool { voiceMode == .organChurch || voiceMode == .hammondB3 }
+
+    enum VoiceMode { case synth, organChurch, hammondB3, rhodes }
 
     enum Waveform: Int, CaseIterable {
         case sine, triangle, sawtooth, square, noise
@@ -49,18 +62,24 @@ struct SynthPreset: Identifiable, Equatable {
 
     init(
         name: String, color: String,
-        osc1Waveform: Waveform, osc2Waveform: Waveform,
-        osc2Detune: Float, oscMix: Float,
-        filterCutoff: Float, filterResonance: Float, filterEnvAmount: Float,
-        attack: Float, decay: Float, sustain: Float, release: Float,
-        lfoRate: Float, lfoDepth: Float, lfoTarget: LFOTarget,
-        reverbMix: Float, delayMix: Float, delayTime: Float, chorusMix: Float,
-        isOrgan: Bool = false,
+        voiceMode: VoiceMode = .synth,
+        osc1Waveform: Waveform = .sawtooth, osc2Waveform: Waveform = .sawtooth,
+        osc2Detune: Float = 0, oscMix: Float = 0.5,
+        filterCutoff: Float = 2000, filterResonance: Float = 0.2, filterEnvAmount: Float = 0.3,
+        attack: Float = 0.05, decay: Float = 0.5, sustain: Float = 0.7, release: Float = 1.0,
+        lfoRate: Float = 0.5, lfoDepth: Float = 0.1, lfoTarget: LFOTarget = .filter,
+        reverbMix: Float = 0.4, delayMix: Float = 0.2, delayTime: Float = 0.375, chorusMix: Float = 0.2,
         distortionAmount: Float = 0,
         shimmerAmount: Float = 0,
-        tremulantDepth: Float = 0
+        tremulantDepth: Float = 0,
+        lofiAmount: Float = 0,
+        vinylAmount: Float = 0,
+        brokenTape: Float = 0,
+        gritAmount: Float = 0,
+        doublerAmount: Float = 0
     ) {
         self.name = name; self.color = color
+        self.voiceMode = voiceMode
         self.osc1Waveform = osc1Waveform; self.osc2Waveform = osc2Waveform
         self.osc2Detune = osc2Detune; self.oscMix = oscMix
         self.filterCutoff = filterCutoff; self.filterResonance = filterResonance
@@ -69,10 +88,14 @@ struct SynthPreset: Identifiable, Equatable {
         self.lfoRate = lfoRate; self.lfoDepth = lfoDepth; self.lfoTarget = lfoTarget
         self.reverbMix = reverbMix; self.delayMix = delayMix
         self.delayTime = delayTime; self.chorusMix = chorusMix
-        self.isOrgan = isOrgan
         self.distortionAmount = distortionAmount
         self.shimmerAmount = shimmerAmount
         self.tremulantDepth = tremulantDepth
+        self.lofiAmount = lofiAmount
+        self.vinylAmount = vinylAmount
+        self.brokenTape = brokenTape
+        self.gritAmount = gritAmount
+        self.doublerAmount = doublerAmount
     }
 
     static func == (lhs: SynthPreset, rhs: SynthPreset) -> Bool { lhs.id == rhs.id }
@@ -81,22 +104,35 @@ struct SynthPreset: Identifiable, Equatable {
 extension SynthPreset {
     static let presets: [SynthPreset] = [
         SynthPreset(
+            name: "Hammond B3",
+            color: "#B45309",
+            voiceMode: .hammondB3,
+            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25,
+            tremulantDepth: 0.5,
+            gritAmount: 0.18
+        ),
+        SynthPreset(
+            name: "Rhodes Mk1",
+            color: "#92400E",
+            voiceMode: .rhodes,
+            reverbMix: 0.35, delayMix: 0.2, delayTime: 0.375,
+            tremulantDepth: 0.3,
+            chorusMix: 0.25
+        ),
+        SynthPreset(
             name: "Church Organ",
             color: "#C4A35A",
-            osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 0, oscMix: 0,
-            filterCutoff: 8000, filterResonance: 0, filterEnvAmount: 0,
+            voiceMode: .organChurch,
+            filterCutoff: 8000, filterResonance: 0,
             attack: 0.005, decay: 0, sustain: 1.0, release: 0.04,
             lfoRate: 0, lfoDepth: 0, lfoTarget: .amplitude,
-            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5, chorusMix: 0,
-            isOrgan: true,
-            distortionAmount: 0,
-            shimmerAmount: 0,
+            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5,
             tremulantDepth: 0.25
         ),
         SynthPreset(
             name: "Mystic Pad",
             color: "#8B5CF6",
+            voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
             osc2Detune: 7, oscMix: 0.5,
             filterCutoff: 800, filterResonance: 0.3, filterEnvAmount: 0.5,
@@ -107,6 +143,7 @@ extension SynthPreset {
         SynthPreset(
             name: "Dark Matter",
             color: "#1E3A5F",
+            voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .sawtooth,
             osc2Detune: -5, oscMix: 0.4,
             filterCutoff: 400, filterResonance: 0.6, filterEnvAmount: 0.7,
@@ -117,6 +154,7 @@ extension SynthPreset {
         SynthPreset(
             name: "Celestial",
             color: "#06B6D4",
+            voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .triangle,
             osc2Detune: 12, oscMix: 0.6,
             filterCutoff: 2000, filterResonance: 0.1, filterEnvAmount: 0.3,
@@ -127,6 +165,7 @@ extension SynthPreset {
         SynthPreset(
             name: "Pulse Drive",
             color: "#F59E0B",
+            voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .square,
             osc2Detune: 0, oscMix: 0.5,
             filterCutoff: 1200, filterResonance: 0.8, filterEnvAmount: 0.9,
@@ -137,6 +176,7 @@ extension SynthPreset {
         SynthPreset(
             name: "Void Walker",
             color: "#059669",
+            voiceMode: .synth,
             osc1Waveform: .noise, osc2Waveform: .sawtooth,
             osc2Detune: 2, oscMix: 0.3,
             filterCutoff: 600, filterResonance: 0.4, filterEnvAmount: 0.6,
@@ -147,6 +187,7 @@ extension SynthPreset {
         SynthPreset(
             name: "Solar Wind",
             color: "#EF4444",
+            voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .triangle,
             osc2Detune: 3, oscMix: 0.45,
             filterCutoff: 1500, filterResonance: 0.5, filterEnvAmount: 0.4,

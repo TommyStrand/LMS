@@ -24,11 +24,18 @@ struct ControlsView: View {
                 }
             }
 
-            if preset.isOrgan {
+            // Row 2 – voice-specific controls
+            switch preset.voiceMode {
+            case .organChurch, .hammondB3:
                 OrganControlsRow(engine: engine, color: color)
-            } else {
+            case .rhodes:
+                RhodesControlsRow(engine: engine, color: color)
+            case .synth:
                 ADSRRow(engine: engine, color: color)
             }
+
+            // Row 3 – Texture (always visible)
+            TextureRow(engine: engine, color: color)
         }
         .padding(.horizontal, 20)
     }
@@ -43,7 +50,6 @@ struct OrganControlsRow: View {
     var body: some View {
         let preset = engine.currentPreset
         HStack(spacing: 0) {
-            // Distortion section
             VStack(spacing: 4) {
                 Text("DISTORTION")
                     .font(.system(size: 7, weight: .bold))
@@ -65,7 +71,6 @@ struct OrganControlsRow: View {
 
             Spacer(minLength: 12)
 
-            // Shimmer section
             VStack(spacing: 4) {
                 Text("SHIMMER")
                     .font(.system(size: 7, weight: .bold))
@@ -84,6 +89,28 @@ struct OrganControlsRow: View {
             .padding(.vertical, 8)
             .background(Color.white.opacity(0.04))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+}
+
+// MARK: - Rhodes controls row
+
+struct RhodesControlsRow: View {
+    @ObservedObject var engine: AudioEngine
+    let color: Color
+
+    var body: some View {
+        let preset = engine.currentPreset
+        HStack(spacing: 16) {
+            KnobView(label: "TREMOLO", value: preset.tremulantDepth, color: color) { v in
+                engine.currentPreset.tremulantDepth = v
+            }
+            KnobView(label: "CHORUS", value: preset.chorusMix, color: color) { v in
+                engine.currentPreset.chorusMix = v
+            }
+            KnobView(label: "SHIMMER", value: preset.shimmerAmount, color: color) { v in
+                engine.setShimmer(v)
+            }
         }
     }
 }
@@ -110,6 +137,45 @@ struct ADSRRow: View {
                 engine.currentPreset.release = v * 4.0
             }
         }
+    }
+}
+
+// MARK: - Texture row (Lo-Fi, Vinyl, B.Tape, Grit, Doubler)
+
+struct TextureRow: View {
+    @ObservedObject var engine: AudioEngine
+    let color: Color
+
+    var body: some View {
+        let preset = engine.currentPreset
+        VStack(spacing: 4) {
+            Text("TEXTURE")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundColor(color.opacity(0.6))
+                .kerning(2)
+
+            HStack(spacing: 12) {
+                KnobView(label: "LO-FI", value: preset.lofiAmount, color: color) { v in
+                    engine.setLofi(v)
+                }
+                KnobView(label: "VINYL", value: preset.vinylAmount, color: color) { v in
+                    engine.setVinyl(v)
+                }
+                KnobView(label: "B.TAPE", value: preset.brokenTape, color: color) { v in
+                    engine.setBrokenTape(v)
+                }
+                KnobView(label: "GRIT", value: preset.gritAmount, color: color) { v in
+                    engine.setGrit(v)
+                }
+                KnobView(label: "DBLR", value: preset.doublerAmount, color: color) { v in
+                    engine.setDoubler(v)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 

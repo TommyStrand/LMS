@@ -34,6 +34,8 @@ target_sources(OmnisphereSynth PRIVATE
     Source/OmniVoice.cpp
 )
 
+target_include_directories(OmnisphereSynth PRIVATE Source/Effects)
+
 target_compile_definitions(OmnisphereSynth PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

@@ -45,9 +45,7 @@ final class SynthVoice: AnyVoice {
         if envStage != .idle { envStage = .release; envTime = 0 }
     }
 
-    var isFinished: Bool { envStage == .idle }
-
-    func nextSample() -> Float {
+    func nextStereoSample() -> (Float, Float) {
         let dt = 1.0 / sampleRate
 
         // LFO
@@ -88,7 +86,8 @@ final class SynthVoice: AnyVoice {
         }
         let filtered = applyBiquadLP(input: raw, cutoff: cutoff, resonance: Double(preset.filterResonance))
 
-        return Float(filtered * Double(velocity))
+        let s = Float(filtered * Double(velocity))
+        return (s, s)
     }
 
     private func waveformSample(phase: Double, waveform: SynthPreset.Waveform) -> Double {

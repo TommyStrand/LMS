@@ -2,8 +2,14 @@
 #include <JuceHeader.h>
 #include "Presets.h"
 #include "OmniVoice.h"
+#include "Effects/LofiEffect.h"
+#include "Effects/VinylEffect.h"
+#include "Effects/TapeDelay.h"
+#include "Effects/GritEffect.h"
+#include "Effects/DoublerEffect.h"
 #include <array>
 #include <atomic>
+#include <vector>
 
 class OmnisphereSynthProcessor : public juce::AudioProcessor
 {
@@ -11,7 +17,6 @@ public:
     OmnisphereSynthProcessor();
     ~OmnisphereSynthProcessor() override;
 
-    // ── AudioProcessor ────────────────────────────────────────────────────────
     void prepareToPlay   (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
     void processBlock    (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
@@ -22,7 +27,7 @@ public:
     const juce::String getName() const override { return JucePlugin_Name; }
     bool acceptsMidi()  const override { return true; }
     bool producesMidi() const override { return false; }
-    double getTailLengthSeconds() const override { return 6.0; }
+    double getTailLengthSeconds() const override { return 8.0; }
 
     int  getNumPrograms() override { return 1; }
     int  getCurrentProgram() override { return 0; }
@@ -33,16 +38,18 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // ── Public API ─────────────────────────────────────────────────────────────
     void loadPreset (int index);
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // XY pad — written from UI thread, read from audio thread
-    std::atomic<float> xyX { 0.5f };
-    std::atomic<float> xyY { 0.5f };
+    // Performance controls — written by UI/MIDI, read by audio thread
+    std::atomic<float> xyX          { 0.5f };
+    std::atomic<float> xyY          { 0.5f };
+    std::atomic<float> midiModWheel { 0.0f };  // CC1
+    std::atomic<float> midiExpression{ 1.0f }; // CC11
+    std::atomic<float> midiLeslieSpd { 0.0f }; // CC3 / mod-wheel for Hammond
 
-    // Waveform display ring buffer (written audio → read UI)
+    // Waveform display ring (written audio → read UI, 30 Hz)
     static constexpr int kWaveSize = 256;
     std::array<std::atomic<float>, kWaveSize> waveRing;
     std::atomic<int> waveWritePos { 0 };
@@ -51,35 +58,33 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void applyEffectParams();
+    void applyReverbParams();
 
     // ── Synth ─────────────────────────────────────────────────────────────────
     juce::Synthesiser synth;
     static constexpr int kMaxVoices = 12;
     std::vector<SynthPreset> presets;
 
-    // ── Effects ───────────────────────────────────────────────────────────────
-    // Main chain: distortion (inline) → reverb → delay
+    // ── Main reverb ────────────────────────────────────────────────────────────
     juce::dsp::Reverb mainReverb;
 
-    // Delay — up to 2 s at 96 kHz
-    static constexpr int kMaxDelaySamples = 192000;
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> delayLine;
-    float delayFeedback = 0.3f;
-
-    // Shimmer — parallel path: copy → long reverb → pitch-shift +1 oct → blend
+    // ── Shimmer: long plate → +1 oct pitch-shift ──────────────────────────────
     juce::dsp::Reverb shimmerReverb;
-    juce::AudioBuffer<float> shimmerBuf;
-
-    // Granular pitch-shifter (+1 octave) for shimmer
-    static constexpr int kGrainSize  = 2048;
-    static constexpr int kShiftBuf   = kGrainSize * 4;
-    float shiftBuffer[2][kShiftBuf]  = {};
-    int   shiftWritePos = 0;
+    juce::AudioBuffer<float> shimBuf;
+    static constexpr int kGrainSize = 2048;
+    static constexpr int kShiftBuf  = kGrainSize * 4;
+    float shiftBuffer[2][kShiftBuf] = {};
+    int   shiftWrite = 0;
     float shiftReadA[2] { 0.f, 0.f };
-    float shiftReadB[2] {};   // offset by half grain
+    float shiftReadB[2] { float(kGrainSize), float(kGrainSize) };
+    float pitchShiftSample (int ch, float in);
 
-    float pitchShiftSample (int ch, float input);
+    // ── New texture effects (stereo instances) ────────────────────────────────
+    LofiEffect   lofi[2];
+    VinylEffect  vinyl[2];
+    TapeDelay    tapeDelay[2];
+    GritEffect   grit;           // same algorithm per channel, stateless
+    DoublerEffect doubler;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OmnisphereSynthProcessor)
 };

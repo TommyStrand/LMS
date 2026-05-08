@@ -49,7 +49,7 @@ final class OrganVoice: AnyVoice {
         if envStage != .idle { envStage = .release }
     }
 
-    func nextSample() -> Float {
+    func nextStereoSample() -> (Float, Float) {
         let dt = 1.0 / sampleRate
 
         // Tremulant LFO (~5.5 Hz, subtle amplitude + pitch wobble)
@@ -88,7 +88,8 @@ final class OrganVoice: AnyVoice {
         let env = advanceEnvelope(dt: dt)
         sum = (sum + click) * env
 
-        return Float(sum * Double(velocity))
+        let s = Float(sum * Double(velocity))
+        return (s, s)
     }
 
     private func advanceEnvelope(dt: Double) -> Double {

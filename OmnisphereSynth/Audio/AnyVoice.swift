@@ -6,5 +6,5 @@ protocol AnyVoice: AnyObject {
     var isFinished: Bool { get }
     func start()
     func release()
-    func nextSample() -> Float
+    func nextStereoSample() -> (Float, Float)
 }

@@ -19,6 +19,9 @@
 		A100000A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200000A /* AVFoundation.framework */; };
 		A100000B /* AnyVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D /* AnyVoice.swift */; };
 		A100000C /* OrganVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E /* OrganVoice.swift */; };
+		A100000D /* HammondVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000F /* HammondVoice.swift */; };
+		A100000E /* RhodesVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* RhodesVoice.swift */; };
+		A100000F /* EffectsProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* EffectsProcessor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +39,9 @@
 		A200000C /* OmnisphereSynth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OmnisphereSynth.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000D /* AnyVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyVoice.swift; sourceTree = "<group>"; };
 		A200000E /* OrganVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganVoice.swift; sourceTree = "<group>"; };
+		A200000F /* HammondVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HammondVoice.swift; sourceTree = "<group>"; };
+		A2000010 /* RhodesVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RhodesVoice.swift; sourceTree = "<group>"; };
+		A2000011 /* EffectsProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsProcessor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +76,9 @@
 				A2000003 /* AudioEngine.swift */,
 				A200000E /* OrganVoice.swift */,
 				A2000004 /* SynthVoice.swift */,
+				A200000F /* HammondVoice.swift */,
+				A2000010 /* RhodesVoice.swift */,
+				A2000011 /* EffectsProcessor.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -189,6 +198,9 @@
 				A1000009 /* ControlsView.swift in Sources */,
 				A100000B /* AnyVoice.swift in Sources */,
 				A100000C /* OrganVoice.swift in Sources */,
+				A100000D /* HammondVoice.swift in Sources */,
+				A100000E /* RhodesVoice.swift in Sources */,
+				A100000F /* EffectsProcessor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
