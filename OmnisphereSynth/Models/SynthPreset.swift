@@ -8,13 +8,13 @@ struct SynthPreset: Identifiable, Equatable {
     // Oscillator
     var osc1Waveform: Waveform
     var osc2Waveform: Waveform
-    var osc2Detune: Float       // semitones
-    var oscMix: Float           // 0=osc1 only, 1=osc2 only
+    var osc2Detune: Float
+    var oscMix: Float
 
     // Filter
-    var filterCutoff: Float     // 20–20000 Hz
-    var filterResonance: Float  // 0–1
-    var filterEnvAmount: Float  // -1 to 1
+    var filterCutoff: Float
+    var filterResonance: Float
+    var filterEnvAmount: Float
 
     // Envelope
     var attack: Float
@@ -33,6 +33,12 @@ struct SynthPreset: Identifiable, Equatable {
     var delayTime: Float
     var chorusMix: Float
 
+    // Organ / FX extensions
+    var isOrgan: Bool
+    var distortionAmount: Float   // 0–1
+    var shimmerAmount: Float      // 0–1
+    var tremulantDepth: Float     // 0–1
+
     enum Waveform: Int, CaseIterable {
         case sine, triangle, sawtooth, square, noise
     }
@@ -40,10 +46,54 @@ struct SynthPreset: Identifiable, Equatable {
     enum LFOTarget: Int {
         case pitch, filter, amplitude
     }
+
+    init(
+        name: String, color: String,
+        osc1Waveform: Waveform, osc2Waveform: Waveform,
+        osc2Detune: Float, oscMix: Float,
+        filterCutoff: Float, filterResonance: Float, filterEnvAmount: Float,
+        attack: Float, decay: Float, sustain: Float, release: Float,
+        lfoRate: Float, lfoDepth: Float, lfoTarget: LFOTarget,
+        reverbMix: Float, delayMix: Float, delayTime: Float, chorusMix: Float,
+        isOrgan: Bool = false,
+        distortionAmount: Float = 0,
+        shimmerAmount: Float = 0,
+        tremulantDepth: Float = 0
+    ) {
+        self.name = name; self.color = color
+        self.osc1Waveform = osc1Waveform; self.osc2Waveform = osc2Waveform
+        self.osc2Detune = osc2Detune; self.oscMix = oscMix
+        self.filterCutoff = filterCutoff; self.filterResonance = filterResonance
+        self.filterEnvAmount = filterEnvAmount
+        self.attack = attack; self.decay = decay; self.sustain = sustain; self.release = release
+        self.lfoRate = lfoRate; self.lfoDepth = lfoDepth; self.lfoTarget = lfoTarget
+        self.reverbMix = reverbMix; self.delayMix = delayMix
+        self.delayTime = delayTime; self.chorusMix = chorusMix
+        self.isOrgan = isOrgan
+        self.distortionAmount = distortionAmount
+        self.shimmerAmount = shimmerAmount
+        self.tremulantDepth = tremulantDepth
+    }
+
+    static func == (lhs: SynthPreset, rhs: SynthPreset) -> Bool { lhs.id == rhs.id }
 }
 
 extension SynthPreset {
     static let presets: [SynthPreset] = [
+        SynthPreset(
+            name: "Church Organ",
+            color: "#C4A35A",
+            osc1Waveform: .sine, osc2Waveform: .sine,
+            osc2Detune: 0, oscMix: 0,
+            filterCutoff: 8000, filterResonance: 0, filterEnvAmount: 0,
+            attack: 0.005, decay: 0, sustain: 1.0, release: 0.04,
+            lfoRate: 0, lfoDepth: 0, lfoTarget: .amplitude,
+            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5, chorusMix: 0,
+            isOrgan: true,
+            distortionAmount: 0,
+            shimmerAmount: 0,
+            tremulantDepth: 0.25
+        ),
         SynthPreset(
             name: "Mystic Pad",
             color: "#8B5CF6",
@@ -56,7 +106,7 @@ extension SynthPreset {
         ),
         SynthPreset(
             name: "Dark Matter",
-            color: "#1E1B4B",
+            color: "#1E3A5F",
             osc1Waveform: .square, osc2Waveform: .sawtooth,
             osc2Detune: -5, oscMix: 0.4,
             filterCutoff: 400, filterResonance: 0.6, filterEnvAmount: 0.7,

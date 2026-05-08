@@ -17,6 +17,8 @@
 		A1000008 /* PresetSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008 /* PresetSelectorView.swift */; };
 		A1000009 /* ControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000009 /* ControlsView.swift */; };
 		A100000A /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200000A /* AVFoundation.framework */; };
+		A100000B /* AnyVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000D /* AnyVoice.swift */; };
+		A100000C /* OrganVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000E /* OrganVoice.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +34,8 @@
 		A200000A /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		A200000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A200000C /* OmnisphereSynth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OmnisphereSynth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A200000D /* AnyVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyVoice.swift; sourceTree = "<group>"; };
+		A200000E /* OrganVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganVoice.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,7 +66,9 @@
 		A4000002 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				A200000D /* AnyVoice.swift */,
 				A2000003 /* AudioEngine.swift */,
+				A200000E /* OrganVoice.swift */,
 				A2000004 /* SynthVoice.swift */,
 			);
 			path = Audio;
@@ -181,6 +187,8 @@
 				A1000007 /* VisualizerView.swift in Sources */,
 				A1000008 /* PresetSelectorView.swift in Sources */,
 				A1000009 /* ControlsView.swift in Sources */,
+				A100000B /* AnyVoice.swift in Sources */,
+				A100000C /* OrganVoice.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

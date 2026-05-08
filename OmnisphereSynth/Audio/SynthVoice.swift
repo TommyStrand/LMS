@@ -1,6 +1,6 @@
 import Foundation
 
-final class SynthVoice {
+final class SynthVoice: AnyVoice {
     let note: Int
     let velocity: Float
     let preset: SynthPreset
@@ -26,6 +26,8 @@ final class SynthVoice {
     private var bq_y1: Double = 0, bq_y2: Double = 0
 
     private let freq: Double
+
+    var isFinished: Bool { envStage == .idle }
 
     enum EnvStage { case idle, attack, decay, sustain, release }
 
