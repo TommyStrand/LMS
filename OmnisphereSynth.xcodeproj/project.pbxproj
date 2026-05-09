@@ -24,6 +24,7 @@
 		A100000F /* EffectsProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* EffectsProcessor.swift */; };
 		A1000010 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* AppTheme.swift */; };
 		A1000011 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013 /* SettingsView.swift */; };
+		A1000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000014 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		A2000011 /* EffectsProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectsProcessor.swift; sourceTree = "<group>"; };
 		A2000012 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		A2000013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A2000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +70,7 @@
 				A4000002 /* Audio */,
 				A4000003 /* Views */,
 				A4000004 /* Models */,
+				A2000014 /* Assets.xcassets */,
 				A200000B /* Info.plist */,
 			);
 			path = OmnisphereSynth;
@@ -183,7 +186,9 @@
 		A3000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				A1000012 /* Assets.xcassets in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
