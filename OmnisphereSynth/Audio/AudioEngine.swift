@@ -5,7 +5,6 @@ final class AudioEngine: ObservableObject {
     // MARK: - Nodes
     private let engine        = AVAudioEngine()
     private let voiceMixer    = AVAudioMixerNode()
-    private let distortion    = AVAudioUnitDistortion()
     private let reverb        = AVAudioUnitReverb()
     private let delay         = AVAudioUnitDelay()
 
@@ -14,16 +13,17 @@ final class AudioEngine: ObservableObject {
     private let timePitch     = AVAudioUnitTimePitch()
     private let shimmerMixer  = AVAudioMixerNode()
 
-    // MARK: - Per-instance texture effects (L+R channels)
-    private var lofi   = (LofiProcessor(),   LofiProcessor())
-    private var vinyl  = (VinylProcessor(sampleRate: 44100), VinylProcessor(sampleRate: 44100))
-    private var grit   = GritProcessor()
-    private var tape   = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
-    private var doubler = DoublerProcessor(sampleRate: 44100)
+    // MARK: - Per-instance texture effects
+    private var lofi      = (LofiProcessor(),  LofiProcessor())
+    private var vinyl     = (VinylProcessor(sampleRate: 44100), VinylProcessor(sampleRate: 44100))
+    private var grit      = GritProcessor()
+    private var tape      = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
+    private var doubler   = DoublerProcessor(sampleRate: 44100)
 
     // MARK: - State
     private(set) var voices: [Int: any AnyVoice] = [:]
-    private var voiceNodes: [Int: AVAudioSourceNode] = [:]
+    private var voiceNodes:    [Int: AVAudioSourceNode] = [:]
+    private var voiceMods:     [Int: ModulationProcessor] = [:]
 
     @Published var waveformSamples: [Float] = Array(repeating: 0, count: 128)
     @Published var currentPreset: SynthPreset = SynthPreset.presets[0]
@@ -43,23 +43,22 @@ final class AudioEngine: ObservableObject {
         try? session.setPreferredIOBufferDuration(0.005)
         try? session.setActive(true)
 
-        [voiceMixer, distortion, reverb, delay,
+        [voiceMixer, reverb, delay,
          shimmerReverb, timePitch, shimmerMixer].forEach { engine.attach($0) }
 
-        // Main path
-        engine.connect(distortion,   to: reverb,              format: nil)
-        engine.connect(reverb,       to: delay,               format: nil)
-        engine.connect(delay,        to: engine.mainMixerNode, format: nil)
+        // Main path (no more AVAudioUnitDistortion — tube saturation done per-voice)
+        engine.connect(reverb, to: delay,                format: nil)
+        engine.connect(delay,  to: engine.mainMixerNode, format: nil)
 
         // Shimmer path
-        engine.connect(shimmerReverb, to: timePitch,          format: nil)
-        engine.connect(timePitch,     to: shimmerMixer,       format: nil)
+        engine.connect(shimmerReverb, to: timePitch,            format: nil)
+        engine.connect(timePitch,     to: shimmerMixer,         format: nil)
         engine.connect(shimmerMixer,  to: engine.mainMixerNode, format: nil)
 
-        // Fan-out voiceMixer → both chains (must use multi-destination API)
+        // Fan-out voiceMixer → reverb + shimmerReverb (multi-destination)
         let stereo = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
         engine.connect(voiceMixer, to: [
-            AVAudioConnectionPoint(node: distortion,   bus: 0),
+            AVAudioConnectionPoint(node: reverb,        bus: 0),
             AVAudioConnectionPoint(node: shimmerReverb, bus: 0)
         ], fromBus: 0, format: stereo)
 
@@ -79,13 +78,9 @@ final class AudioEngine: ObservableObject {
         reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
         reverb.wetDryMix = preset.reverbMix * 100
 
-        delay.wetDryMix  = preset.delayMix * 100
-        delay.delayTime  = Double(preset.delayTime)
-        delay.feedback   = 28
-
-        distortion.loadFactoryPreset(.multiDistortedFunk)
-        distortion.preGain   = preset.distortionAmount * 18
-        distortion.wetDryMix = preset.distortionAmount > 0 ? 40 + preset.distortionAmount * 55 : 0
+        delay.wetDryMix = preset.delayMix * 100
+        delay.delayTime = Double(preset.delayTime)
+        delay.feedback  = 28
 
         shimmerReverb.loadFactoryPreset(.plate)
         shimmerReverb.wetDryMix = 80
@@ -94,10 +89,12 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Live knob updates
 
-    func setDistortion(_ v: Float) { currentPreset.distortionAmount = v; distortion.preGain = v * 18; distortion.wetDryMix = v > 0.01 ? 40 + v * 55 : 0 }
+    func setDistortion(_ v: Float) { currentPreset.distortionAmount = v }
     func setShimmer(_ v: Float)    { currentPreset.shimmerAmount = v; shimmerMixer.outputVolume = v * 0.45 }
-    func setReverb(_ v: Float)     { currentPreset.reverbMix = v; reverb.wetDryMix = v * 100 }
-    func setDelay(_ v: Float)      { currentPreset.delayMix = v; delay.wetDryMix = v * 100 }
+    func setReverb(_ v: Float)     { currentPreset.reverbMix = v;     reverb.wetDryMix = v * 100 }
+    func setDelay(_ v: Float)      { currentPreset.delayMix = v;      delay.wetDryMix = v * 100 }
+    func setTremolo(_ v: Float)    { currentPreset.tremulantDepth = v }
+    func setChorus(_ v: Float)     { currentPreset.chorusMix = v }
     func setLofi(_ v: Float)       { currentPreset.lofiAmount = v }
     func setVinyl(_ v: Float)      { currentPreset.vinylAmount = v }
     func setBrokenTape(_ v: Float) { currentPreset.brokenTape = v }
@@ -126,16 +123,19 @@ final class AudioEngine: ObservableObject {
         voice.lfoDepthMod     = y
         voices[touchID] = voice
 
+        let mod = ModulationProcessor(sampleRate: sampleRate)
+        voiceMods[touchID] = mod
+
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
 
-        // Capture effect state by value at note-on time so render callback reads consistent params
-        let lofiRef   = lofi
-        let vinylRef  = vinyl
-        let gritRef   = grit
-        let tapeRef   = tape
+        // Capture by value/ref so render block reads consistent params
+        let lofiRef    = lofi
+        let vinylRef   = vinyl
+        let gritRef    = grit
+        let tapeRef    = tape
         let doublerRef = doubler
 
-        let node = AVAudioSourceNode(format: format) { [weak self, weak voice] _, _, frameCount, audioBufferList in
+        let node = AVAudioSourceNode(format: format) { [weak self, weak voice, weak mod] _, _, frameCount, audioBufferList in
             guard let self, let voice else { return noErr }
             let preset = self.currentPreset
             let abl    = UnsafeMutableAudioBufferListPointer(audioBufferList)
@@ -170,6 +170,19 @@ final class AudioEngine: ObservableObject {
                 let (dl, dr) = doublerRef.process(l, amount: dAmt)
                 l = dl; r = dr
 
+                // Universal modulation: tremolo + chorus (works on every voice mode)
+                if let mod {
+                    let (ml, mr) = mod.process(l: l, r: r,
+                                               tremDepth: preset.tremulantDepth,
+                                               chorusMix: preset.chorusMix)
+                    l = ml; r = mr
+                }
+
+                // Warm tube overdrive (replaces the old AVAudioUnitDistortion)
+                let drive = preset.distortionAmount
+                l = tubeSaturate(l, drive: drive)
+                r = tubeSaturate(r, drive: drive)
+
                 left[i]  = l
                 right[i] = r
                 self.feedAnalysis((l + r) * 0.5)
@@ -187,10 +200,10 @@ final class AudioEngine: ObservableObject {
         voices[touchID]?.release()
         let tail: Double
         switch currentPreset.voiceMode {
-        case .hammondB3:  tail = 0.1
+        case .hammondB3:   tail = 0.1
         case .organChurch: tail = 0.15
-        case .rhodes:     tail = 3.0
-        case .synth:      tail = Double(currentPreset.release) + 0.1
+        case .rhodes:      tail = 3.0
+        case .synth:       tail = Double(currentPreset.release) + 0.1
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
             guard let self else { return }
@@ -198,6 +211,7 @@ final class AudioEngine: ObservableObject {
                 self.engine.detach(node)
                 self.voiceNodes.removeValue(forKey: touchID)
                 self.voices.removeValue(forKey: touchID)
+                self.voiceMods.removeValue(forKey: touchID)
             }
         }
     }

@@ -220,5 +220,74 @@ extension SynthPreset {
             reverbMix: 0.55, delayMix: 0.25, delayTime: 0.4, chorusMix: 0.35,
             iconStyle: .solarRadial
         ),
+
+        // ── Organic / electromechanical additions ──────────────────────
+        SynthPreset(
+            name: "Wurlitzer",
+            color: "#A05A1F",
+            voiceMode: .rhodes,
+            reverbMix: 0.30, delayMix: 0.08, chorusMix: 0.18,
+            distortionAmount: 0.18,
+            tremulantDepth: 0.55,                          // Wurly's signature trem
+            iconStyle: .rhodesTine
+        ),
+        SynthPreset(
+            name: "Suitcase '73",
+            color: "#A16207",
+            voiceMode: .rhodes,
+            reverbMix: 0.45, delayMix: 0.18, chorusMix: 0.40,
+            tremulantDepth: 0.05,
+            iconStyle: .rhodesTine
+        ),
+        SynthPreset(
+            name: "Clavinet",
+            color: "#7C2D12",
+            voiceMode: .synth,
+            osc1Waveform: .square, osc2Waveform: .sawtooth,
+            osc2Detune: 0, oscMix: 0.35,
+            filterCutoff: 4500, filterResonance: 0.45, filterEnvAmount: 0.6,
+            attack: 0.001, decay: 0.18, sustain: 0.35, release: 0.20,
+            reverbMix: 0.18, delayMix: 0.05, chorusMix: 0.0,
+            distortionAmount: 0.30,                        // tube-warm bite
+            gritAmount: 0.20,
+            iconStyle: .pulseBolt
+        ),
+        SynthPreset(
+            name: "Mellotron",
+            color: "#6B4423",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .triangle,
+            osc2Detune: 0.4, oscMix: 0.55,
+            filterCutoff: 1800, filterResonance: 0.20, filterEnvAmount: 0.2,
+            attack: 0.45, decay: 0.5, sustain: 0.75, release: 1.6,
+            reverbMix: 0.55, delayMix: 0.10, chorusMix: 0.30,
+            tremulantDepth: 0.12,
+            vinylAmount: 0.28, brokenTape: 0.18,
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Celesta",
+            color: "#7DD3FC",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .sine,
+            osc2Detune: 12, oscMix: 0.45,
+            filterCutoff: 6000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.001, decay: 1.4, sustain: 0.0, release: 1.0,
+            reverbMix: 0.72, delayMix: 0.18, chorusMix: 0.0,
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Vibraphone",
+            color: "#FCD34D",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .triangle,
+            osc2Detune: 5, oscMix: 0.30,
+            filterCutoff: 4000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.002, decay: 1.6, sustain: 0.20, release: 1.2,
+            lfoRate: 6.0, lfoDepth: 0.40, lfoTarget: .amplitude,
+            reverbMix: 0.62, delayMix: 0.10,
+            tremulantDepth: 0.55,                          // motor-driven trem
+            iconStyle: .solarRadial
+        ),
     ]
 }

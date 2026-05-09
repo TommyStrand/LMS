@@ -36,10 +36,49 @@ struct ControlsView: View {
                 ADSRRow(engine: engine, color: color)
             }
 
-            // Row 3 – Texture (always visible)
+            // Row 3 – Modulation (universal: tremolo + chorus)
+            ModulationRow(engine: engine, color: color, theme: theme)
+
+            // Row 4 – Texture (always visible)
             TextureRow(engine: engine, color: color, theme: theme)
         }
         .padding(.horizontal, 20)
+    }
+}
+
+// MARK: - Modulation row (universal, all voice modes)
+
+struct ModulationRow: View {
+    @ObservedObject var engine: AudioEngine
+    let color: Color
+    let theme: AppTheme
+
+    var body: some View {
+        let preset = engine.currentPreset
+        VStack(spacing: 4) {
+            Text("MODULATION")
+                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(color.opacity(0.6))
+                .kerning(2)
+
+            HStack(spacing: 24) {
+                KnobView(label: "TREM",  value: preset.tremulantDepth, color: color) { v in
+                    engine.setTremolo(v)
+                }
+                KnobView(label: "CHORUS", value: preset.chorusMix,     color: color) { v in
+                    engine.setChorus(v)
+                }
+                KnobView(label: "DRIVE",  value: preset.distortionAmount, color: color) { v in
+                    engine.setDistortion(v)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 }
 

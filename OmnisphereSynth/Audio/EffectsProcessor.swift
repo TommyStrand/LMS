@@ -171,3 +171,77 @@ final class BrokenTapeDelay {
         return input * (1 - mix) + delayed * mix
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modulation: tremolo (amplitude LFO) + chorus (LFO-modulated short delay)
+// ─────────────────────────────────────────────────────────────────────────────
+final class ModulationProcessor {
+    private let sampleRate: Double
+    private var tremPhase: Double = 0
+    private let bufSize = 1024
+    private var buf: [Float]
+    private var writePos = 0
+    private var chorusLfoPhase: Double = .random(in: 0...1)   // start at random phase per voice for richness
+
+    init(sampleRate: Double) {
+        self.sampleRate = sampleRate
+        self.buf = Array(repeating: 0, count: 1024)
+    }
+
+    func process(l: Float, r: Float, tremDepth: Float, chorusMix: Float) -> (Float, Float) {
+        var lOut = l, rOut = r
+        let dt = 1.0 / sampleRate
+
+        // Tremolo: ~4.8 Hz amplitude modulation, sine-shaped
+        if tremDepth > 0.001 {
+            let trem = 1.0 - Double(tremDepth) * (1.0 - cos(tremPhase * 2 * .pi)) * 0.5
+            lOut *= Float(trem)
+            rOut *= Float(trem)
+            tremPhase += 4.8 * dt
+            if tremPhase >= 1.0 { tremPhase -= 1.0 }
+        }
+
+        // Chorus: LFO-modulated short delay, opposite-phase L/R for stereo width
+        if chorusMix > 0.001 {
+            buf[writePos & (bufSize - 1)] = (lOut + rOut) * 0.5
+            chorusLfoPhase += 0.65 * dt
+            if chorusLfoPhase >= 1.0 { chorusLfoPhase -= 1.0 }
+            let lfo = Float(sin(chorusLfoPhase * 2 * .pi))
+            let baseDelay: Float = 14
+            let modDepth: Float  = 9
+            let chL = readDelay(baseDelay + lfo * modDepth)
+            let chR = readDelay(baseDelay - lfo * modDepth)
+            let mix = min(chorusMix, 1)
+            lOut = lOut * (1 - mix * 0.5) + chL * mix
+            rOut = rOut * (1 - mix * 0.5) + chR * mix
+            writePos = (writePos + 1) & (bufSize - 1)
+        }
+
+        return (lOut, rOut)
+    }
+
+    private func readDelay(_ delay: Float) -> Float {
+        var rp = Float(writePos) - delay - 1
+        if rp < 0 { rp += Float(bufSize) }
+        let i0 = Int(rp) & (bufSize - 1)
+        let i1 = (i0 + 1) & (bufSize - 1)
+        let fr = rp - rp.rounded(.down)
+        return buf[i0] * (1 - fr) + buf[i1] * fr
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tube saturation: warm tanh-based overdrive (no harsh clipping)
+// Slight asymmetric bias adds even-harmonic warmth like a class-A tube stage.
+// ─────────────────────────────────────────────────────────────────────────────
+@inline(__always)
+func tubeSaturate(_ sample: Float, drive: Float) -> Float {
+    guard drive > 0.001 else { return sample }
+    let g           = 1.0 + Double(drive) * 6.0       // 1× → 7×
+    let bias        = Double(drive) * 0.08            // small DC bias
+    let normalize   = Float(tanh(g))
+    let warmed      = tanh(Double(sample) * g + bias) - tanh(bias)
+    let outputGain  = 1.0 - Double(drive) * 0.2       // gentle make-up volume drop
+    return Float(warmed * outputGain) / normalize
+}
+
