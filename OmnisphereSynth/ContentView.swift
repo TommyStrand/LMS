@@ -34,25 +34,29 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Play surface helper
+
+    @ViewBuilder
+    private func playSurface(preset: SynthPreset) -> some View {
+        if themeManager.playMode == .keyboard {
+            PianoKeyboardView(engine: engine, preset: preset)
+        } else {
+            XYPadView(engine: engine, preset: preset)
+        }
+    }
+
     // MARK: - iPhone layout
 
     private func iphoneLayout(theme: AppTheme) -> some View {
         VStack(spacing: 0) {
             header(theme: theme)
 
-            VisualizerView(samples: engine.waveformSamples,
-                           color: theme.accent(for: Color(hex: currentPreset.color)),
-                           theme: theme)
-                .frame(height: 56)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-
             PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
                 engine.applyPreset(preset)
             }
-            .padding(.top, 6)
+            .padding(.top, 8)
 
-            XYPadView(engine: engine, preset: currentPreset)
+            playSurface(preset: currentPreset)
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .frame(maxHeight: .infinity)
@@ -74,13 +78,8 @@ struct ContentView: View {
             header(theme: theme)
 
             HStack(alignment: .top, spacing: 0) {
-                // Left panel: visualizer + presets + controls
+                // Left panel: presets + controls
                 VStack(spacing: 10) {
-                    VisualizerView(samples: engine.waveformSamples,
-                                   color: theme.accent(for: Color(hex: currentPreset.color)),
-                                   theme: theme)
-                        .frame(height: 70)
-
                     PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
                         engine.applyPreset(preset)
                     }
@@ -95,8 +94,8 @@ struct ContentView: View {
                 .padding(.leading, 16)
                 .padding(.top, 10)
 
-                // Right panel: XY Pad
-                XYPadView(engine: engine, preset: currentPreset)
+                // Right panel: play surface
+                playSurface(preset: currentPreset)
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
                     .padding(.bottom, 16)
@@ -108,11 +107,12 @@ struct ContentView: View {
     // MARK: - Header
 
     private func header(theme: AppTheme) -> some View {
-        HStack(spacing: 12) {
+        let accent = theme.accent(for: Color(hex: currentPreset.color))
+        return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SUPERNOVA PAD")
                     .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
-                    .foregroundColor(theme.accent(for: Color(hex: currentPreset.color)).opacity(0.9))
+                    .foregroundColor(accent.opacity(0.9))
                     .kerning(3)
                 Text("Touch Synthesizer")
                     .font(.system(size: 18, weight: .thin, design: theme.fontDesign))
@@ -121,16 +121,67 @@ struct ContentView: View {
 
             Spacer()
 
+            // Transpose controls
+            HStack(spacing: 0) {
+                Button {
+                    if themeManager.transposeOctave > -3 {
+                        themeManager.transposeOctave -= 1
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                        .frame(width: 30, height: 30)
+                }
+
+                Text(themeManager.transposeOctave == 0
+                     ? "OCT"
+                     : (themeManager.transposeOctave > 0
+                        ? "+\(themeManager.transposeOctave)"
+                        : "\(themeManager.transposeOctave)"))
+                    .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(themeManager.transposeOctave == 0
+                                     ? theme.secondaryText
+                                     : accent)
+                    .frame(width: 28)
+
+                Button {
+                    if themeManager.transposeOctave < 3 {
+                        themeManager.transposeOctave += 1
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                        .frame(width: 30, height: 30)
+                }
+            }
+            .background(theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                    .strokeBorder(theme.panelBorder, lineWidth: 1)
+            )
+
             // Voice indicators
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 ForEach(0..<6, id: \.self) { i in
                     Circle()
-                        .fill(i < engine.voices.count
-                              ? theme.accent(for: Color(hex: currentPreset.color))
-                              : theme.primaryText.opacity(0.12))
+                        .fill(i < engine.voices.count ? accent : theme.primaryText.opacity(0.12))
                         .frame(width: 7, height: 7)
                         .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
                 }
+            }
+
+            // Play mode toggle
+            iconButton(systemName: themeManager.playMode == .grid ? "square.grid.3x3" : "pianokeys",
+                       active: false, theme: theme) {
+                withAnimation(.spring(response: 0.3)) {
+                    themeManager.selectPlayMode(themeManager.playMode == .grid ? .keyboard : .grid)
+                }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }
 
             // Controls toggle

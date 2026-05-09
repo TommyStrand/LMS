@@ -53,6 +53,110 @@ struct SettingsView: View {
                             }
                         }
 
+                        // MARK: Play mode
+                        sectionHeader("PLAY MODE", theme: theme)
+
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 2),
+                            spacing: 14
+                        ) {
+                            ForEach(PlayMode.allCases) { mode in
+                                PlayModeCard(
+                                    mode: mode,
+                                    isSelected: themeManager.playMode == mode,
+                                    theme: theme
+                                )
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.3)) {
+                                        themeManager.selectPlayMode(mode)
+                                    }
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }
+                            }
+                        }
+
+                        // MARK: Scale
+                        sectionHeader("SCALE", theme: theme)
+
+                        // Root note picker
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Root Note")
+                                .font(.system(size: 12, weight: .medium, design: theme.fontDesign))
+                                .foregroundColor(theme.secondaryText)
+
+                            let noteNames = ["C", "C#", "D", "D#", "E", "F",
+                                             "F#", "G", "G#", "A", "A#", "B"]
+                            LazyVGrid(
+                                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6),
+                                spacing: 8
+                            ) {
+                                ForEach(0..<12, id: \.self) { i in
+                                    let isSelected = (themeManager.rootNote % 12) == i
+                                    let accent: Color = theme.accentOverride ?? Color(hex: "#8B5CF6")
+                                    Button {
+                                        // Keep same octave, change pitch class
+                                        let octave = themeManager.rootNote / 12
+                                        themeManager.selectRootNote(octave * 12 + i)
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    } label: {
+                                        Text(noteNames[i])
+                                            .font(.system(size: 13, weight: .semibold,
+                                                          design: theme.fontDesign))
+                                            .foregroundColor(isSelected ? .white : theme.primaryText)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(isSelected ? accent : theme.panelBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7)
+                                                    .strokeBorder(isSelected
+                                                                  ? accent
+                                                                  : theme.panelBorder, lineWidth: 1)
+                                            )
+                                    }
+                                }
+                            }
+
+                            Text("Scale Type")
+                                .font(.system(size: 12, weight: .medium, design: theme.fontDesign))
+                                .foregroundColor(theme.secondaryText)
+                                .padding(.top, 4)
+
+                            LazyVGrid(
+                                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2),
+                                spacing: 8
+                            ) {
+                                ForEach(MusicalScale.allCases) { sc in
+                                    let isSelected = themeManager.scale == sc
+                                    let accent: Color = theme.accentOverride ?? Color(hex: "#8B5CF6")
+                                    Button {
+                                        themeManager.selectScale(sc)
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    } label: {
+                                        Text(sc.label)
+                                            .font(.system(size: 12, weight: isSelected ? .bold : .regular,
+                                                          design: theme.fontDesign))
+                                            .foregroundColor(isSelected ? .white : theme.primaryText)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(isSelected ? accent : theme.panelBackground)
+                                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7)
+                                                    .strokeBorder(isSelected
+                                                                  ? accent
+                                                                  : theme.panelBorder, lineWidth: 1)
+                                            )
+                                    }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .background(theme.panelBackground)
+                        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+                            .strokeBorder(theme.panelBorder, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+
                         // MARK: About
                         sectionHeader("ABOUT", theme: theme)
 
@@ -155,6 +259,48 @@ struct ThemeCard: View {
             .foregroundColor(isSelected
                 ? (theme.accentOverride ?? .accentColor)
                 : Color.primary.opacity(0.6))
+        }
+    }
+}
+
+// MARK: - Play mode card
+
+struct PlayModeCard: View {
+    let mode: PlayMode
+    let isSelected: Bool
+    let theme: AppTheme
+
+    private var accent: Color { theme.accentOverride ?? Color(hex: "#8B5CF6") }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(theme.panelBackground)
+                    .frame(height: 72)
+
+                Image(systemName: mode.icon)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundColor(isSelected ? accent : theme.secondaryText)
+
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(accent, lineWidth: 2.5)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(accent)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(6)
+                } else {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(theme.panelBorder, lineWidth: 1)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            Text(mode.label)
+                .font(.system(size: 11, weight: .medium, design: theme.fontDesign))
+                .foregroundColor(isSelected ? accent : Color.primary.opacity(0.6))
         }
     }
 }

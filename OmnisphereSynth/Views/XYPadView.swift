@@ -15,7 +15,11 @@ struct XYPadView: View {
     @State private var activeTouches: [Int: TouchPoint] = [:]
     @State private var gridOpacity: Double = 0.12
 
-    private let notes = [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72]
+    private var notes: [Int] {
+        let root = themeManager.rootNote + themeManager.transposeOctave * 12
+        let clamped = max(0, min(root, 108))
+        return themeManager.scale.notes(rootMidi: clamped, octaves: 2)
+    }
 
     var body: some View {
         let theme = themeManager.current
@@ -29,10 +33,20 @@ struct XYPadView: View {
                 // Grid
                 gridOverlay(size: geo.size, theme: theme, accent: accent)
 
-                // Ripples
+                // Ripples + note names
                 ForEach(Array(activeTouches.values), id: \.id) { touch in
                     TouchRipple(color: accent)
                         .position(touch.location)
+                    Text(midiToNoteName(touch.note))
+                        .font(.system(size: 12, weight: .bold, design: theme.fontDesign))
+                        .foregroundColor(accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(theme.panelBackground.opacity(0.82))
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .position(x: touch.location.x,
+                                  y: max(20, touch.location.y - 54))
+                        .allowsHitTesting(false)
                 }
 
                 // Labels
@@ -42,12 +56,14 @@ struct XYPadView: View {
             .onAppear { animateGrid() }
             .overlay(
                 SimultaneousTouchGesture { events in
+                    let currentNotes = notes
+                    guard !currentNotes.isEmpty else { return }
                     for event in events {
                         let loc = event.location
                         let x   = Float(loc.x / geo.size.width)
                         let y   = Float(1 - loc.y / geo.size.height)
-                        let ni  = Int(x * Float(notes.count - 1))
-                        let note = notes[max(0, min(ni, notes.count - 1))]
+                        let ni  = Int(x * Float(currentNotes.count - 1))
+                        let note = currentNotes[max(0, min(ni, currentNotes.count - 1))]
                         switch event.phase {
                         case .began:
                             activeTouches[event.id] = TouchPoint(id: event.id, location: loc,
@@ -117,13 +133,19 @@ struct XYPadView: View {
 
     // MARK: Labels
 
+    @ViewBuilder
     private func padLabels(theme: AppTheme) -> some View {
+        let root = midiToNoteName(themeManager.rootNote + themeManager.transposeOctave * 12)
+            .components(separatedBy: CharacterSet.decimalDigits).joined()
         VStack {
             HStack {
                 Text("← Brightness")
                     .font(.system(size: 10, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText.opacity(0.35))
                 Spacer()
+                Text("\(root) \(themeManager.scale.label)")
+                    .font(.system(size: 10, weight: .medium, design: theme.fontDesign))
+                    .foregroundColor(theme.primaryText.opacity(0.45))
             }
             Spacer()
             HStack {
@@ -142,6 +164,12 @@ struct XYPadView: View {
         withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
             gridOpacity = 0.28
         }
+    }
+
+    private func midiToNoteName(_ midi: Int) -> String {
+        let names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        let octave = (midi / 12) - 1
+        return "\(names[midi % 12])\(octave)"
     }
 }
 

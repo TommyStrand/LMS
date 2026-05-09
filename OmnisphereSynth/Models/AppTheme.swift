@@ -1,5 +1,89 @@
 import SwiftUI
 
+// MARK: - Play mode
+
+enum PlayMode: String, CaseIterable, Identifiable {
+    case grid     = "grid"
+    case keyboard = "keyboard"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .grid:     return "Grid"
+        case .keyboard: return "Keyboard"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .grid:     return "square.grid.3x3"
+        case .keyboard: return "pianokeys"
+        }
+    }
+}
+
+// MARK: - Musical scale
+
+enum MusicalScale: String, CaseIterable, Identifiable {
+    case major         = "major"
+    case minor         = "minor"
+    case dorian        = "dorian"
+    case phrygian      = "phrygian"
+    case lydian        = "lydian"
+    case mixolydian    = "mixolydian"
+    case locrian       = "locrian"
+    case harmonicMinor = "harmonicMinor"
+    case pentatonic    = "pentatonic"
+    case blues         = "blues"
+    case chromatic     = "chromatic"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .major:         return "Major"
+        case .minor:         return "Minor"
+        case .dorian:        return "Dorian"
+        case .phrygian:      return "Phrygian"
+        case .lydian:        return "Lydian"
+        case .mixolydian:    return "Mixolydian"
+        case .locrian:       return "Locrian"
+        case .harmonicMinor: return "Harm. Minor"
+        case .pentatonic:    return "Pentatonic"
+        case .blues:         return "Blues"
+        case .chromatic:     return "Chromatic"
+        }
+    }
+
+    var intervals: [Int] {
+        switch self {
+        case .major:         return [0, 2, 4, 5, 7, 9, 11]
+        case .minor:         return [0, 2, 3, 5, 7, 8, 10]
+        case .dorian:        return [0, 2, 3, 5, 7, 9, 10]
+        case .phrygian:      return [0, 1, 3, 5, 7, 8, 10]
+        case .lydian:        return [0, 2, 4, 6, 7, 9, 11]
+        case .mixolydian:    return [0, 2, 4, 5, 7, 9, 10]
+        case .locrian:       return [0, 1, 3, 5, 6, 8, 10]
+        case .harmonicMinor: return [0, 2, 3, 5, 7, 8, 11]
+        case .pentatonic:    return [0, 2, 4, 7, 9]
+        case .blues:         return [0, 3, 5, 6, 7, 10]
+        case .chromatic:     return Array(0...11)
+        }
+    }
+
+    func notes(rootMidi: Int, octaves: Int) -> [Int] {
+        var result: [Int] = []
+        for oct in 0..<octaves {
+            for interval in intervals {
+                let note = rootMidi + oct * 12 + interval
+                if note >= 0 && note <= 127 { result.append(note) }
+            }
+        }
+        return result
+    }
+}
+
 // MARK: - Control style
 
 enum ControlStyle: String, CaseIterable, Identifiable {
@@ -143,6 +227,10 @@ struct AppTheme: Identifiable {
 final class ThemeManager: ObservableObject {
     @AppStorage("selectedThemeId") private var storedId: String = "cosmos"
     @AppStorage("controlStyle")    private var storedControlStyle: String = ControlStyle.rotary.rawValue
+    @AppStorage("playMode")        private var storedPlayMode: String = PlayMode.grid.rawValue
+    @AppStorage("scaleId")         private var storedScaleId: String = MusicalScale.major.rawValue
+    @AppStorage("rootNote")        var rootNote: Int = 48
+    @AppStorage("transposeOctave") var transposeOctave: Int = 0
 
     var current: AppTheme {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
@@ -152,6 +240,14 @@ final class ThemeManager: ObservableObject {
         ControlStyle(rawValue: storedControlStyle) ?? .rotary
     }
 
+    var playMode: PlayMode {
+        PlayMode(rawValue: storedPlayMode) ?? .grid
+    }
+
+    var scale: MusicalScale {
+        MusicalScale(rawValue: storedScaleId) ?? .major
+    }
+
     func select(_ theme: AppTheme) {
         storedId = theme.id
         objectWillChange.send()
@@ -159,6 +255,21 @@ final class ThemeManager: ObservableObject {
 
     func selectControlStyle(_ style: ControlStyle) {
         storedControlStyle = style.rawValue
+        objectWillChange.send()
+    }
+
+    func selectPlayMode(_ mode: PlayMode) {
+        storedPlayMode = mode.rawValue
+        objectWillChange.send()
+    }
+
+    func selectScale(_ scale: MusicalScale) {
+        storedScaleId = scale.rawValue
+        objectWillChange.send()
+    }
+
+    func selectRootNote(_ midi: Int) {
+        rootNote = midi
         objectWillChange.send()
     }
 }
