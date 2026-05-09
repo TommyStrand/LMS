@@ -1,95 +1,184 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var engine = AudioEngine()
+    @StateObject private var engine       = AudioEngine()
+    @StateObject private var themeManager = ThemeManager()
     @State private var selectedPresetIndex = 0
-    @State private var showControls = true
+    @State private var showControls  = true
+    @State private var showSettings  = false
 
     var currentPreset: SynthPreset { SynthPreset.presets[selectedPresetIndex] }
 
     var body: some View {
-        ZStack {
-            Color(hex: "#0a0a14").ignoresSafeArea()
+        let theme = themeManager.current
+        GeometryReader { geo in
+            ZStack {
+                theme.appBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header
-                header
+                // Scanline overlay (Radar theme)
+                if theme.scanlines {
+                    ScanlinesView().ignoresSafeArea().allowsHitTesting(false)
+                }
 
-                // Waveform visualizer
-                VisualizerView(
-                    samples: engine.waveformSamples,
-                    color: Color(hex: currentPreset.color)
-                )
-                .frame(height: 60)
+                if geo.size.width > 680 {
+                    ipadLayout(theme: theme, geo: geo)
+                } else {
+                    iphoneLayout(theme: theme)
+                }
+            }
+        }
+        .environmentObject(themeManager)
+        .preferredColorScheme(themeManager.current.colorScheme)
+        .sheet(isPresented: $showSettings) {
+            SettingsView().environmentObject(themeManager)
+        }
+    }
+
+    // MARK: - iPhone layout
+
+    private func iphoneLayout(theme: AppTheme) -> some View {
+        VStack(spacing: 0) {
+            header(theme: theme)
+
+            VisualizerView(samples: engine.waveformSamples,
+                           color: theme.accent(for: Color(hex: currentPreset.color)),
+                           theme: theme)
+                .frame(height: 56)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
 
-                // Preset selector
-                PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
-                    engine.applyPreset(preset)
-                }
-                .padding(.top, 8)
-
-                // Main XY Pad
-                XYPadView(engine: engine, preset: currentPreset)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .frame(maxHeight: .infinity)
-
-                // Controls panel
-                if showControls {
-                    ControlsView(engine: engine)
-                        .padding(.top, 12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                Spacer(minLength: 8)
+            PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
+                engine.applyPreset(preset)
             }
+            .padding(.top, 6)
+
+            XYPadView(engine: engine, preset: currentPreset)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .frame(maxHeight: .infinity)
+
+            if showControls {
+                ControlsView(engine: engine)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            Spacer(minLength: 6)
         }
-        .preferredColorScheme(.dark)
     }
 
-    private var header: some View {
-        HStack {
+    // MARK: - iPad layout (side-by-side)
+
+    private func ipadLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            header(theme: theme)
+
+            HStack(alignment: .top, spacing: 0) {
+                // Left panel: visualizer + presets + controls
+                VStack(spacing: 10) {
+                    VisualizerView(samples: engine.waveformSamples,
+                                   color: theme.accent(for: Color(hex: currentPreset.color)),
+                                   theme: theme)
+                        .frame(height: 70)
+
+                    PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
+                        engine.applyPreset(preset)
+                    }
+
+                    if showControls {
+                        ControlsView(engine: engine)
+                            .transition(.opacity)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: geo.size.width * 0.38)
+                .padding(.leading, 16)
+                .padding(.top, 10)
+
+                // Right panel: XY Pad
+                XYPadView(engine: engine, preset: currentPreset)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    // MARK: - Header
+
+    private func header(theme: AppTheme) -> some View {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SUPERNOVA PAD")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(Color(hex: currentPreset.color).opacity(0.8))
-                    .kerning(4)
-                Text("Touch Synth")
-                    .font(.system(size: 20, weight: .thin))
-                    .foregroundColor(.white)
+                    .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(theme.accent(for: Color(hex: currentPreset.color)).opacity(0.9))
+                    .kerning(3)
+                Text("Touch Synthesizer")
+                    .font(.system(size: 18, weight: .thin, design: theme.fontDesign))
+                    .foregroundColor(theme.primaryText)
             }
 
             Spacer()
 
-            // Active voice indicator
-            HStack(spacing: 4) {
+            // Voice indicators
+            HStack(spacing: 5) {
                 ForEach(0..<6, id: \.self) { i in
                     Circle()
                         .fill(i < engine.voices.count
-                              ? Color(hex: currentPreset.color)
-                              : Color.white.opacity(0.1))
-                        .frame(width: 6, height: 6)
+                              ? theme.accent(for: Color(hex: currentPreset.color))
+                              : theme.primaryText.opacity(0.12))
+                        .frame(width: 7, height: 7)
                         .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
                 }
             }
 
-            Button {
-                withAnimation(.spring(response: 0.3)) {
-                    showControls.toggle()
-                }
-            } label: {
-                Image(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.3")
-                    .font(.system(size: 18))
-                    .foregroundColor(showControls ? Color(hex: currentPreset.color) : .white.opacity(0.5))
-                    .padding(8)
-                    .background(Color.white.opacity(0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            // Controls toggle
+            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
+                       active: showControls, theme: theme) {
+                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
+            }
+
+            // Settings
+            iconButton(systemName: "gearshape", active: false, theme: theme) {
+                showSettings = true
             }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
+
+    private func iconButton(systemName: String, active: Bool, theme: AppTheme, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17))
+                .foregroundColor(active
+                    ? theme.accent(for: Color(hex: currentPreset.color))
+                    : theme.secondaryText)
+                .frame(width: 36, height: 36)
+                .background(theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                        .strokeBorder(theme.panelBorder, lineWidth: 1)
+                )
+        }
+    }
+}
+
+// MARK: - Scanlines
+
+struct ScanlinesView: View {
+    var body: some View {
+        Canvas { ctx, size in
+            var y: CGFloat = 0
+            while y < size.height {
+                let r = CGRect(x: 0, y: y, width: size.width, height: 1)
+                ctx.fill(Path(r), with: .color(.black.opacity(0.18)))
+                y += 3
+            }
+        }
     }
 }
 
@@ -102,12 +191,10 @@ extension Color {
         var rgb: UInt64 = 0
         Scanner(string: h).scanHexInt64(&rgb)
         let r = Double((rgb >> 16) & 0xFF) / 255
-        let g = Double((rgb >> 8) & 0xFF) / 255
+        let g = Double((rgb >> 8)  & 0xFF) / 255
         let b = Double(rgb & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
     }
 }
 
-#Preview {
-    ContentView()
-}
+#Preview { ContentView() }

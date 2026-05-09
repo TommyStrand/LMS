@@ -1,0 +1,125 @@
+import SwiftUI
+
+// MARK: - Theme definition
+
+struct AppTheme: Identifiable {
+    let id: String
+    let name: String
+    let icon: String            // SF Symbol
+
+    let appBackground: Color
+    let panelBackground: Color
+    let panelBorder: Color
+    let knobBody: Color
+    let knobTrackBg: Color      // arc background ring
+    let accentOverride: Color?  // nil = use preset colour
+    let primaryText: Color
+    let secondaryText: Color
+    let fontDesign: Font.Design
+    let colorScheme: ColorScheme
+    let scanlines: Bool         // CRT scanline overlay
+    let cornerRadius: CGFloat
+
+    func accent(for presetColor: Color) -> Color {
+        accentOverride ?? presetColor
+    }
+
+    // MARK: - 5 built-in themes
+
+    static let cosmos = AppTheme(
+        id: "cosmos", name: "Dark Cosmos", icon: "sparkles",
+        appBackground: Color(hex: "#080814"),
+        panelBackground: Color(hex: "#0E0E22"),
+        panelBorder: Color.white.opacity(0.08),
+        knobBody: Color(hex: "#12122A"),
+        knobTrackBg: Color.white.opacity(0.05),
+        accentOverride: nil,
+        primaryText: .white,
+        secondaryText: Color.white.opacity(0.45),
+        fontDesign: .default,
+        colorScheme: .dark,
+        scanlines: false,
+        cornerRadius: 12
+    )
+
+    static let radio = AppTheme(
+        id: "radio", name: "Analog Radio", icon: "radio",
+        appBackground: Color(hex: "#1A0C06"),
+        panelBackground: Color(hex: "#E8D0A0"),
+        panelBorder: Color(hex: "#7A4F28"),
+        knobBody: Color(hex: "#C4A070"),
+        knobTrackBg: Color(hex: "#7A4F28").opacity(0.25),
+        accentOverride: Color(hex: "#D4821A"),
+        primaryText: Color(hex: "#2C1408"),
+        secondaryText: Color(hex: "#6B3A18"),
+        fontDesign: .rounded,
+        colorScheme: .light,
+        scanlines: false,
+        cornerRadius: 8
+    )
+
+    static let radar = AppTheme(
+        id: "radar", name: "Radar", icon: "scope",
+        appBackground: Color(hex: "#010A04"),
+        panelBackground: Color(hex: "#020F06"),
+        panelBorder: Color(hex: "#00FF41").opacity(0.35),
+        knobBody: Color(hex: "#021A08"),
+        knobTrackBg: Color(hex: "#00FF41").opacity(0.08),
+        accentOverride: Color(hex: "#00FF41"),
+        primaryText: Color(hex: "#00FF41"),
+        secondaryText: Color(hex: "#00FF41").opacity(0.55),
+        fontDesign: .monospaced,
+        colorScheme: .dark,
+        scanlines: true,
+        cornerRadius: 4
+    )
+
+    static let cyber = AppTheme(
+        id: "cyber", name: "Neon Cyber", icon: "bolt.fill",
+        appBackground: Color(hex: "#080010"),
+        panelBackground: Color(hex: "#10001A"),
+        panelBorder: Color(hex: "#FF006E").opacity(0.45),
+        knobBody: Color(hex: "#180025"),
+        knobTrackBg: Color(hex: "#FF006E").opacity(0.08),
+        accentOverride: Color(hex: "#FF006E"),
+        primaryText: Color(hex: "#FF006E"),
+        secondaryText: Color(hex: "#00F5FF").opacity(0.75),
+        fontDesign: .default,
+        colorScheme: .dark,
+        scanlines: false,
+        cornerRadius: 2
+    )
+
+    static let ivory = AppTheme(
+        id: "ivory", name: "Warm Ivory", icon: "pianokeys",
+        appBackground: Color(hex: "#EAE4D8"),
+        panelBackground: Color(hex: "#D4CABC"),
+        panelBorder: Color(hex: "#8B7355"),
+        knobBody: Color(hex: "#BEB4A4"),
+        knobTrackBg: Color(hex: "#8B7355").opacity(0.2),
+        accentOverride: Color(hex: "#C02020"),
+        primaryText: Color(hex: "#1E1208"),
+        secondaryText: Color(hex: "#5A3A1A"),
+        fontDesign: .rounded,
+        colorScheme: .light,
+        scanlines: false,
+        cornerRadius: 8
+    )
+
+    static let all: [AppTheme] = [.cosmos, .radio, .radar, .cyber, .ivory]
+}
+
+// MARK: - Manager
+
+final class ThemeManager: ObservableObject {
+    @AppStorage("selectedThemeId") private var storedId: String = "cosmos"
+
+    var current: AppTheme {
+        AppTheme.all.first { $0.id == storedId } ?? .cosmos
+    }
+
+    func select(_ theme: AppTheme) {
+        storedId = theme.id
+        objectWillChange.send()
+    }
+}

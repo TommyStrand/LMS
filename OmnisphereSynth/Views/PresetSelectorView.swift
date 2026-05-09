@@ -2,15 +2,18 @@ import SwiftUI
 
 struct PresetSelectorView: View {
     @Binding var selectedIndex: Int
+    @EnvironmentObject var themeManager: ThemeManager
     let onSelect: (SynthPreset) -> Void
 
     var body: some View {
+        let theme = themeManager.current
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ForEach(Array(SynthPreset.presets.enumerated()), id: \.offset) { idx, preset in
                     PresetChip(
                         preset: preset,
-                        isSelected: idx == selectedIndex
+                        isSelected: idx == selectedIndex,
+                        theme: theme
                     )
                     .onTapGesture {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -30,32 +33,31 @@ struct PresetSelectorView: View {
 struct PresetChip: View {
     let preset: SynthPreset
     let isSelected: Bool
+    let theme: AppTheme
+
+    private var accentColor: Color { theme.accent(for: Color(hex: preset.color)) }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 5) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        isSelected
-                            ? Color(hex: preset.color).opacity(0.9)
-                            : Color.white.opacity(0.08)
-                    )
+                RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                    .fill(isSelected ? accentColor.opacity(0.85) : theme.panelBackground)
                     .frame(width: 64, height: 64)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                Color(hex: preset.color).opacity(isSelected ? 1 : 0.3),
-                                lineWidth: isSelected ? 2 : 1
-                            )
+                        RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                            .strokeBorder(accentColor.opacity(isSelected ? 1 : 0.4),
+                                          lineWidth: isSelected ? 2 : 1)
                     )
-                    .shadow(color: isSelected ? Color(hex: preset.color).opacity(0.6) : .clear, radius: 10)
+                    .shadow(color: isSelected ? accentColor.opacity(0.5) : .clear, radius: 10)
 
-                OscIcon(waveform: preset.osc1Waveform, color: isSelected ? .white : Color(hex: preset.color))
+                OscIcon(waveform: preset.osc1Waveform,
+                        color: isSelected ? theme.primaryText : accentColor)
                     .frame(width: 32, height: 20)
             }
+
             Text(preset.name)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(isSelected ? Color(hex: preset.color) : .white.opacity(0.5))
+                .font(.system(size: 9, weight: .medium, design: theme.fontDesign))
+                .foregroundColor(isSelected ? accentColor : theme.secondaryText)
                 .lineLimit(1)
                 .frame(width: 72)
         }
@@ -73,10 +75,10 @@ struct OscIcon: View {
             let mid = size.height / 2
             switch waveform {
             case .sine:
-                for x in stride(from: 0, through: size.width, by: 1) {
-                    let y = mid - sin(x / size.width * 2 * .pi) * mid * 0.8
+                for x in stride(from: 0.0, through: Double(size.width), by: 1) {
+                    let y = Double(mid) - sin(x / Double(size.width) * 2 * .pi) * Double(mid) * 0.8
                     if x == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                    else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    else       { path.addLine(to: CGPoint(x: x, y: y)) }
                 }
             case .triangle:
                 path.move(to: CGPoint(x: 0, y: mid))
@@ -96,13 +98,14 @@ struct OscIcon: View {
             case .noise:
                 var rng: UInt32 = 12345
                 path.move(to: CGPoint(x: 0, y: mid))
-                for x in stride(from: 1, through: size.width, by: 2) {
+                for x in stride(from: 1.0, through: Double(size.width), by: 2) {
                     rng = rng &* 1664525 &+ 1013904223
-                    let y = mid + (CGFloat(Int32(bitPattern: rng)) / CGFloat(Int32.max)) * mid * 0.8
+                    let y = Double(mid) + (Double(Int32(bitPattern: rng)) / Double(Int32.max)) * Double(mid) * 0.8
                     path.addLine(to: CGPoint(x: x, y: y))
                 }
             }
-            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+            context.stroke(path, with: .color(color),
+                           style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
     }
 }

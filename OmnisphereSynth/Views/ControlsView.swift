@@ -2,10 +2,12 @@ import SwiftUI
 
 struct ControlsView: View {
     @ObservedObject var engine: AudioEngine
+    @EnvironmentObject var themeManager: ThemeManager
 
     var body: some View {
         let preset = engine.currentPreset
         let color  = Color(hex: preset.color)
+        let theme  = themeManager.current
 
         VStack(spacing: 12) {
             // Row 1 – always visible
@@ -35,7 +37,7 @@ struct ControlsView: View {
             }
 
             // Row 3 – Texture (always visible)
-            TextureRow(engine: engine, color: color)
+            TextureRow(engine: engine, color: color, theme: theme)
         }
         .padding(.horizontal, 20)
     }
@@ -45,14 +47,16 @@ struct ControlsView: View {
 
 struct OrganControlsRow: View {
     @ObservedObject var engine: AudioEngine
+    @EnvironmentObject var themeManager: ThemeManager
     let color: Color
 
     var body: some View {
         let preset = engine.currentPreset
+        let theme  = themeManager.current
         HStack(spacing: 0) {
             VStack(spacing: 4) {
                 Text("DISTORTION")
-                    .font(.system(size: 7, weight: .bold))
+                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
                     .foregroundColor(color.opacity(0.7))
                     .kerning(1.5)
                 HStack(spacing: 16) {
@@ -66,14 +70,16 @@ struct OrganControlsRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .strokeBorder(theme.panelBorder, lineWidth: 1))
 
             Spacer(minLength: 12)
 
             VStack(spacing: 4) {
                 Text("SHIMMER")
-                    .font(.system(size: 7, weight: .bold))
+                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
                     .foregroundColor(color.opacity(0.7))
                     .kerning(1.5)
                 HStack(spacing: 16) {
@@ -87,8 +93,10 @@ struct OrganControlsRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .strokeBorder(theme.panelBorder, lineWidth: 1))
         }
     }
 }
@@ -145,12 +153,13 @@ struct ADSRRow: View {
 struct TextureRow: View {
     @ObservedObject var engine: AudioEngine
     let color: Color
+    let theme: AppTheme
 
     var body: some View {
         let preset = engine.currentPreset
         VStack(spacing: 4) {
             Text("TEXTURE")
-                .font(.system(size: 7, weight: .bold))
+                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
                 .foregroundColor(color.opacity(0.6))
                 .kerning(2)
 
@@ -174,8 +183,10 @@ struct TextureRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 }
 
@@ -187,38 +198,58 @@ struct KnobView: View {
     let color: Color
     let onChange: (Float) -> Void
 
+    @EnvironmentObject var themeManager: ThemeManager
+    @Environment(\.horizontalSizeClass) var sizeClass
     @State private var lastDragY: CGFloat = 0
 
     private let minAngle: Double = -135
     private let maxAngle: Double =  135
 
+    private var isPad: Bool { sizeClass == .regular }
+
+    private var outerSize: CGFloat  { isPad ? 72 : 52 }
+    private var trackSize: CGFloat  { isPad ? 62 : 44 }
+    private var innerSize: CGFloat  { isPad ? 54 : 38 }
+    private var needleLen: CGFloat  { isPad ? 14 : 10 }
+    private var needleOff: CGFloat  { isPad ? -17 : -12 }
+    private var labelSize: CGFloat  { isPad ? 11 : 9 }
+
     var body: some View {
-        VStack(spacing: 4) {
+        let theme = themeManager.current
+        let accent = theme.accent(for: color)
+
+        VStack(spacing: isPad ? 6 : 4) {
             ZStack {
+                // Outer glow ring
                 Circle()
-                    .fill(Color.white.opacity(0.05))
-                    .frame(width: 52, height: 52)
+                    .fill(theme.knobTrackBg)
+                    .frame(width: outerSize, height: outerSize)
+
+                // Progress arc
                 Circle()
                     .trim(from: 0, to: CGFloat(value))
-                    .stroke(color.opacity(0.8), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .frame(width: 44, height: 44)
+                    .stroke(accent.opacity(0.85),
+                            style: StrokeStyle(lineWidth: isPad ? 4 : 3, lineCap: .round))
+                    .frame(width: trackSize, height: trackSize)
                     .rotationEffect(.degrees(-90))
+
+                // Knob body
                 Circle()
-                    .fill(Color(hex: "#1a1a2e"))
-                    .frame(width: 38, height: 38)
+                    .fill(theme.knobBody)
+                    .frame(width: innerSize, height: innerSize)
+                    .shadow(color: accent.opacity(0.35), radius: isPad ? 6 : 4)
                     .overlay(
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(color)
-                            .frame(width: 3, height: 10)
-                            .offset(y: -12)
+                            .fill(accent)
+                            .frame(width: isPad ? 4 : 3, height: needleLen)
+                            .offset(y: needleOff)
                             .rotationEffect(.degrees(mappedAngle))
                     )
-                    .shadow(color: color.opacity(0.4), radius: 4)
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
-                        let delta = Float(lastDragY - v.location.y) * 0.005
+                        let delta = Float(lastDragY - v.location.y) * (isPad ? 0.004 : 0.005)
                         lastDragY = v.location.y
                         onChange(max(0, min(1, value + delta)))
                     }
@@ -226,8 +257,8 @@ struct KnobView: View {
             )
 
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.white.opacity(0.5))
+                .font(.system(size: labelSize, weight: .semibold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
                 .kerning(1.5)
         }
     }
@@ -245,25 +276,36 @@ struct ADSRView: View {
     let color: Color
     let onChange: (Float) -> Void
 
+    @EnvironmentObject var themeManager: ThemeManager
+    @Environment(\.horizontalSizeClass) var sizeClass
     @State private var lastDragY: CGFloat = 0
 
+    private var isPad: Bool { sizeClass == .regular }
+    private var sliderW: CGFloat  { isPad ? 48 : 36 }
+    private var sliderH: CGFloat  { isPad ? 88 : 64 }
+    private var fillW: CGFloat    { isPad ? 38 : 28 }
+    private var labelSize: CGFloat { isPad ? 11 : 9 }
+
     var body: some View {
-        VStack(spacing: 4) {
+        let theme = themeManager.current
+        let accent = theme.accent(for: color)
+
+        VStack(spacing: isPad ? 6 : 4) {
             ZStack(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.white.opacity(0.05))
-                    .frame(width: 36, height: 64)
+                    .fill(theme.knobTrackBg)
+                    .frame(width: sliderW, height: sliderH)
                 RoundedRectangle(cornerRadius: 3)
                     .fill(LinearGradient(
-                        colors: [color, color.opacity(0.4)],
+                        colors: [accent, accent.opacity(0.35)],
                         startPoint: .top, endPoint: .bottom
                     ))
-                    .frame(width: 28, height: max(4, CGFloat(value) * 56))
+                    .frame(width: fillW, height: max(4, CGFloat(value) * (sliderH - 8)))
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
-                        let delta = Float(lastDragY - v.location.y) * 0.007
+                        let delta = Float(lastDragY - v.location.y) * (isPad ? 0.005 : 0.007)
                         lastDragY = v.location.y
                         onChange(max(0.001, min(1, value + delta)))
                     }
@@ -271,8 +313,8 @@ struct ADSRView: View {
             )
 
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.white.opacity(0.5))
+                .font(.system(size: labelSize, weight: .semibold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
                 .kerning(1.5)
         }
     }
