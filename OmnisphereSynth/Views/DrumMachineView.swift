@@ -3,13 +3,17 @@ import SwiftUI
 struct DrumMachineView: View {
     @ObservedObject var drum: DrumEngine
     @EnvironmentObject  var themeManager: ThemeManager
+    @State private var selectedFeel: DrumFeel = .ride
 
     var body: some View {
         let theme  = themeManager.current
-        let accent = theme.accent(for: Color(hex: "#E07040"))  // warm orange for drums
+        let accent = theme.accent(for: Color(hex: "#E07040"))
 
         GeometryReader { geo in
             VStack(spacing: 0) {
+                feelSelector(theme: theme, accent: accent)
+                    .padding(.bottom, 6)
+
                 patternStrip(theme: theme, accent: accent)
                     .padding(.bottom, 8)
 
@@ -37,29 +41,82 @@ struct DrumMachineView: View {
         }
     }
 
-    // MARK: - Pattern strip
+    // MARK: - Feel selector
 
-    private func patternStrip(theme: AppTheme, accent: Color) -> some View {
+    private func feelSelector(theme: AppTheme, accent: Color) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(DrumPattern.all.indices, id: \.self) { i in
-                    let selected = drum.patternIndex == i
+                ForEach(DrumFeel.allCases, id: \.self) { feel in
+                    let selected = selectedFeel == feel
                     Button {
-                        drum.patternIndex = i
+                        withAnimation(.spring(response: 0.25)) {
+                            selectedFeel = feel
+                            // Select first pattern in the new feel if current is outside it
+                            let feelPatterns = DrumPattern.patterns(for: feel)
+                            if !feelPatterns.isEmpty {
+                                let currentPattern = DrumPattern.all[drum.patternIndex]
+                                if currentPattern.feel != feel {
+                                    if let idx = DrumPattern.all.firstIndex(where: { $0.feel == feel }) {
+                                        drum.patternIndex = idx
+                                    }
+                                }
+                            }
+                        }
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     } label: {
-                        Text(DrumPattern.all[i].name)
-                            .font(.system(size: 11, weight: .semibold, design: theme.fontDesign))
-                            .foregroundColor(selected ? theme.appBackground : accent)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(selected ? accent : theme.panelBackground)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule().strokeBorder(
-                                    selected ? Color.clear : accent.opacity(0.35),
-                                    lineWidth: 1)
-                            )
+                        VStack(spacing: 3) {
+                            Text(feel.emoji)
+                                .font(.system(size: 16))
+                            Text(feel.rawValue.uppercased())
+                                .font(.system(size: 8, weight: .bold, design: theme.fontDesign))
+                                .kerning(1.2)
+                        }
+                        .foregroundColor(selected ? theme.appBackground : accent)
+                        .frame(width: 52, height: 46)
+                        .background(selected ? accent : theme.panelBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                                .strokeBorder(selected ? Color.clear : accent.opacity(0.35), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    // MARK: - Pattern strip (filtered by feel)
+
+    private func patternStrip(theme: AppTheme, accent: Color) -> some View {
+        let feelPatterns = DrumPattern.patterns(for: selectedFeel)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(feelPatterns.indices, id: \.self) { localIdx in
+                    let pattern = feelPatterns[localIdx]
+                    let globalIdx = DrumPattern.all.firstIndex(where: { $0.name == pattern.name }) ?? 0
+                    let selected  = drum.patternIndex == globalIdx
+                    Button {
+                        drum.patternIndex = globalIdx
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text(pattern.name)
+                                .font(.system(size: 11, weight: .semibold, design: theme.fontDesign))
+                            Text("\(pattern.bars)BAR")
+                                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                                .opacity(0.65)
+                        }
+                        .foregroundColor(selected ? theme.appBackground : accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(selected ? accent : theme.panelBackground)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(
+                                selected ? Color.clear : accent.opacity(0.35),
+                                lineWidth: 1)
+                        )
                     }
                 }
             }
@@ -71,18 +128,15 @@ struct DrumMachineView: View {
 
     private func beatRing(accent: Color, theme: AppTheme) -> some View {
         ZStack {
-            // Track
             Circle()
                 .stroke(theme.panelBorder, lineWidth: 3)
 
-            // Progress arc
             Circle()
                 .trim(from: 0, to: drum.beatFraction)
                 .stroke(accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.linear(duration: 0.05), value: drum.beatFraction)
 
-            // Beat dots (one per bar subdivision)
             let beats = max(2, DrumPattern.all[drum.patternIndex].bars * 4)
             ForEach(0 ..< beats, id: \.self) { i in
                 let angle = Double(i) / Double(beats) * 2 * .pi - .pi / 2
@@ -93,7 +147,6 @@ struct DrumMachineView: View {
                     .offset(x: cos(angle) * 46, y: sin(angle) * 46)
             }
 
-            // Centre: play state + BPM
             VStack(spacing: 2) {
                 Image(systemName: drum.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 22))
@@ -112,34 +165,51 @@ struct DrumMachineView: View {
     // MARK: - BPM row
 
     private func bpmRow(theme: AppTheme, accent: Color) -> some View {
-        HStack(spacing: 8) {
-            Text("BPM")
-                .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
-                .foregroundColor(theme.secondaryText)
-                .kerning(1.5)
-                .frame(width: 36, alignment: .leading)
+        VStack(spacing: 6) {
+            HStack {
+                Text("BPM")
+                    .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText)
+                    .kerning(1.5)
+                Spacer()
+                Text("\(Int(drum.bpm))")
+                    .font(.system(size: 22, weight: .thin, design: theme.fontDesign))
+                    .foregroundColor(accent)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 4)
 
             Slider(value: $drum.bpm, in: 50...180, step: 1)
                 .accentColor(accent)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 4)
 
-            Text("\(Int(drum.bpm))")
-                .font(.system(size: 13, weight: .semibold, design: theme.fontDesign))
-                .foregroundColor(theme.primaryText)
-                .frame(width: 30, alignment: .trailing)
+            HStack {
+                Text("50")
+                    .font(.system(size: 8, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText.opacity(0.5))
+                Spacer()
+                Text("180")
+                    .font(.system(size: 8, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText.opacity(0.5))
+            }
+            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 4)
+        .padding(10)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .strokeBorder(theme.panelBorder, lineWidth: 1)
+        )
     }
 
     // MARK: - Effects grid
 
     private func effectsGrid(theme: AppTheme, accent: Color) -> some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                effectKnob(label: "DELAY",   value: $drum.delayMix,  accent: accent, theme: theme)
-                effectKnob(label: "SHIMMER", value: $drum.shimmer,   accent: accent, theme: theme)
-                effectKnob(label: "DIRT",    value: $drum.grit,      accent: accent, theme: theme)
-            }
+        HStack(spacing: 12) {
+            effectKnob(label: "DELAY",   value: $drum.delayMix, accent: accent, theme: theme)
+            effectKnob(label: "SHIMMER", value: $drum.shimmer,  accent: accent, theme: theme)
+            effectKnob(label: "DIRT",    value: $drum.grit,     accent: accent, theme: theme)
         }
     }
 
@@ -149,14 +219,12 @@ struct DrumMachineView: View {
                             theme: AppTheme) -> some View {
         VStack(spacing: 6) {
             ZStack {
-                // Background track
                 Circle()
                     .trim(from: 0.15, to: 0.85)
                     .stroke(theme.panelBorder, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(90 + 180 * 0.15))
                     .frame(width: 52, height: 52)
 
-                // Filled arc
                 let filled = 0.15 + (0.85 - 0.15) * Double(value.wrappedValue)
                 Circle()
                     .trim(from: 0.15, to: filled)
@@ -165,7 +233,6 @@ struct DrumMachineView: View {
                     .frame(width: 52, height: 52)
                     .animation(.easeOut(duration: 0.08), value: value.wrappedValue)
 
-                // Value text
                 Text(String(format: "%.0f", value.wrappedValue * 100))
                     .font(.system(size: 11, weight: .semibold, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText)
