@@ -115,9 +115,8 @@ extension SynthPreset {
             name: "Rhodes Mk1",
             color: "#92400E",
             voiceMode: .rhodes,
-            reverbMix: 0.35, delayMix: 0.2, delayTime: 0.375,
-            tremulantDepth: 0.3,
-            chorusMix: 0.25
+            reverbMix: 0.35, delayMix: 0.2, delayTime: 0.375, chorusMix: 0.25,
+            tremulantDepth: 0.3
         ),
         SynthPreset(
             name: "Church Organ",
