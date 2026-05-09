@@ -1,11 +1,20 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var engine       = AudioEngine()
-    @StateObject private var themeManager = ThemeManager()
+    @StateObject private var engine: AudioEngine
+    @StateObject private var themeManager: ThemeManager
+    @StateObject private var midi: MIDIController
     @State private var selectedPresetIndex = 0
     @State private var showControls  = true
     @State private var showSettings  = false
+    @State private var midiActivityLit = false
+
+    init() {
+        let e = AudioEngine()
+        _engine       = StateObject(wrappedValue: e)
+        _themeManager = StateObject(wrappedValue: ThemeManager())
+        _midi         = StateObject(wrappedValue: MIDIController(engine: e))
+    }
 
     var currentPreset: SynthPreset { SynthPreset.presets[selectedPresetIndex] }
 
@@ -31,6 +40,12 @@ struct ContentView: View {
         .preferredColorScheme(themeManager.current.colorScheme)
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(themeManager)
+        }
+        .onChange(of: midi.activityPulse) { _ in
+            midiActivityLit = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                midiActivityLit = false
+            }
         }
     }
 
@@ -173,6 +188,28 @@ struct ContentView: View {
                         .frame(width: 7, height: 7)
                         .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
                 }
+            }
+
+            // MIDI indicator
+            if midi.isConnected {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(accent.opacity(midiActivityLit ? 1.0 : 0.3))
+                        .frame(width: 6, height: 6)
+                        .animation(.easeOut(duration: 0.2), value: midiActivityLit)
+                    Text(String((midi.primaryDeviceName ?? "MIDI").prefix(12)))
+                        .font(.system(size: 9, weight: .semibold, design: theme.fontDesign))
+                        .foregroundColor(theme.secondaryText)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                        .strokeBorder(theme.panelBorder, lineWidth: 1)
+                )
             }
 
             // Play mode toggle
