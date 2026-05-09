@@ -31,17 +31,40 @@ struct SettingsView: View {
                             }
                         }
 
+                        // MARK: Control style
+                        sectionHeader("CONTROLS", theme: theme)
+
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 2),
+                            spacing: 14
+                        ) {
+                            ForEach(ControlStyle.allCases) { style in
+                                ControlStyleCard(
+                                    style: style,
+                                    isSelected: themeManager.controlStyle == style,
+                                    theme: theme
+                                )
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.3)) {
+                                        themeManager.selectControlStyle(style)
+                                    }
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }
+                            }
+                        }
+
                         // MARK: About
                         sectionHeader("ABOUT", theme: theme)
 
                         VStack(alignment: .leading, spacing: 6) {
-                            infoRow("App", value: "SuperNovaPad 1.0", theme: theme)
-                            infoRow("Voices", value: "Synth · Hammond · Rhodes · Organ", theme: theme)
+                            infoRow("App",     value: "SuperNovaPad 1.0",                theme: theme)
+                            infoRow("Voices",  value: "Synth · Hammond · Rhodes · Organ", theme: theme)
                             infoRow("Effects", value: "Grit · Lo-Fi · Vinyl · Tape · Doubler", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)
-                        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius).strokeBorder(theme.panelBorder, lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+                            .strokeBorder(theme.panelBorder, lineWidth: 1))
                         .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                     }
                     .padding(20)
@@ -89,12 +112,10 @@ struct ThemeCard: View {
     var body: some View {
         VStack(spacing: 8) {
             ZStack {
-                // Background swatch
                 RoundedRectangle(cornerRadius: 10)
                     .fill(theme.appBackground)
                     .frame(height: 80)
 
-                // Mini panel strip
                 RoundedRectangle(cornerRadius: 6)
                     .fill(theme.panelBackground)
                     .frame(width: 70, height: 32)
@@ -134,6 +155,48 @@ struct ThemeCard: View {
             .foregroundColor(isSelected
                 ? (theme.accentOverride ?? .accentColor)
                 : Color.primary.opacity(0.6))
+        }
+    }
+}
+
+// MARK: - Control style card
+
+struct ControlStyleCard: View {
+    let style: ControlStyle
+    let isSelected: Bool
+    let theme: AppTheme
+
+    private var accent: Color { theme.accentOverride ?? Color(hex: "#8B5CF6") }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(theme.panelBackground)
+                    .frame(height: 72)
+
+                Image(systemName: style.icon)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundColor(isSelected ? accent : theme.secondaryText)
+
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(accent, lineWidth: 2.5)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(accent)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(6)
+                } else {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(theme.panelBorder, lineWidth: 1)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            Text(style.label)
+                .font(.system(size: 11, weight: .medium, design: theme.fontDesign))
+                .foregroundColor(isSelected ? accent : Color.primary.opacity(0.6))
         }
     }
 }

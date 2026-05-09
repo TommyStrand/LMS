@@ -1,5 +1,34 @@
 import SwiftUI
 
+// MARK: - Control style
+
+enum ControlStyle: String, CaseIterable, Identifiable {
+    case rotary  = "rotary"
+    case ledRing = "ledRing"
+    case fader   = "fader"
+    case flatArc = "flatArc"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .rotary:  return "Rotary"
+        case .ledRing: return "LED Ring"
+        case .fader:   return "Fader"
+        case .flatArc: return "Flat Arc"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .rotary:  return "dial.medium"
+        case .ledRing: return "circle.dotted"
+        case .fader:   return "slider.vertical.3"
+        case .flatArc: return "circle.dashed"
+        }
+    }
+}
+
 // MARK: - Theme definition
 
 struct AppTheme: Identifiable {
@@ -113,13 +142,23 @@ struct AppTheme: Identifiable {
 
 final class ThemeManager: ObservableObject {
     @AppStorage("selectedThemeId") private var storedId: String = "cosmos"
+    @AppStorage("controlStyle")    private var storedControlStyle: String = ControlStyle.rotary.rawValue
 
     var current: AppTheme {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
     }
 
+    var controlStyle: ControlStyle {
+        ControlStyle(rawValue: storedControlStyle) ?? .rotary
+    }
+
     func select(_ theme: AppTheme) {
         storedId = theme.id
+        objectWillChange.send()
+    }
+
+    func selectControlStyle(_ style: ControlStyle) {
+        storedControlStyle = style.rawValue
         objectWillChange.send()
     }
 }

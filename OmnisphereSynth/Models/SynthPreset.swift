@@ -48,6 +48,9 @@ struct SynthPreset: Identifiable, Equatable {
     var gritAmount: Float
     var doublerAmount: Float
 
+    // Preset chip icon style
+    var iconStyle: IconStyle
+
     var isOrgan: Bool { voiceMode == .organChurch || voiceMode == .hammondB3 }
 
     enum VoiceMode { case synth, organChurch, hammondB3, rhodes }
@@ -58,6 +61,18 @@ struct SynthPreset: Identifiable, Equatable {
 
     enum LFOTarget: Int {
         case pitch, filter, amplitude
+    }
+
+    enum IconStyle {
+        case hammondTonewheel
+        case rhodesTine
+        case churchPipes
+        case mysticWave
+        case darkVortex
+        case celestialDots
+        case pulseBolt
+        case voidHole
+        case solarRadial
     }
 
     init(
@@ -76,7 +91,8 @@ struct SynthPreset: Identifiable, Equatable {
         vinylAmount: Float = 0,
         brokenTape: Float = 0,
         gritAmount: Float = 0,
-        doublerAmount: Float = 0
+        doublerAmount: Float = 0,
+        iconStyle: IconStyle = .mysticWave
     ) {
         self.name = name; self.color = color
         self.voiceMode = voiceMode
@@ -96,6 +112,7 @@ struct SynthPreset: Identifiable, Equatable {
         self.brokenTape = brokenTape
         self.gritAmount = gritAmount
         self.doublerAmount = doublerAmount
+        self.iconStyle = iconStyle
     }
 
     static func == (lhs: SynthPreset, rhs: SynthPreset) -> Bool { lhs.id == rhs.id }
@@ -109,14 +126,16 @@ extension SynthPreset {
             voiceMode: .hammondB3,
             reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25,
             tremulantDepth: 0.5,
-            gritAmount: 0.18
+            gritAmount: 0.18,
+            iconStyle: .hammondTonewheel
         ),
         SynthPreset(
             name: "Rhodes Mk1",
             color: "#92400E",
             voiceMode: .rhodes,
             reverbMix: 0.35, delayMix: 0.2, delayTime: 0.375, chorusMix: 0.25,
-            tremulantDepth: 0.3
+            tremulantDepth: 0.3,
+            iconStyle: .rhodesTine
         ),
         SynthPreset(
             name: "Church Organ",
@@ -126,7 +145,8 @@ extension SynthPreset {
             attack: 0.005, decay: 0, sustain: 1.0, release: 0.04,
             lfoRate: 0, lfoDepth: 0, lfoTarget: .amplitude,
             reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5,
-            tremulantDepth: 0.25
+            tremulantDepth: 0.25,
+            iconStyle: .churchPipes
         ),
         SynthPreset(
             name: "Mystic Pad",
@@ -137,7 +157,8 @@ extension SynthPreset {
             filterCutoff: 800, filterResonance: 0.3, filterEnvAmount: 0.5,
             attack: 1.2, decay: 0.5, sustain: 0.8, release: 2.0,
             lfoRate: 0.3, lfoDepth: 0.15, lfoTarget: .filter,
-            reverbMix: 0.7, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.4
+            reverbMix: 0.7, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.4,
+            iconStyle: .mysticWave
         ),
         SynthPreset(
             name: "Dark Matter",
@@ -148,7 +169,8 @@ extension SynthPreset {
             filterCutoff: 400, filterResonance: 0.6, filterEnvAmount: 0.7,
             attack: 0.05, decay: 0.8, sustain: 0.5, release: 1.5,
             lfoRate: 0.8, lfoDepth: 0.2, lfoTarget: .pitch,
-            reverbMix: 0.5, delayMix: 0.4, delayTime: 0.5, chorusMix: 0.2
+            reverbMix: 0.5, delayMix: 0.4, delayTime: 0.5, chorusMix: 0.2,
+            iconStyle: .darkVortex
         ),
         SynthPreset(
             name: "Celestial",
@@ -159,7 +181,8 @@ extension SynthPreset {
             filterCutoff: 2000, filterResonance: 0.1, filterEnvAmount: 0.3,
             attack: 2.0, decay: 1.0, sustain: 0.9, release: 3.0,
             lfoRate: 0.15, lfoDepth: 0.1, lfoTarget: .amplitude,
-            reverbMix: 0.85, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.6
+            reverbMix: 0.85, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.6,
+            iconStyle: .celestialDots
         ),
         SynthPreset(
             name: "Pulse Drive",
@@ -170,7 +193,8 @@ extension SynthPreset {
             filterCutoff: 1200, filterResonance: 0.8, filterEnvAmount: 0.9,
             attack: 0.01, decay: 0.3, sustain: 0.6, release: 0.4,
             lfoRate: 4.0, lfoDepth: 0.4, lfoTarget: .filter,
-            reverbMix: 0.3, delayMix: 0.5, delayTime: 0.25, chorusMix: 0.1
+            reverbMix: 0.3, delayMix: 0.5, delayTime: 0.25, chorusMix: 0.1,
+            iconStyle: .pulseBolt
         ),
         SynthPreset(
             name: "Void Walker",
@@ -181,7 +205,8 @@ extension SynthPreset {
             filterCutoff: 600, filterResonance: 0.4, filterEnvAmount: 0.6,
             attack: 0.8, decay: 1.2, sustain: 0.4, release: 2.5,
             lfoRate: 0.5, lfoDepth: 0.25, lfoTarget: .pitch,
-            reverbMix: 0.6, delayMix: 0.35, delayTime: 0.333, chorusMix: 0.5
+            reverbMix: 0.6, delayMix: 0.35, delayTime: 0.333, chorusMix: 0.5,
+            iconStyle: .voidHole
         ),
         SynthPreset(
             name: "Solar Wind",
@@ -192,7 +217,8 @@ extension SynthPreset {
             filterCutoff: 1500, filterResonance: 0.5, filterEnvAmount: 0.4,
             attack: 0.4, decay: 0.6, sustain: 0.7, release: 1.8,
             lfoRate: 1.2, lfoDepth: 0.3, lfoTarget: .filter,
-            reverbMix: 0.55, delayMix: 0.25, delayTime: 0.4, chorusMix: 0.35
+            reverbMix: 0.55, delayMix: 0.25, delayTime: 0.4, chorusMix: 0.35,
+            iconStyle: .solarRadial
         ),
     ]
 }
