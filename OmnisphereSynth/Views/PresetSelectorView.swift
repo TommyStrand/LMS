@@ -154,7 +154,7 @@ struct PresetIcon: View {
 
     private static func drawChurchPipes(_ ctx: GraphicsContext, _ size: CGSize, _ color: Color) {
         let heights: [CGFloat] = [0.42, 0.64, 0.90, 0.64, 0.42]
-        let pipeW  = size.width / CGFloat(heights.count + 1.8)
+        let pipeW  = size.width / (CGFloat(heights.count) + 1.8)
         let gap    = pipeW * 0.22
         let totalW = CGFloat(heights.count) * pipeW + CGFloat(heights.count - 1) * gap
         let startX = (size.width - totalW) / 2
