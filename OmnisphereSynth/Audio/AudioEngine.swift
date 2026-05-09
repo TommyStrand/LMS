@@ -46,15 +46,22 @@ final class AudioEngine: ObservableObject {
         [voiceMixer, distortion, reverb, delay,
          shimmerReverb, timePitch, shimmerMixer].forEach { engine.attach($0) }
 
-        engine.connect(voiceMixer,   to: distortion,  format: nil)
-        engine.connect(distortion,   to: reverb,       format: nil)
-        engine.connect(reverb,       to: delay,        format: nil)
+        // Main path
+        engine.connect(distortion,   to: reverb,              format: nil)
+        engine.connect(reverb,       to: delay,               format: nil)
         engine.connect(delay,        to: engine.mainMixerNode, format: nil)
 
-        engine.connect(voiceMixer,    to: shimmerReverb, format: nil)
-        engine.connect(shimmerReverb, to: timePitch,     format: nil)
-        engine.connect(timePitch,     to: shimmerMixer,  format: nil)
+        // Shimmer path
+        engine.connect(shimmerReverb, to: timePitch,          format: nil)
+        engine.connect(timePitch,     to: shimmerMixer,       format: nil)
         engine.connect(shimmerMixer,  to: engine.mainMixerNode, format: nil)
+
+        // Fan-out voiceMixer → both chains (must use multi-destination API)
+        let stereo = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        engine.connect(voiceMixer, to: [
+            AVAudioConnectionPoint(node: distortion,   bus: 0),
+            AVAudioConnectionPoint(node: shimmerReverb, bus: 0)
+        ], fromBus: 0, format: stereo)
 
         timePitch.pitch  = 1200
         timePitch.rate   = 1.0
