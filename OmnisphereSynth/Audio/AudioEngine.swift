@@ -76,7 +76,7 @@ final class AudioEngine: ObservableObject {
         delay.delayTime  = Double(preset.delayTime)
         delay.feedback   = 28
 
-        distortion.loadFactoryPreset(.multiDriveSpeed)
+        distortion.loadFactoryPreset(.multiDistortedFunk)
         distortion.preGain   = preset.distortionAmount * 18
         distortion.wetDryMix = preset.distortionAmount > 0 ? 40 + preset.distortionAmount * 55 : 0
 
