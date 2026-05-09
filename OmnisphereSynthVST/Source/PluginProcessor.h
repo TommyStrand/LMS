@@ -11,11 +11,11 @@
 #include <atomic>
 #include <vector>
 
-class OmnisphereSynthProcessor : public juce::AudioProcessor
+class SuperNovaPadProcessor : public juce::AudioProcessor
 {
 public:
-    OmnisphereSynthProcessor();
-    ~OmnisphereSynthProcessor() override;
+    SuperNovaPadProcessor();
+    ~SuperNovaPadProcessor() override;
 
     void prepareToPlay   (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -86,5 +86,5 @@ private:
     GritEffect   grit;           // same algorithm per channel, stateless
     DoublerEffect doubler;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OmnisphereSynthProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperNovaPadProcessor)
 };

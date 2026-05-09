@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct OmnisphereSynthApp: App {
+struct SuperNovaPadApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -14,8 +14,8 @@ cmake --build "${BUILD_DIR}" --config "${CONFIG}" --parallel
 
 # ── Install (macOS) ─────────────────────────────────────────────────────────
 if [ "$(uname)" = "Darwin" ]; then
-    VST3_SRC=$(find "${BUILD_DIR}" -name "OmnisphereSynth.vst3" -type d | head -1)
-    AU_SRC=$(find "${BUILD_DIR}"   -name "OmnisphereSynth.component" -type d | head -1)
+    VST3_SRC=$(find "${BUILD_DIR}" -name "SuperNovaPad.vst3" -type d | head -1)
+    AU_SRC=$(find "${BUILD_DIR}"   -name "SuperNovaPad.component" -type d | head -1)
 
     if [ -n "$VST3_SRC" ]; then
         echo "→ Installing VST3 to ~/Library/Audio/Plug-Ins/VST3/"
@@ -34,7 +34,7 @@ fi
 
 # ── Install (Linux) ──────────────────────────────────────────────────────────
 if [ "$(uname)" = "Linux" ]; then
-    VST3_SRC=$(find "${BUILD_DIR}" -name "OmnisphereSynth.vst3" -type d | head -1)
+    VST3_SRC=$(find "${BUILD_DIR}" -name "SuperNovaPad.vst3" -type d | head -1)
     if [ -n "$VST3_SRC" ]; then
         echo "→ Installing VST3 to ~/.vst3/"
         mkdir -p ~/.vst3

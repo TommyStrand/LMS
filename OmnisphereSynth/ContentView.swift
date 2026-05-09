@@ -52,7 +52,7 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("OMNISPHERE")
+                Text("SUPERNOVA PAD")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(Color(hex: currentPreset.color).opacity(0.8))
                     .kerning(4)

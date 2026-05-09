@@ -108,7 +108,7 @@ void XYPad::paint(juce::Graphics& g)
 // ─────────────────────────────────────────────────────────────────────────────
 // WaveformDisplay
 // ─────────────────────────────────────────────────────────────────────────────
-WaveformDisplay::WaveformDisplay(OmnisphereSynthProcessor& p): proc(p) { startTimerHz(30); }
+WaveformDisplay::WaveformDisplay(SuperNovaPadProcessor& p): proc(p) { startTimerHz(30); }
 WaveformDisplay::~WaveformDisplay() { stopTimer(); }
 
 void WaveformDisplay::paint(juce::Graphics& g)
@@ -116,7 +116,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
     g.setColour(juce::Colour(0xFF0d0d1e)); g.fillRoundedRectangle(b,8);
 
-    const int N = OmnisphereSynthProcessor::kWaveSize;
+    const int N = SuperNovaPadProcessor::kWaveSize;
     const float mid = b.getCentreY();
     juce::Path path;
     for(int i=0;i<N;++i){
@@ -133,7 +133,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
 // LabelledKnob
 // ─────────────────────────────────────────────────────────────────────────────
 LabelledKnob::LabelledKnob(const juce::String& pid, const juce::String& lbl,
-                             OmnisphereSynthProcessor& proc, OmniLookAndFeel& laf)
+                             SuperNovaPadProcessor& proc, OmniLookAndFeel& laf)
 {
     slider.setSliderStyle(juce::Slider::RotaryVerticalDrag);
     slider.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);
@@ -158,9 +158,9 @@ void LabelledKnob::resized()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OmnisphereSynthEditor
+// SuperNovaPadEditor
 // ─────────────────────────────────────────────────────────────────────────────
-OmnisphereSynthEditor::OmnisphereSynthEditor(OmnisphereSynthProcessor& p)
+SuperNovaPadEditor::SuperNovaPadEditor(SuperNovaPadProcessor& p)
     : AudioProcessorEditor(&p), proc(p),
       presets(Presets::all()),
       xyPad(p.xyX, p.xyY, juce::Colour(0xFF8B5CF6)),
@@ -177,7 +177,7 @@ OmnisphereSynthEditor::OmnisphereSynthEditor(OmnisphereSynthProcessor& p)
     addAndMakeVisible(presetBox);
 
     // Title
-    titleLabel.setText("OMNISPHERE SYNTH",juce::dontSendNotification);
+    titleLabel.setText("SUPERNOVA PAD",juce::dontSendNotification);
     titleLabel.setFont(juce::Font(14,juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId,juce::Colours::white.withAlpha(0.7f));
     titleLabel.setJustificationType(juce::Justification::centredLeft);
@@ -239,9 +239,9 @@ OmnisphereSynthEditor::OmnisphereSynthEditor(OmnisphereSynthProcessor& p)
     updateForPreset(presets[p.currentPresetIndex]);
 }
 
-OmnisphereSynthEditor::~OmnisphereSynthEditor() { setLookAndFeel(nullptr); }
+SuperNovaPadEditor::~SuperNovaPadEditor() { setLookAndFeel(nullptr); }
 
-void OmnisphereSynthEditor::comboBoxChanged(juce::ComboBox* box)
+void SuperNovaPadEditor::comboBoxChanged(juce::ComboBox* box)
 {
     if(box == &presetBox){
         const int idx = presetBox.getSelectedId()-1;
@@ -250,7 +250,7 @@ void OmnisphereSynthEditor::comboBoxChanged(juce::ComboBox* box)
     }
 }
 
-void OmnisphereSynthEditor::updateForPreset(const SynthPreset& p)
+void SuperNovaPadEditor::updateForPreset(const SynthPreset& p)
 {
     laf.accentColour = p.color;
     xyPad.setAccentColour(p.color);
@@ -277,7 +277,7 @@ void OmnisphereSynthEditor::updateForPreset(const SynthPreset& p)
     repaint();
 }
 
-void OmnisphereSynthEditor::paint(juce::Graphics& g)
+void SuperNovaPadEditor::paint(juce::Graphics& g)
 {
     g.setGradientFill(juce::ColourGradient(
         juce::Colour(0xFF0f0f20),0,0,
@@ -288,7 +288,7 @@ void OmnisphereSynthEditor::paint(juce::Graphics& g)
     g.drawLine(448,50,448,float(kH-70),1);
 }
 
-void OmnisphereSynthEditor::resized()
+void SuperNovaPadEditor::resized()
 {
     const int padL=12,padT=50,xyW=428,xyH=390;
     const int ctrlX=458, ctrlW=kW-ctrlX-12;

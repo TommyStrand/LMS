@@ -6,7 +6,7 @@
 // Parameter layout
 // ─────────────────────────────────────────────────────────────────────────────
 juce::AudioProcessorValueTreeState::ParameterLayout
-OmnisphereSynthProcessor::createLayout()
+SuperNovaPadProcessor::createLayout()
 {
     using namespace juce;
     std::vector<std::unique_ptr<RangedAudioParameter>> p;
@@ -41,7 +41,7 @@ OmnisphereSynthProcessor::createLayout()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-OmnisphereSynthProcessor::OmnisphereSynthProcessor()
+SuperNovaPadProcessor::SuperNovaPadProcessor()
     : AudioProcessor (BusesProperties()
                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "State", createLayout())
@@ -63,10 +63,10 @@ OmnisphereSynthProcessor::OmnisphereSynthProcessor()
     synth.addSound (new OmniSound());
 }
 
-OmnisphereSynthProcessor::~OmnisphereSynthProcessor() {}
+SuperNovaPadProcessor::~SuperNovaPadProcessor() {}
 
 // ─────────────────────────────────────────────────────────────────────────────
-void OmnisphereSynthProcessor::loadPreset (int index)
+void SuperNovaPadProcessor::loadPreset (int index)
 {
     index = juce::jlimit (0, int (presets.size()) - 1, index);
     currentPresetIndex = index;
@@ -104,7 +104,7 @@ void OmnisphereSynthProcessor::loadPreset (int index)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-void OmnisphereSynthProcessor::prepareToPlay (double sr, int blockSize)
+void SuperNovaPadProcessor::prepareToPlay (double sr, int blockSize)
 {
     synth.setCurrentPlaybackSampleRate (sr);
 
@@ -134,9 +134,9 @@ void OmnisphereSynthProcessor::prepareToPlay (double sr, int blockSize)
     applyReverbParams();
 }
 
-void OmnisphereSynthProcessor::releaseResources() {}
+void SuperNovaPadProcessor::releaseResources() {}
 
-void OmnisphereSynthProcessor::applyReverbParams()
+void SuperNovaPadProcessor::applyReverbParams()
 {
     const float rev = *apvts.getRawParameterValue ("reverb");
     juce::dsp::Reverb::Parameters rp;
@@ -148,7 +148,7 @@ void OmnisphereSynthProcessor::applyReverbParams()
 // ─────────────────────────────────────────────────────────────────────────────
 // Granular pitch-shift (+1 oct) for shimmer
 // ─────────────────────────────────────────────────────────────────────────────
-float OmnisphereSynthProcessor::pitchShiftSample (int ch, float in)
+float SuperNovaPadProcessor::pitchShiftSample (int ch, float in)
 {
     shiftBuffer[ch][shiftWrite & (kShiftBuf - 1)] = in;
 
@@ -176,7 +176,7 @@ float OmnisphereSynthProcessor::pitchShiftSample (int ch, float in)
 // ─────────────────────────────────────────────────────────────────────────────
 // processBlock
 // ─────────────────────────────────────────────────────────────────────────────
-void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void SuperNovaPadProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -333,7 +333,7 @@ void OmnisphereSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-void OmnisphereSynthProcessor::getStateInformation (juce::MemoryBlock& data)
+void SuperNovaPadProcessor::getStateInformation (juce::MemoryBlock& data)
 {
     auto state = apvts.copyState();
     state.setProperty ("presetIndex", currentPresetIndex, nullptr);
@@ -341,7 +341,7 @@ void OmnisphereSynthProcessor::getStateInformation (juce::MemoryBlock& data)
     copyXmlToBinary (*xml, data);
 }
 
-void OmnisphereSynthProcessor::setStateInformation (const void* data, int size)
+void SuperNovaPadProcessor::setStateInformation (const void* data, int size)
 {
     std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, size));
     if (xml && xml->hasTagName (apvts.state.getType())) {
@@ -351,12 +351,12 @@ void OmnisphereSynthProcessor::setStateInformation (const void* data, int size)
     }
 }
 
-juce::AudioProcessorEditor* OmnisphereSynthProcessor::createEditor()
+juce::AudioProcessorEditor* SuperNovaPadProcessor::createEditor()
 {
-    return new OmnisphereSynthEditor (*this);
+    return new SuperNovaPadEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new OmnisphereSynthProcessor();
+    return new SuperNovaPadProcessor();
 }

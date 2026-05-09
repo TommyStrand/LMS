@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(OmnisphereSynth VERSION 1.0.0)
+project(SuperNovaPad VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 
 # Auto-fetch JUCE — no manual clone needed
@@ -11,7 +11,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_plugin(OmnisphereSynth
+juce_add_plugin(SuperNovaPad
     COMPANY_NAME            "TommyStrand"
     IS_SYNTH                TRUE
     NEEDS_MIDI_INPUT        TRUE
@@ -20,30 +20,30 @@ juce_add_plugin(OmnisphereSynth
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE TmSt
-    PLUGIN_CODE             OmSy
+    PLUGIN_CODE             SnPd
     FORMATS                 VST3 AU Standalone
-    PRODUCT_NAME            "OmnisphereSynth"
+    PRODUCT_NAME            "SuperNovaPad"
     VST3_CATEGORIES         Instrument Synth
 )
 
-juce_generate_juce_header(OmnisphereSynth)
+juce_generate_juce_header(SuperNovaPad)
 
-target_sources(OmnisphereSynth PRIVATE
+target_sources(SuperNovaPad PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/OmniVoice.cpp
 )
 
-target_include_directories(OmnisphereSynth PRIVATE Source/Effects)
+target_include_directories(SuperNovaPad PRIVATE Source/Effects)
 
-target_compile_definitions(OmnisphereSynth PUBLIC
+target_compile_definitions(SuperNovaPad PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
 )
 
-target_link_libraries(OmnisphereSynth
+target_link_libraries(SuperNovaPad
     PRIVATE
         juce::juce_audio_basics
         juce::juce_audio_devices

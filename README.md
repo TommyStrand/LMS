@@ -1,4 +1,4 @@
-# OmnisphereSynth
+# SuperNovaPad
 
 A polyphonic synthesizer in two forms: an **iOS touch app** and a **JUCE-based VST3 / AU / Standalone plugin** for macOS.
 
@@ -91,8 +91,8 @@ cd OmnisphereSynthVST
 ```
 
 Output in `dist/`:
-- `OmnisphereSynth-1.0.0.pkg` — installer with VST3 / AU / Standalone options
-- `OmnisphereSynth-1.0.0.dmg` — disk image ready to share
+- `SuperNovaPad-1.0.0.pkg` — installer with VST3 / AU / Standalone options
+- `SuperNovaPad-1.0.0.dmg` — disk image ready to share
 
 Install locations:
 

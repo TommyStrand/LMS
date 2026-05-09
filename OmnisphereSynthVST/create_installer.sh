@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# create_installer.sh — Build OmnisphereSynth and package a macOS .pkg + .dmg
+# create_installer.sh — Build SuperNovaPad and package a macOS .pkg + .dmg
 #
 # Usage:
 #   ./create_installer.sh              # build then package
@@ -7,13 +7,13 @@
 #   ./create_installer.sh --dmg-only   # skip build, create DMG from existing .pkg
 #
 # Outputs:
-#   dist/OmnisphereSynth-1.0.0.pkg
-#   dist/OmnisphereSynth-1.0.0.dmg
+#   dist/SuperNovaPad-1.0.0.pkg
+#   dist/SuperNovaPad-1.0.0.dmg
 
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-NAME="OmnisphereSynth"
+NAME="SuperNovaPad"
 VERSION="1.0.0"
 COMPANY="TommyStrand"
 BUILD_DIR="build"

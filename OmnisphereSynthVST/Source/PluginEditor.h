@@ -49,12 +49,12 @@ private:
 class WaveformDisplay : public juce::Component, private juce::Timer
 {
 public:
-    WaveformDisplay (OmnisphereSynthProcessor&);
+    WaveformDisplay (SuperNovaPadProcessor&);
     ~WaveformDisplay() override;
     void setAccentColour (juce::Colour c) { accent = c; }
     void paint (juce::Graphics&) override;
 private:
-    OmnisphereSynthProcessor& proc;
+    SuperNovaPadProcessor& proc;
     juce::Colour accent { 0xFF8B5CF6 };
     void timerCallback() override { repaint(); }
 };
@@ -66,7 +66,7 @@ class LabelledKnob : public juce::Component
 {
 public:
     LabelledKnob (const juce::String& paramID, const juce::String& labelText,
-                  OmnisphereSynthProcessor&, OmniLookAndFeel&);
+                  SuperNovaPadProcessor&, OmniLookAndFeel&);
     void resized() override;
     juce::Slider slider;
 private:
@@ -77,18 +77,18 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 // Main editor  —  820 × 580 px
 // ─────────────────────────────────────────────────────────────────────────────
-class OmnisphereSynthEditor : public juce::AudioProcessorEditor,
+class SuperNovaPadEditor : public juce::AudioProcessorEditor,
                                private juce::ComboBox::Listener
 {
 public:
-    OmnisphereSynthEditor (OmnisphereSynthProcessor&);
-    ~OmnisphereSynthEditor() override;
+    SuperNovaPadEditor (SuperNovaPadProcessor&);
+    ~SuperNovaPadEditor() override;
 
     void paint   (juce::Graphics&) override;
     void resized () override;
 
 private:
-    OmnisphereSynthProcessor& proc;
+    SuperNovaPadProcessor& proc;
     OmniLookAndFeel laf;
     std::vector<SynthPreset> presets;
 
@@ -124,5 +124,5 @@ private:
     void comboBoxChanged (juce::ComboBox*) override;
     void updateForPreset (const SynthPreset&);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OmnisphereSynthEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SuperNovaPadEditor)
 };
