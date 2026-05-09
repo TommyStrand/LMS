@@ -59,13 +59,28 @@ struct XYPadView: View {
                 .padding(12)
             }
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { _ in }
-            )
             .onAppear { animateGrid() }
-            .simultaneousGesture(
-                touchGesture(in: geo.size)
+            .overlay(
+                SimultaneousTouchGesture { events in
+                    for event in events {
+                        let loc = event.location
+                        let x = Float(loc.x / geo.size.width)
+                        let y = Float(1 - loc.y / geo.size.height)
+                        let noteIndex = Int(x * Float(notes.count - 1))
+                        let note = notes[max(0, min(noteIndex, notes.count - 1))]
+
+                        if event.phase == .began {
+                            activeTouches[event.id] = TouchPoint(id: event.id, location: loc, note: note, velocity: 0.7 + y * 0.3)
+                            engine.noteOn(touchID: event.id, note: note, velocity: 0.7 + y * 0.3, x: x, y: y)
+                        } else if event.phase == .moved {
+                            activeTouches[event.id]?.location = loc
+                            engine.updateTouch(touchID: event.id, x: x, y: y)
+                        } else if event.phase == .ended || event.phase == .cancelled {
+                            activeTouches.removeValue(forKey: event.id)
+                            engine.noteOff(touchID: event.id)
+                        }
+                    }
+                }
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -94,29 +109,6 @@ struct XYPadView: View {
                 path.addLine(to: CGPoint(x: canvasSize.width, y: y))
             }
             context.stroke(path, with: .color(.white.opacity(gridOpacity)), lineWidth: 0.5)
-        }
-    }
-
-    private func touchGesture(in size: CGSize) -> some Gesture {
-        SimultaneousTouchGesture { events in
-            for event in events {
-                let loc = event.location
-                let x = Float(loc.x / size.width)
-                let y = Float(1 - loc.y / size.height)
-                let noteIndex = Int(x * Float(notes.count - 1))
-                let note = notes[max(0, min(noteIndex, notes.count - 1))]
-
-                if event.phase == .began {
-                    activeTouches[event.id] = TouchPoint(id: event.id, location: loc, note: note, velocity: 0.7 + y * 0.3)
-                    engine.noteOn(touchID: event.id, note: note, velocity: 0.7 + y * 0.3, x: x, y: y)
-                } else if event.phase == .moved {
-                    activeTouches[event.id]?.location = loc
-                    engine.updateTouch(touchID: event.id, x: x, y: y)
-                } else if event.phase == .ended || event.phase == .cancelled {
-                    activeTouches.removeValue(forKey: event.id)
-                    engine.noteOff(touchID: event.id)
-                }
-            }
         }
     }
 
