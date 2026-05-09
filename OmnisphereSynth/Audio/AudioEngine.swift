@@ -66,6 +66,11 @@ final class AudioEngine: ObservableObject {
         timePitch.rate   = 1.0
         shimmerMixer.outputVolume = 0
 
+        // Headroom: each voice peaks near 1.0, so several stacked voices can
+        // clip the bus. Attenuating here prevents the clipping transients
+        // that the delay/reverb tail would otherwise expose as clicks.
+        voiceMixer.outputVolume = 0.55
+
         applyPreset(currentPreset)
         try? engine.start()
     }

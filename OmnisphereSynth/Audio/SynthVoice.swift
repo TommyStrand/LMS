@@ -16,6 +16,10 @@ final class SynthVoice: AnyVoice {
     private var lfoPhase: Double = 0
     private var noiseState: UInt32 = 1
 
+    // Long-press vibrato
+    private var noteAge:  Double = 0
+    private var vibPhase: Double = 0
+
     // Envelope state
     private var envStage: EnvStage = .idle
     private var envValue: Double = 0
@@ -53,9 +57,18 @@ final class SynthVoice: AnyVoice {
         if lfoPhase > 1 { lfoPhase -= 1 }
         let lfoVal = sin(lfoPhase * 2 * .pi) * Double(preset.lfoDepth * lfoDepthMod * 2)
 
-        // Frequency with detune + LFO pitch mod
-        var f1 = freq
-        var f2 = freq * pow(2.0, Double(preset.osc2Detune) / 12.0)
+        // Long-press vibrato — silent for the first 400 ms, then ramps in
+        // over another 400 ms. ~5.5 Hz, ±22 cents at full depth.
+        noteAge += dt
+        vibPhase += 5.5 * dt
+        if vibPhase > 1 { vibPhase -= 1 }
+        let vibRamp = max(0.0, min(1.0, (noteAge - 0.4) / 0.4))
+        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 22.0
+        let vibFactor = pow(2.0, vibCents / 1200.0)
+
+        // Frequency with detune + LFO pitch mod + vibrato
+        var f1 = freq * vibFactor
+        var f2 = freq * pow(2.0, Double(preset.osc2Detune) / 12.0) * vibFactor
         if preset.lfoTarget == .pitch {
             f1 *= pow(2.0, lfoVal / 12.0)
             f2 *= pow(2.0, lfoVal / 12.0)
@@ -108,23 +121,27 @@ final class SynthVoice: AnyVoice {
     }
 
     private func advanceEnvelope(dt: Double) -> Double {
+        // Anti-click: enforce minimum attack/release times so steep ADSR
+        // values can't produce sub-millisecond amplitude jumps.
+        let minAttack:  Double = 0.004    // 4 ms
+        let minRelease: Double = 0.012    // 12 ms
         switch envStage {
         case .idle:
             return 0
         case .attack:
-            let rate = preset.attack > 0 ? 1.0 / Double(preset.attack) : 1000.0
-            envValue = min(envValue + rate * dt, 1.0)
+            let a = max(Double(preset.attack), minAttack)
+            envValue = min(envValue + dt / a, 1.0)
             if envValue >= 1.0 { envStage = .decay; envTime = 0 }
         case .decay:
             let target = Double(preset.sustain)
-            let rate = preset.decay > 0 ? (1.0 - target) / Double(preset.decay) : 1000.0
-            envValue = max(envValue - rate * dt, target)
+            let d = max(Double(preset.decay), 0.005)
+            envValue = max(envValue - (1.0 - target) * dt / d, target)
             if envValue <= target { envStage = .sustain }
         case .sustain:
             envValue = Double(preset.sustain)
         case .release:
-            let rate = preset.release > 0 ? envValue / Double(preset.release) : 1000.0
-            envValue = max(envValue - rate * dt, 0.0)
+            let r = max(Double(preset.release), minRelease)
+            envValue = max(envValue - envValue * dt / r, 0.0)
             if envValue <= 0.0001 { envStage = .idle }
         }
         return envValue

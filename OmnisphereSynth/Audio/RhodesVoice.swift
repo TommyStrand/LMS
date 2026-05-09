@@ -24,6 +24,10 @@ final class RhodesVoice: AnyVoice {
     // Tremolo
     private var tremoloPhase: Double = 0
 
+    // Long-press vibrato
+    private var noteAge:  Double = 0
+    private var vibPhase: Double = 0
+
     // Key-gated envelope (fast attack, instant release)
     private enum EnvStage { case idle, attack, sustain, release }
     private var envStage: EnvStage = .idle
@@ -53,12 +57,20 @@ final class RhodesVoice: AnyVoice {
         // Kick voice to release when natural decay finishes
         if decayEnv < 0.0001 && envStage == .sustain { envStage = .release }
 
+        // Long-press vibrato (~5.5 Hz, ±18 cents, ramps in 0.4–0.8s)
+        noteAge  += dt
+        vibPhase += 5.5 * dt
+        if vibPhase > 1 { vibPhase -= 1 }
+        let vibRamp  = max(0.0, min(1.0, (noteAge - 0.4) / 0.4))
+        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 18.0
+        let vibFreq  = freq * pow(2.0, vibCents / 1200.0)
+
         // FM: modulator at carrier + 0.5 Hz (slight inharmonicity)
-        modPhase = (modPhase + (freq + 0.5) * dt).truncatingRemainder(dividingBy: 1.0)
+        modPhase = (modPhase + (vibFreq + 0.5) * dt).truncatingRemainder(dividingBy: 1.0)
         let modIdx = Double(velocity) * 1.6 * decayEnv    // velocity-sensitive brightness
         let modSig = sin(modPhase * 2 * .pi) * modIdx
 
-        carPhase = (carPhase + freq * dt).truncatingRemainder(dividingBy: 1.0)
+        carPhase = (carPhase + vibFreq * dt).truncatingRemainder(dividingBy: 1.0)
         var out = sin(carPhase * 2 * .pi + modSig)
 
         // Tremolo (~5 Hz, depth from lfoDepthMod)
@@ -76,7 +88,7 @@ final class RhodesVoice: AnyVoice {
         switch envStage {
         case .idle:    return 0
         case .attack:
-            envValue = min(envValue + dt / 0.002, 1.0)
+            envValue = min(envValue + dt / 0.004, 1.0)   // 4 ms anti-click ramp
             if envValue >= 1.0 { envStage = .sustain }
         case .sustain: envValue = 1.0
         case .release:

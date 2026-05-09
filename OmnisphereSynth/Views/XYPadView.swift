@@ -62,8 +62,9 @@ struct XYPadView: View {
                         let loc = event.location
                         let x   = Float(loc.x / geo.size.width)
                         let y   = Float(1 - loc.y / geo.size.height)
-                        let ni  = Int(x * Float(currentNotes.count - 1))
-                        let note = currentNotes[max(0, min(ni, currentNotes.count - 1))]
+                        let ni  = max(0, min(currentNotes.count - 1,
+                                              Int(x * Float(currentNotes.count))))
+                        let note = currentNotes[ni]
                         switch event.phase {
                         case .began:
                             activeTouches[event.id] = TouchPoint(id: event.id, location: loc,
@@ -112,8 +113,10 @@ struct XYPadView: View {
     // MARK: Grid
 
     private func gridOverlay(size: CGSize, theme: AppTheme, accent: Color) -> some View {
-        Canvas { context, _ in
-            let cols = 8, rows = 6
+        let noteCount = max(1, notes.count)
+        return Canvas { context, _ in
+            let cols = noteCount
+            let rows = 6
             let colW = size.width  / CGFloat(cols)
             let rowH = size.height / CGFloat(rows)
             var path = Path()
@@ -128,6 +131,19 @@ struct XYPadView: View {
                 path.addLine(to: CGPoint(x: size.width, y: y))
             }
             context.stroke(path, with: .color(accent.opacity(gridOpacity)), lineWidth: 0.6)
+
+            // Octave markers — draw heavier line at scale-octave boundaries
+            let intervalsPerOct = max(1, themeManager.scale.intervals.count)
+            var octPath = Path()
+            var i = intervalsPerOct
+            while i < cols {
+                let x = colW * CGFloat(i)
+                octPath.move(to: CGPoint(x: x, y: 0))
+                octPath.addLine(to: CGPoint(x: x, y: size.height))
+                i += intervalsPerOct
+            }
+            context.stroke(octPath, with: .color(accent.opacity(gridOpacity * 1.8)),
+                           lineWidth: 1.2)
         }
     }
 
