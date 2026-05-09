@@ -99,9 +99,9 @@ final class HammondVoice: AnyVoice {
         // Write to Leslie buffer
         leslieBuffer[leslieWrite & (lesliBufSize - 1)] = mono
 
-        let angle = hornPhase * 2 * Float.pi
-        let dA = Float(8 * (1 + sin(Double(angle))))
-        let dB = Float(8 * (1 + cos(Double(angle))))
+        let angle = hornPhase * 2 * Double.pi
+        let dA = Float(8 * (1 + sin(angle)))
+        let dB = Float(8 * (1 + cos(angle)))
 
         func readAt(_ delay: Float) -> Float {
             var rp = Float(leslieWrite) - delay - 1
@@ -112,8 +112,8 @@ final class HammondVoice: AnyVoice {
             return leslieBuffer[i0] * (1 - fr) + leslieBuffer[i1] * fr
         }
 
-        let amL = 0.72 + 0.28 * sin(Double(angle))
-        let amR = 0.72 + 0.28 * cos(Double(angle))
+        let amL = 0.72 + 0.28 * sin(angle)
+        let amR = 0.72 + 0.28 * cos(angle)
 
         leslieWrite = (leslieWrite + 1) & (lesliBufSize - 1)
         return (readAt(dA) * Float(amL), readAt(dB) * Float(amR))
