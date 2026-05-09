@@ -107,22 +107,19 @@ struct PianoKeyboardView: View {
                             let note = noteAt(loc, geo: geo)
                             touchToNote[event.id] = note
                             pressedKeys.insert(note)
-                            let vel: Float = 0.8
-                            engine.noteOn(touchID: event.id, note: note, velocity: vel,
+                            engine.noteOn(touchID: event.id, note: note, velocity: 0.85,
                                           x: Float(loc.x / geo.size.width),
                                           y: Float(1 - loc.y / geo.size.height))
                         case .moved:
-                            // Slide between keys
-                            let note = noteAt(loc, geo: geo)
-                            if let prev = touchToNote[event.id], prev != note {
-                                engine.noteOff(touchID: event.id)
-                                pressedKeys.remove(prev)
-                                touchToNote[event.id] = note
-                                pressedKeys.insert(note)
-                                engine.noteOn(touchID: event.id, note: note, velocity: 0.8,
-                                              x: Float(loc.x / geo.size.width),
-                                              y: Float(1 - loc.y / geo.size.height))
-                            }
+                            // Pass continuous X/Y for filter/mod, but DO NOT
+                            // retrigger on key changes — sliding to a new key
+                            // was thrashing noteOff/noteOn on the same touchID
+                            // (where the noteOn guard then silently dropped the
+                            // new note) and producing audible ticking through
+                            // the delay tail.
+                            engine.updateTouch(touchID: event.id,
+                                               x: Float(loc.x / geo.size.width),
+                                               y: Float(1 - loc.y / geo.size.height))
                         default:
                             if let note = touchToNote[event.id] {
                                 pressedKeys.remove(note)

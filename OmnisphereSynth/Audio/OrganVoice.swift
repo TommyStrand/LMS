@@ -28,6 +28,7 @@ final class OrganVoice: AnyVoice {
     // Key click: brief noise burst on attack
     private var clickSamplesLeft: Int
     private var noiseState: UInt32 = 98765
+    private var clickLpf:   Double = 0
 
     // Per-partial slight detuning for warmth (cents)
     private static let detuneOffsets: [Double] = [0, 0, 1.2, -0.8, 0.5, -1.1, 0.9, -0.6, 0.3]
@@ -58,15 +59,18 @@ final class OrganVoice: AnyVoice {
         let tremAmp = Double(tremulantDepth * Float(lfoDepthMod) * 2.0)
         let tremVal = sin(tremPhase * 2 * .pi) * tremAmp * 0.04
 
-        // Key click
+        // Key click — softer + lowpassed so rapid retriggers don't dump
+        // high-frequency transients into the reverb/delay tail.
         var click: Double = 0
         if clickSamplesLeft > 0 {
             noiseState = noiseState &* 1664525 &+ 1013904223
             let n = Double(Int32(bitPattern: noiseState)) / Double(Int32.max)
             let clickEnv = Double(clickSamplesLeft) / (sampleRate * 0.012)
-            click = n * clickEnv * 0.06
+            click = n * clickEnv * 0.03
             clickSamplesLeft -= 1
         }
+        clickLpf = clickLpf * 0.7 + click * 0.3
+        click = clickLpf
 
         // Sum drawbar partials
         var sum: Double = 0

@@ -39,6 +39,7 @@ final class HammondVoice: AnyVoice {
     private var envValue: Double   = 0
 
     private var noiseState: UInt32 = 44444
+    private var clickLpf:   Double = 0   // smooths the key-click noise
 
     init(note: Int, velocity: Float, sampleRate: Double) {
         self.freq       = 440.0 * pow(2.0, Double(note - 69) / 12.0)
@@ -78,14 +79,18 @@ final class HammondVoice: AnyVoice {
         percEnv   = max(0, percEnv - dt / 0.04)
         sum      += sin(percPhase * 2 * .pi) * percEnv * 0.35
 
-        // Key click
+        // Key click — softer + lowpassed so a flurry of note-ons doesn't
+        // pile high-frequency transients into the reverb/delay tail.
         var click: Double = 0
         if clickLeft > 0 {
             noiseState = noiseState &* 1664525 &+ 1013904223
             let n = Double(Int32(bitPattern: noiseState)) / Double(Int32.max)
-            click = n * (Double(clickLeft) / (sampleRate * 0.012)) * 0.07
+            click = n * (Double(clickLeft) / (sampleRate * 0.012)) * 0.035
             clickLeft -= 1
         }
+        // One-pole LPF on the click only (≈2.5 kHz)
+        clickLpf = clickLpf * 0.7 + click * 0.3
+        click = clickLpf
 
         let env = advanceEnv(dt: dt)
         let mono = Float((sum + click) * env * Double(velocity) * 0.55)
