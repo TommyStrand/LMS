@@ -27,6 +27,9 @@
 		A1000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000014 /* Assets.xcassets */; };
 		A1000013 /* PianoKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015 /* PianoKeyboardView.swift */; };
 		A1000014 /* MIDIController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017 /* MIDIController.swift */; };
+		A1000015 /* DrumEngine.swift in Sources */    = {isa = PBXBuildFile; fileRef = A2000018 /* DrumEngine.swift */; };
+		A1000016 /* DrumPatterns.swift in Sources */  = {isa = PBXBuildFile; fileRef = A2000019 /* DrumPatterns.swift */; };
+		A1000017 /* DrumMachineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* DrumMachineView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,7 +55,10 @@
 		A2000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000015 /* PianoKeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PianoKeyboardView.swift; sourceTree = "<group>"; };
 		A2000016 /* SuperNovaPad.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SuperNovaPad.entitlements; sourceTree = "<group>"; };
-		A2000017 /* MIDIController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIController.swift; sourceTree = "<group>"; };
+		A2000017 /* MIDIController.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIController.swift;   sourceTree = "<group>"; };
+		A2000018 /* DrumEngine.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumEngine.swift;       sourceTree = "<group>"; };
+		A2000019 /* DrumPatterns.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumPatterns.swift;     sourceTree = "<group>"; };
+		A2000020 /* DrumMachineView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumMachineView.swift;  sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +99,7 @@
 				A2000010 /* RhodesVoice.swift */,
 				A2000011 /* EffectsProcessor.swift */,
 				A2000017 /* MIDIController.swift */,
+				A2000018 /* DrumEngine.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -106,6 +113,7 @@
 				A2000009 /* ControlsView.swift */,
 				A2000013 /* SettingsView.swift */,
 				A2000015 /* PianoKeyboardView.swift */,
+				A2000020 /* DrumMachineView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -115,6 +123,7 @@
 			children = (
 				A2000005 /* SynthPreset.swift */,
 				A2000012 /* AppTheme.swift */,
+				A2000019 /* DrumPatterns.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -224,6 +233,9 @@
 				A1000011 /* SettingsView.swift in Sources */,
 				A1000013 /* PianoKeyboardView.swift in Sources */,
 				A1000014 /* MIDIController.swift in Sources */,
+				A1000015 /* DrumEngine.swift in Sources */,
+				A1000016 /* DrumPatterns.swift in Sources */,
+				A1000017 /* DrumMachineView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

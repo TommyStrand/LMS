@@ -4,10 +4,12 @@ struct ContentView: View {
     @StateObject private var engine: AudioEngine
     @StateObject private var themeManager: ThemeManager
     @StateObject private var midi: MIDIController
+    @StateObject private var drum = DrumEngine()
     @State private var selectedPresetIndex = 0
     @State private var showControls  = true
     @State private var showSettings  = false
     @State private var midiActivityLit = false
+    @State private var showDrumMachine = false
 
     init() {
         let e = AudioEngine()
@@ -53,7 +55,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private func playSurface(preset: SynthPreset) -> some View {
-        if themeManager.playMode == .keyboard {
+        if showDrumMachine {
+            DrumMachineView(drum: drum)
+        } else if themeManager.playMode == .keyboard {
             PianoKeyboardView(engine: engine, preset: preset)
         } else {
             XYPadView(engine: engine, preset: preset)
@@ -212,13 +216,22 @@ struct ContentView: View {
                 )
             }
 
-            // Play mode toggle
-            iconButton(systemName: themeManager.playMode == .grid ? "square.grid.3x3" : "pianokeys",
-                       active: false, theme: theme) {
-                withAnimation(.spring(response: 0.3)) {
-                    themeManager.selectPlayMode(themeManager.playMode == .grid ? .keyboard : .grid)
-                }
+            // Drum machine toggle
+            iconButton(systemName: "waveform.circle\(showDrumMachine ? ".fill" : "")",
+                       active: showDrumMachine, theme: theme) {
+                withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+
+            // Play mode toggle (hidden while drum machine is active)
+            if !showDrumMachine {
+                iconButton(systemName: themeManager.playMode == .grid ? "square.grid.3x3" : "pianokeys",
+                           active: false, theme: theme) {
+                    withAnimation(.spring(response: 0.3)) {
+                        themeManager.selectPlayMode(themeManager.playMode == .grid ? .keyboard : .grid)
+                    }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
             }
 
             // Controls toggle
