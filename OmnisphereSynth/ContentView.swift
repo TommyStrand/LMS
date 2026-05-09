@@ -5,11 +5,14 @@ struct ContentView: View {
     @StateObject private var themeManager: ThemeManager
     @StateObject private var midi: MIDIController
     @StateObject private var drum = DrumEngine()
+    @StateObject private var recorder = AudioRecorder()
     @State private var selectedPresetIndex = 0
-    @State private var showControls  = true
-    @State private var showSettings  = false
+    @State private var showControls    = true
+    @State private var showSettings    = false
     @State private var midiActivityLit = false
     @State private var showDrumMachine = false
+    @State private var showShareSheet  = false
+    @State private var recBlink        = false
 
     init() {
         let e = AudioEngine()
@@ -43,10 +46,27 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(themeManager)
         }
+        .sheet(isPresented: $showShareSheet, onDismiss: { recorder.exportURL = nil }) {
+            if let url = recorder.exportURL {
+                ShareSheet(url: url)
+            }
+        }
         .onChange(of: midi.activityPulse) { _ in
             midiActivityLit = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 midiActivityLit = false
+            }
+        }
+        .onChange(of: recorder.exportURL) { url in
+            if url != nil { showShareSheet = true }
+        }
+        .onChange(of: recorder.isRecording) { recording in
+            if recording {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    recBlink = true
+                }
+            } else {
+                withAnimation(.default) { recBlink = false }
             }
         }
     }
@@ -240,6 +260,9 @@ struct ContentView: View {
                 withAnimation(.spring(response: 0.3)) { showControls.toggle() }
             }
 
+            // Record / export
+            recordButton(theme: theme, accent: accent)
+
             // Settings
             iconButton(systemName: "gearshape", active: false, theme: theme) {
                 showSettings = true
@@ -266,6 +289,51 @@ struct ContentView: View {
                 )
         }
     }
+
+    @ViewBuilder
+    private func recordButton(theme: AppTheme, accent: Color) -> some View {
+        let recColor = Color.red
+        Button {
+            if recorder.isRecording {
+                recorder.stopRecording()
+            } else {
+                recorder.startRecording(synthEngine: engine.avEngine, drumEngine: drum.avEngine)
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                    .fill(theme.panelBackground)
+                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                    .strokeBorder(recorder.isRecording
+                                  ? recColor.opacity(recBlink ? 0.9 : 0.3)
+                                  : theme.panelBorder, lineWidth: 1)
+                if recorder.isExporting {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(theme.secondaryText)
+                } else {
+                    Image(systemName: recorder.isRecording ? "stop.circle.fill" : "record.circle")
+                        .font(.system(size: 17))
+                        .foregroundColor(recorder.isRecording
+                                         ? recColor.opacity(recBlink ? 1.0 : 0.5)
+                                         : theme.secondaryText)
+                }
+            }
+            .frame(width: 36, height: 36)
+        }
+        .disabled(recorder.isExporting)
+    }
+}
+
+// MARK: - Share sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ uivc: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Scanlines

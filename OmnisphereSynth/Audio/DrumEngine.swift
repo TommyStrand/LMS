@@ -143,6 +143,7 @@ final class DrumEngine: ObservableObject {
     // MARK: Audio graph
 
     private let audioEngine = AVAudioEngine()
+    var avEngine: AVAudioEngine { audioEngine }
     private let delayNode   = AVAudioUnitDelay()
     private let reverbNode  = AVAudioUnitReverb()
     private var sourceNode: AVAudioSourceNode!

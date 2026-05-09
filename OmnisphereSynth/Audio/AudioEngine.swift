@@ -4,6 +4,7 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Nodes
     private let engine        = AVAudioEngine()
+    var avEngine: AVAudioEngine { engine }
     private let voiceMixer    = AVAudioMixerNode()
     private let reverb        = AVAudioUnitReverb()
     private let delay         = AVAudioUnitDelay()
