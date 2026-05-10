@@ -84,6 +84,7 @@ final class DrumEngine: ObservableObject {
     private var _pattern:        DrumPattern = DrumPattern.all[0]
     private var renderIsPlaying: Bool   = false
     private var beatCounter:     Int    = 0
+    private var shuffleBag:      [Int]  = []
 
     // MARK: Init
 
@@ -111,6 +112,22 @@ final class DrumEngine: ObservableObject {
     }
 
     func togglePlay() { isPlaying ? stop() : play() }
+
+    func randomize() {
+        // Shuffle-bag: refill when empty so every pattern plays before any repeats
+        if shuffleBag.isEmpty {
+            shuffleBag = Array(0..<DrumPattern.all.count).shuffled()
+        }
+        // Skip the current pattern if it happens to be next in the bag
+        if shuffleBag.count > 1 && shuffleBag.last == patternIndex {
+            let last = shuffleBag.removeLast()
+            let next = shuffleBag.removeLast()
+            shuffleBag.append(last)
+            patternIndex = next
+        } else {
+            patternIndex = shuffleBag.removeLast()
+        }
+    }
 
     // MARK: Sample loading
 

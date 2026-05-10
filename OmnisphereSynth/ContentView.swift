@@ -4,8 +4,9 @@ struct ContentView: View {
     @StateObject private var engine: AudioEngine
     @StateObject private var themeManager: ThemeManager
     @StateObject private var midi: MIDIController
-    @StateObject private var drum = DrumEngine()
-    @StateObject private var recorder = AudioRecorder()
+    @StateObject private var drum      = DrumEngine()
+    @StateObject private var favorites = FavoritesStore()
+    @StateObject private var recorder  = AudioRecorder()
     @State private var selectedPresetIndex = 0
     @State private var showControls    = true
     @State private var showSettings    = false
@@ -76,7 +77,7 @@ struct ContentView: View {
     @ViewBuilder
     private func playSurface(preset: SynthPreset) -> some View {
         if showDrumMachine {
-            DrumMachineView(drum: drum)
+            DrumMachineView(drum: drum, favorites: favorites)
         } else if themeManager.playMode == .keyboard {
             PianoKeyboardView(engine: engine, preset: preset)
         } else {
@@ -237,7 +238,7 @@ struct ContentView: View {
             }
 
             // Drum machine toggle
-            iconButton(systemName: "waveform.circle\(showDrumMachine ? ".fill" : "")",
+            iconButton(systemName: "drum\(showDrumMachine ? ".fill" : "")",
                        active: showDrumMachine, theme: theme) {
                 withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
