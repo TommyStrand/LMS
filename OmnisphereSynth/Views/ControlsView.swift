@@ -220,8 +220,19 @@ struct TextureRow: View {
                 KnobView(label: "GRIT", value: preset.gritAmount, color: color) { v in
                     engine.setGrit(v)
                 }
+            }
+            HStack(spacing: 12) {
                 KnobView(label: "BLOOM", value: preset.bloomAmount, color: color) { v in
                     engine.setBloom(v)
+                }
+                KnobView(label: "PHASER", value: preset.phaserAmount, color: color) { v in
+                    engine.setPhaser(v)
+                }
+                KnobView(label: "A.WAH", value: preset.autoWahAmount, color: color) { v in
+                    engine.setAutoWah(v)
+                }
+                KnobView(label: "WAVER", value: preset.modDelayAmount, color: color) { v in
+                    engine.setModDelay(v)
                 }
             }
         }

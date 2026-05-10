@@ -20,6 +20,14 @@ final class AudioEngine: ObservableObject {
     private var grit       = GritProcessor()
     private var tape       = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
     private var bloom      = BloomReverbProcessor(sampleRate: 44100)
+    // L/R phaser with 180° offset so the notches sweep in opposite directions
+    private var phaser     = (PhaserProcessor(sampleRate: 44100),
+                              PhaserProcessor(sampleRate: 44100, lfoPhaseOffset: 0.5))
+    private var autoWah    = (AutoWahProcessor(sampleRate: 44100),
+                              AutoWahProcessor(sampleRate: 44100))
+    // Slightly different LFO rates give natural stereo movement in the delay
+    private var modDelay   = (ModulatingDelayProcessor(sampleRate: 44100, lfoRate: 0.33),
+                              ModulatingDelayProcessor(sampleRate: 44100, lfoRate: 0.37))
 
     // MARK: - State
     private(set) var voices: [Int: any AnyVoice] = [:]
@@ -106,6 +114,9 @@ final class AudioEngine: ObservableObject {
     func setBrokenTape(_ v: Float) { currentPreset.brokenTape = v }
     func setGrit(_ v: Float)       { currentPreset.gritAmount = v }
     func setBloom(_ v: Float)      { currentPreset.bloomAmount = v }
+    func setPhaser(_ v: Float)     { currentPreset.phaserAmount = v }
+    func setAutoWah(_ v: Float)    { currentPreset.autoWahAmount = v }
+    func setModDelay(_ v: Float)   { currentPreset.modDelayAmount = v }
 
     // MARK: - Touch Events
 
@@ -142,11 +153,14 @@ final class AudioEngine: ObservableObject {
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
 
         // Capture by value/ref so render block reads consistent params
-        let lofiRef       = lofi
-        let spaceEchoRef  = spaceEcho
-        let gritRef       = grit
-        let tapeRef       = tape
-        let bloomRef      = bloom
+        let lofiRef      = lofi
+        let spaceEchoRef = spaceEcho
+        let gritRef      = grit
+        let tapeRef      = tape
+        let bloomRef     = bloom
+        let phaserRef    = phaser
+        let autoWahRef   = autoWah
+        let modDelayRef  = modDelay
 
         let node = AVAudioSourceNode(format: format) { [weak self, weak voice, weak mod] _, _, frameCount, audioBufferList in
             guard let self, let voice else { return noErr }
@@ -158,7 +172,12 @@ final class AudioEngine: ObservableObject {
             for i in 0..<Int(frameCount) {
                 var (l, r) = voice.nextStereoSample()
 
-                // Grit (mono before doubler)
+                // Auto-Wah (before grit: envelope filter shapes voice before distortion)
+                let awAmt = preset.autoWahAmount
+                l = autoWahRef.0.process(l, amount: awAmt)
+                r = autoWahRef.1.process(r, amount: awAmt)
+
+                // Grit
                 let gAmt = preset.gritAmount
                 l = gritRef.process(l, amount: gAmt)
                 r = gritRef.process(r, amount: gAmt)
@@ -191,10 +210,20 @@ final class AudioEngine: ObservableObject {
                     l = ml; r = mr
                 }
 
-                // Warm tube overdrive (replaces the old AVAudioUnitDistortion)
+                // Warm tube overdrive
                 let drive = preset.distortionAmount
                 l = tubeSaturate(l, drive: drive)
                 r = tubeSaturate(r, drive: drive)
+
+                // Phaser (after saturation: sweeps the harmonically-rich tone)
+                let phAmt = preset.phaserAmount
+                l = phaserRef.0.process(l, amount: phAmt)
+                r = phaserRef.1.process(r, amount: phAmt)
+
+                // Modulating Delay (last in chain: warps the full processed signal)
+                let mdAmt = preset.modDelayAmount
+                l = modDelayRef.0.process(l, amount: mdAmt)
+                r = modDelayRef.1.process(r, amount: mdAmt)
 
                 left[i]  = l
                 right[i] = r

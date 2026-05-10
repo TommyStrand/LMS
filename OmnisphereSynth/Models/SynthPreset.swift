@@ -47,6 +47,9 @@ struct SynthPreset: Identifiable, Equatable {
     var brokenTape:    Float
     var gritAmount:    Float
     var bloomAmount:   Float
+    var phaserAmount:  Float
+    var autoWahAmount: Float
+    var modDelayAmount: Float
 
     // Preset chip icon style
     var iconStyle: IconStyle
@@ -92,6 +95,9 @@ struct SynthPreset: Identifiable, Equatable {
         brokenTape: Float = 0,
         gritAmount: Float = 0,
         bloomAmount: Float = 0,
+        phaserAmount: Float = 0,
+        autoWahAmount: Float = 0,
+        modDelayAmount: Float = 0,
         iconStyle: IconStyle = .mysticWave
     ) {
         self.name = name; self.color = color
@@ -112,6 +118,9 @@ struct SynthPreset: Identifiable, Equatable {
         self.brokenTape = brokenTape
         self.gritAmount = gritAmount
         self.bloomAmount = bloomAmount
+        self.phaserAmount = phaserAmount
+        self.autoWahAmount = autoWahAmount
+        self.modDelayAmount = modDelayAmount
         self.iconStyle = iconStyle
     }
 

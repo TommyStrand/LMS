@@ -260,6 +260,134 @@ final class ModulationProcessor {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phaser: 4 first-order all-pass stages with LFO-swept center frequency.
+// Feedback around the all-pass chain adds resonant notch depth.
+// L and R use 180° offset LFO phases for stereo width.
+// ─────────────────────────────────────────────────────────────────────────────
+final class PhaserProcessor {
+    private var lfoPhase: Double
+    private let sampleRate: Float
+    private var stateX: [Float] = [0, 0, 0, 0]
+    private var stateY: [Float] = [0, 0, 0, 0]
+    private var feedbackSample: Float = 0
+
+    init(sampleRate: Double, lfoPhaseOffset: Double = 0) {
+        self.sampleRate = Float(sampleRate)
+        self.lfoPhase   = lfoPhaseOffset
+    }
+
+    func process(_ input: Float, amount: Float) -> Float {
+        guard amount > 0.005 else { return input }
+        lfoPhase += 0.5 / Double(sampleRate)
+        if lfoPhase >= 1.0 { lfoPhase -= 1.0 }
+
+        let lfo = Float(0.5 + 0.5 * sin(lfoPhase * 2 * .pi))
+        let fc  = 300.0 + lfo * 1700.0
+        let w   = tanf(Float.pi * fc / sampleRate)
+        let a   = (1.0 - w) / (1.0 + w)
+
+        var x = input + feedbackSample * amount * 0.35
+        for i in 0..<4 {
+            let y = a * (x - stateY[i]) + stateX[i]
+            stateX[i] = x; stateY[i] = y
+            x = y
+        }
+        feedbackSample = x
+        return input * (1.0 - amount * 0.5) + x * (amount * 0.5)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Wah: envelope follower drives a resonant bandpass filter.
+// Playing harder opens the filter higher — classic wah/funk character.
+// ─────────────────────────────────────────────────────────────────────────────
+final class AutoWahProcessor {
+    private let sampleRate: Float
+    private var envelope: Float = 0
+    private var bq_x1: Float = 0, bq_x2: Float = 0
+    private var bq_y1: Float = 0, bq_y2: Float = 0
+
+    init(sampleRate: Double) { self.sampleRate = Float(sampleRate) }
+
+    func process(_ input: Float, amount: Float) -> Float {
+        guard amount > 0.005 else { return input }
+
+        let absIn = abs(input)
+        let atk = Float(1.0 / (0.005 * Double(sampleRate)))
+        let rel = Float(1.0 / (0.12  * Double(sampleRate)))
+        envelope = absIn > envelope
+            ? envelope + (absIn - envelope) * atk
+            : max(envelope - envelope * rel, 0)
+
+        let fc = 250.0 + envelope * amount * 3750.0
+        let q  = 2.5 + amount * 3.0
+        let filtered = bandpass(input, cutoff: fc, q: q)
+        return input * (1.0 - amount * 0.75) + filtered * amount * 0.75
+    }
+
+    private func bandpass(_ input: Float, cutoff: Float, q: Float) -> Float {
+        let w0    = 2.0 * Float.pi * cutoff / sampleRate
+        let sinW  = sinf(w0), cosW = cosf(w0)
+        let alpha = sinW / (2.0 * q)
+        let b0    =  sinW * 0.5
+        let b2    = -sinW * 0.5
+        let a0    =  1.0 + alpha
+        let a1    = -2.0 * cosW
+        let a2    =  1.0 - alpha
+        let y = (b0/a0)*input + (b2/a0)*bq_x2
+              - (a1/a0)*bq_y1 - (a2/a0)*bq_y2
+        bq_x2 = bq_x1; bq_x1 = input
+        bq_y2 = bq_y1; bq_y1 = y
+        return y
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modulating Delay: delay line with LFO-swept read position.
+// Creates analog-delay wobble — pitch gently warps in the feedback tail.
+// L and R use slightly different LFO rates for natural stereo movement.
+// ─────────────────────────────────────────────────────────────────────────────
+final class ModulatingDelayProcessor {
+    private let bufSize = 65536
+    private var buf: [Float]
+    private var writePos = 0
+    private var lfoPhase: Double
+    private var lpState:  Float  = 0
+    private let sampleRate: Float
+    private let lfoRate:    Double
+
+    init(sampleRate: Double, lfoRate: Double = 0.35) {
+        self.sampleRate = Float(sampleRate)
+        self.lfoRate    = lfoRate
+        self.lfoPhase   = Double.random(in: 0...1)
+        buf = Array(repeating: 0, count: 65536)
+    }
+
+    func process(_ input: Float, amount: Float) -> Float {
+        guard amount > 0.005 else { return input }
+        lfoPhase += lfoRate / Double(sampleRate)
+        if lfoPhase >= 1.0 { lfoPhase -= 1.0 }
+        let lfo = Float(sin(lfoPhase * 2 * .pi))
+
+        let baseDelay = 0.27 * sampleRate
+        let modDepth  = amount * 35.0 * sampleRate / 1000.0
+        let delayTime = max(4, baseDelay + lfo * modDepth)
+
+        var rpos = Float(writePos) - delayTime
+        if rpos < 0 { rpos += Float(bufSize) }
+        let i0 = Int(rpos) & (bufSize - 1)
+        let i1 = (i0 + 1) & (bufSize - 1)
+        let fr = rpos - rpos.rounded(.down)
+        let delayed = buf[i0] * (1 - fr) + buf[i1] * fr
+
+        lpState = lpState * 0.72 + delayed * 0.28
+        buf[writePos & (bufSize - 1)] = input + lpState * 0.45 * amount
+        writePos = (writePos + 1) & (bufSize - 1)
+        return input * (1.0 - amount * 0.35) + delayed * amount * 0.80
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tube saturation: warm tanh-based overdrive (no harsh clipping)
 // Slight asymmetric bias adds even-harmonic warmth like a class-A tube stage.
 // ─────────────────────────────────────────────────────────────────────────────
