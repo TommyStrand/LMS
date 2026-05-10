@@ -71,6 +71,10 @@ final class DrumEngine: ObservableObject {
     private var sampleBuffers: [DrumVoiceID: [AVAudioPCMBuffer]] = [:]
     private var rrIndex: [Int] = Array(repeating: 0, count: DrumVoiceID.allCases.count)
 
+    // Lowercased filename (no extension) → URL, built by scanning the entire bundle tree.
+    // Handles both flat resources and folder-reference subdirectories added in Xcode.
+    private var bundleWavMap: [String: URL] = [:]
+
     // MARK: Render-thread state
 
     private var voicePool:       [SampleVoice?] = Array(repeating: nil, count: 32)
@@ -110,7 +114,25 @@ final class DrumEngine: ObservableObject {
 
     // MARK: Sample loading
 
+    private func buildBundleWavMap() {
+        guard let enumerator = FileManager.default.enumerator(
+            at: Bundle.main.bundleURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for case let url as URL in enumerator where url.pathExtension.lowercased() == "wav" {
+            bundleWavMap[url.deletingPathExtension().lastPathComponent.lowercased()] = url
+        }
+
+        print("DrumEngine: \(bundleWavMap.count) .wav files found in bundle")
+        if bundleWavMap.isEmpty {
+            print("DrumEngine: ⚠️  no WAV files found — add MusicRadar samples to the Xcode target")
+        }
+    }
+
     private func loadSamples() {
+        buildBundleWavMap()
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
 
         // Each tuple: (voice, [bundle resource names without extension])
@@ -153,7 +175,7 @@ final class DrumEngine: ObservableObject {
     }
 
     private func loadSample(name: String, targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else {
+        guard let url = bundleWavMap[name.lowercased()] else {
             print("DrumEngine: missing \(name).wav")
             return nil
         }
