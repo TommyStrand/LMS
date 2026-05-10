@@ -22,25 +22,29 @@ Touch the pad to play. Each finger is an independent voice. Slide horizontally t
 | Void Walker | Noise + sawtooth subtractive | Evolving texture |
 | Solar Wind | Sawtooth + triangle subtractive | Moving filter sweep |
 
-### Texture Effects
+### Effects Chain
 
 Applied per-sample in this order:
 
 ```
-Grit → Lo-Fi → Vinyl → Broken Tape Delay → Doubler
+Auto-Wah → Grit → Lo-Fi → Space Echo → Broken Tape
+  → Bloom Reverb → Tremolo/Chorus → Tube Saturation → Phaser → Modulating Delay
 ```
+
+Global bus effects (shared): Hall/Chamber Reverb · Delay · Shimmer
 
 | Effect | Description |
 |--------|-------------|
-| **Grit** | Asymmetric tube waveshaper — adds even harmonics |
+| **Auto-Wah** | Envelope-following bandpass filter (250 Hz → 4 kHz) — touch dynamics drive the sweep |
+| **Grit** | Asymmetric tube waveshaper — adds even harmonics and warmth |
 | **Lo-Fi** | Bit-depth crush (16→4 bit) + sample-rate decimation |
-| **Vinyl** | Wow/flutter pitch drift + random crackle |
+| **Space Echo** | Tape-style echo with flutter and saturation |
 | **Broken Tape** | Wow/flutter on delay time + dropouts + tape saturation |
-| **Doubler** | Detuned stereo widener — two delayed copies panned L/R |
-
-### Classic Effects
-
-Reverb · Delay · Distortion · Shimmer (plate reverb into +1 octave pitch shift)
+| **Bloom Reverb** | Slowly swelling LFO-modulated reverb that builds behind the note |
+| **Tremolo/Chorus** | Combined modulation: amplitude tremolo + detuned stereo chorus |
+| **Tube Saturation** | Soft-knee overdrive emulating valve circuitry |
+| **Phaser** | 4-stage all-pass phaser with LFO sweep and resonant feedback |
+| **Modulating Delay (Waver)** | LFO-swept delay line (±35 ms) — subtle pitch warble to full wobble |
 
 ---
 
@@ -76,7 +80,7 @@ Plugin formats built simultaneously: **VST3**, **AU**, **Standalone**.
 
 ### All Parameters (DAW Automation)
 
-`voice_mode` · `osc1` · `osc2` · `detune` · `osc_mix` · `filter_cutoff` · `filter_res` · `attack` · `decay` · `sustain` · `release` · `lfo_rate` · `lfo_depth` · `reverb` · `delay` · `delay_time` · `shimmer` · `distortion` · `tremulant` · `lofi` · `vinyl` · `broken_tape` · `grit` · `doubler`
+`voice_mode` · `osc1` · `osc2` · `detune` · `osc_mix` · `filter_cutoff` · `filter_res` · `attack` · `decay` · `sustain` · `release` · `lfo_rate` · `lfo_depth` · `reverb` · `delay` · `delay_time` · `shimmer` · `distortion` · `tremulant` · `lofi` · `space_echo` · `broken_tape` · `grit` · `bloom` · `phaser` · `auto_wah` · `waver`
 
 ---
 
@@ -110,19 +114,22 @@ Install locations:
 OmnisphereSynth/          iOS app (Swift / SwiftUI / AVFoundation)
   Audio/
     AnyVoice.swift          Voice protocol
-    AudioEngine.swift       AVAudioEngine graph + effects routing
+    AudioEngine.swift       AVAudioEngine graph + per-voice effect routing
     SynthVoice.swift        Dual-oscillator subtractive synth
-    OrganVoice.swift        Church pipe organ (additive)
+    OrganVoice.swift        Church pipe organ (additive + tremulant)
     HammondVoice.swift      Hammond B3 + Leslie rotary speaker
     RhodesVoice.swift       Rhodes Mk1 (2-op FM)
-    EffectsProcessor.swift  Lo-Fi, Vinyl, Grit, Doubler, Broken Tape
+    EffectsProcessor.swift  All per-voice effects (Grit, Lo-Fi, Space Echo,
+                            Broken Tape, Bloom, Phaser, Auto-Wah, Waver,
+                            Modulation, Tube Saturation)
   Models/
     SynthPreset.swift       Preset definitions + VoiceMode enum
   Views/
     XYPadView.swift         Multi-touch XY performance pad
-    ControlsView.swift      Knobs, ADSR sliders, Texture row
+    ControlsView.swift      Knobs, ADSR sliders, effects rows
     VisualizerView.swift    Real-time waveform display
     PresetSelectorView.swift Preset carousel
+    SettingsView.swift      About / info panel
 
 OmnisphereSynthVST/       VST3/AU plugin (C++ / JUCE)
   Source/
