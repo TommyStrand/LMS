@@ -1,113 +1,31 @@
 import AVFoundation
 import Foundation
 
-// MARK: - PRNG (lock-free, no heap allocations — safe on the audio thread)
+// MARK: - Sample voice (value type, pool-allocated, no ARC in hot path)
 
-fileprivate struct LCG {
-    var state: UInt64 = 2463534242
-    mutating func next() -> Double {
-        state = state &* 6364136223846793005 &+ 1442695040888963407
-        return Double(Int64(bitPattern: state)) / Double(Int64.max)
-    }
-}
-
-// MARK: - Voice synthesiser (value type, stored in pre-allocated pool)
-
-struct DrumVoiceSynth {
-    let voiceType: DrumVoiceID
+struct SampleVoice {
+    private let leftData:  UnsafeMutablePointer<Float>
+    private let rightData: UnsafeMutablePointer<Float>
+    private let frameLen:  Int
     let velocity: Float
-    var samplesElapsed: Int = 0
-    var phase1: Double = 0
-    var phase2: Double = 0
-    var phase3: Double = 0
-    var lpf1:   Double = 0
-    var prevNoise: Double = 0
-    fileprivate var rng = LCG()
-    var done: Bool = false
+    var position: Int = 0
 
-    mutating func advance(sampleRate: Double) -> Float {
-        let t  = Double(samplesElapsed) / sampleRate
-        let dt = 1.0 / sampleRate
-        let v  = Double(velocity)
-        samplesElapsed += 1
+    init(buffer: AVAudioPCMBuffer, velocity: Float) {
+        let ch    = buffer.floatChannelData!
+        leftData  = ch[0]
+        rightData = buffer.format.channelCount > 1 ? ch[1] : ch[0]
+        frameLen  = Int(buffer.frameLength)
+        self.velocity = velocity
+    }
 
-        switch voiceType {
+    var done: Bool { position >= frameLen }
 
-        case .kick:
-            let pitchEnv = (165.0 - 52.0) * exp(-t / 0.038) + 52.0
-            phase1 += pitchEnv * dt * 2.0 * .pi
-            let amp   = exp(-t / 0.38) * v
-            let click = t < 0.003 ? rng.next() * 0.22 * v : 0.0
-            done = t > 1.6
-            return Float(sin(phase1) * amp * 0.9 + click)
-
-        case .snare:
-            phase1 += 185.0 * dt * 2.0 * .pi
-            let body  = sin(phase1) * exp(-t / 0.030) * 0.35
-            let raw   = rng.next()
-            let hp    = raw - prevNoise * 0.88
-            prevNoise = raw
-            phase2   += 320.0 * dt * 2.0 * .pi
-            let crack  = sin(phase2) * exp(-t / 0.012) * 0.25
-            let noise  = hp * exp(-t / 0.17) * 0.60
-            done = t > 0.65
-            return Float((body + crack + noise) * v * 0.85)
-
-        case .hihat:
-            let raw = rng.next()
-            let hp  = raw - prevNoise * 0.96
-            prevNoise = raw
-            lpf1 = lpf1 * 0.15 + hp * 0.85
-            done = t > 0.12
-            return Float(lpf1 * exp(-t / 0.028) * v * 0.55)
-
-        case .hihatOpen:
-            let raw = rng.next()
-            let hp  = raw - prevNoise * 0.96
-            prevNoise = raw
-            lpf1 = lpf1 * 0.15 + hp * 0.85
-            done = t > 0.85
-            return Float(lpf1 * exp(-t / 0.20) * v * 0.55)
-
-        case .rideBell:
-            phase1 += 1290.0 * dt * 2.0 * .pi
-            phase2 += 1871.0 * dt * 2.0 * .pi
-            phase3 += 3180.0 * dt * 2.0 * .pi
-            let attack = t < 0.006 ? rng.next() * 0.25 * v : 0.0
-            let amp    = exp(-t / 1.9) * v
-            let sig    = sin(phase1) * 0.50 + sin(phase2) * 0.30 + sin(phase3) * 0.20
-            done = t > 6.0
-            return Float(sig * amp * 0.45 + attack)
-
-        case .tomLo:
-            phase1 += (65.0 * (1.0 + 0.65 * exp(-t / 0.055))) * dt * 2.0 * .pi
-            let click = t < 0.005 ? rng.next() * 0.18 * v : 0.0
-            done = t > 1.6
-            return Float((sin(phase1) * 0.88 + click) * exp(-t / 0.50) * v)
-
-        case .tomMid:
-            phase1 += (100.0 * (1.0 + 0.55 * exp(-t / 0.048))) * dt * 2.0 * .pi
-            let click = t < 0.004 ? rng.next() * 0.18 * v : 0.0
-            done = t > 1.4
-            return Float((sin(phase1) * 0.88 + click) * exp(-t / 0.42) * v)
-
-        case .tomHi:
-            phase1 += (155.0 * (1.0 + 0.50 * exp(-t / 0.042))) * dt * 2.0 * .pi
-            let click = t < 0.003 ? rng.next() * 0.18 * v : 0.0
-            done = t > 1.2
-            return Float((sin(phase1) * 0.88 + click) * exp(-t / 0.34) * v)
-
-        case .crash:
-            let raw = rng.next()
-            let hp  = raw - prevNoise * 0.88
-            prevNoise = raw
-            phase1 += 1870.0 * dt * 2.0 * .pi
-            phase2 += 3714.0 * dt * 2.0 * .pi
-            let metal = (sin(phase1) + sin(phase2)) * 0.5 * exp(-t / 2.20) * v * 0.25
-            let noise = hp * exp(-t / 0.50) * v
-            done = t > 5.0
-            return Float((noise + metal) * 0.55)
-        }
+    mutating func nextStereo() -> (Float, Float) {
+        guard position < frameLen else { return (0, 0) }
+        let l = leftData[position]  * velocity
+        let r = rightData[position] * velocity
+        position += 1
+        return (l, r)
     }
 }
 
@@ -123,7 +41,7 @@ final class DrumEngine: ObservableObject {
     }
     @Published var patternIndex: Int = 0 {
         didSet {
-            let idx = max(0, min(patternIndex, DrumPattern.all.count - 1))
+            let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
             _pattern     = DrumPattern.all[idx]
             tickPosition = 0
         }
@@ -137,7 +55,6 @@ final class DrumEngine: ObservableObject {
     @Published var grit: Float = 0.0 {
         didSet { renderGrit = grit }
     }
-    // 0…1 fraction through the current loop bar (drives the beat ring in the UI)
     @Published var beatFraction: Double = 0
 
     // MARK: Audio graph
@@ -148,21 +65,28 @@ final class DrumEngine: ObservableObject {
     private let reverbNode  = AVAudioUnitReverb()
     private var sourceNode: AVAudioSourceNode!
 
-    // MARK: Render-thread shadow vars (written from main, read from audio thread)
+    // MARK: Sample bank (main-thread write before engine start, audio-thread read only)
 
-    private var voicePool:    [DrumVoiceSynth?] = Array(repeating: nil, count: 24)
-    private var tickPosition: Double = 0
-    private var renderBpm:    Double = 90
-    private var renderGrit:   Float  = 0
-    private var _pattern:     DrumPattern = DrumPattern.all[0]
-    private var renderIsPlaying: Bool = false
-    private var beatCounter:  Int    = 0
+    // Buffers are retained here for the engine's lifetime so SampleVoice raw pointers stay valid
+    private var sampleBuffers: [DrumVoiceID: [AVAudioPCMBuffer]] = [:]
+    private var rrIndex: [Int] = Array(repeating: 0, count: DrumVoiceID.allCases.count)
+
+    // MARK: Render-thread state
+
+    private var voicePool:       [SampleVoice?] = Array(repeating: nil, count: 32)
+    private var tickPosition:    Double = 0
+    private var renderBpm:       Double = 90
+    private var renderGrit:      Float  = 0
+    private var _pattern:        DrumPattern = DrumPattern.all[0]
+    private var renderIsPlaying: Bool   = false
+    private var beatCounter:     Int    = 0
 
     // MARK: Init
 
     init() {
         renderBpm = bpm
         _pattern  = DrumPattern.all[0]
+        loadSamples()
         setupAudio()
     }
 
@@ -184,18 +108,90 @@ final class DrumEngine: ObservableObject {
 
     func togglePlay() { isPlaying ? stop() : play() }
 
+    // MARK: Sample loading
+
+    private func loadSamples() {
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+
+        // Each tuple: (voice, [bundle resource names without extension])
+        // Files must be added to the Xcode target from the MusicRadar pack.
+        let specs: [(DrumVoiceID, [String])] = [
+            (.kick,
+             (1...8).map { String(format: "CYCdh_K1close_Kick-%02d", $0) }),
+
+            (.snare,
+             (1...5).map { String(format: "CYCdh_K1close_Snr-%02d", $0) }),
+
+            (.hihat,
+             (1...9).map { String(format: "CYCdh_K1close_ClHat-%02d", $0) }),
+
+            (.hihatOpen,
+             (1...7).map { String(format: "CYCdh_K1close_OpHat-%02d", $0) }),
+
+            (.rideBell,
+             ["CYCdh_Kurz01-Ride01", "CYCdh_Kurz01-Ride02"]),
+
+            (.crash,
+             (1...7).map { String(format: "CyCdh_K3Crash-%02d", $0) }),
+
+            (.tomHi,
+             ["CYCdh_K5-Tom01a", "CYCdh_K5-Tom01b", "CYCdh_K5-Tom01c"]),
+
+            (.tomMid,
+             ["CYCdh_K5-Tom02a", "CYCdh_K5-Tom02b", "CYCdh_K5-Tom02c"]),
+
+            (.tomLo,
+             ["CYCdh_K5-Tom03a", "CYCdh_K5-Tom03b", "CYCdh_K5-Tom03c"]),
+        ]
+
+        for (voice, names) in specs {
+            sampleBuffers[voice] = names.compactMap { loadSample(name: $0, targetFormat: fmt) }
+            if let loaded = sampleBuffers[voice] {
+                print("DrumEngine: \(voice) – \(loaded.count)/\(names.count) samples loaded")
+            }
+        }
+    }
+
+    private func loadSample(name: String, targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else {
+            print("DrumEngine: missing \(name).wav")
+            return nil
+        }
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+
+        let fileFmt = file.processingFormat
+        let frames  = AVAudioFrameCount(file.length)
+        guard let src = AVAudioPCMBuffer(pcmFormat: fileFmt, frameCapacity: frames),
+              (try? file.read(into: src)) != nil else { return nil }
+
+        // Fast path: formats already match
+        if fileFmt.sampleRate  == targetFormat.sampleRate &&
+           fileFmt.channelCount == targetFormat.channelCount { return src }
+
+        // Convert sample rate / channel count
+        let dstFrames = AVAudioFrameCount(
+            Double(frames) * targetFormat.sampleRate / fileFmt.sampleRate
+        ) + 1
+        guard let dst       = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: dstFrames),
+              let converter = AVAudioConverter(from: fileFmt, to: targetFormat) else { return nil }
+
+        var err: NSError?
+        var done = false
+        converter.convert(to: dst, error: &err) { _, status in
+            if done { status.pointee = .noDataNow; return nil }
+            status.pointee = .haveData; done = true; return src
+        }
+        return err == nil ? dst : nil
+    }
+
     // MARK: Audio graph setup
 
     private func setupAudio() {
-        let sr: Double = 44100
-        let fmt = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2)!
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
 
         sourceNode = AVAudioSourceNode(format: fmt) { [weak self] isSilence, _, frameCount, abl in
             guard let self else { isSilence.pointee = true; return noErr }
-            self.renderBlock(isSilence: isSilence,
-                             frameCount: Int(frameCount),
-                             abl: abl,
-                             sampleRate: sr)
+            self.renderBlock(isSilence: isSilence, frameCount: Int(frameCount), abl: abl)
             return noErr
         }
 
@@ -203,11 +199,11 @@ final class DrumEngine: ObservableObject {
         audioEngine.attach(delayNode)
         audioEngine.attach(reverbNode)
 
-        audioEngine.connect(sourceNode, to: delayNode,            format: fmt)
-        audioEngine.connect(delayNode,  to: reverbNode,           format: fmt)
+        audioEngine.connect(sourceNode, to: delayNode,                format: fmt)
+        audioEngine.connect(delayNode,  to: reverbNode,               format: fmt)
         audioEngine.connect(reverbNode, to: audioEngine.mainMixerNode, format: fmt)
 
-        delayNode.delayTime     = 60.0 / renderBpm * 0.75  // dotted-eighth feel
+        delayNode.delayTime     = 60.0 / renderBpm * 0.75
         delayNode.feedback      = 28
         delayNode.lowPassCutoff = 5500
         delayNode.wetDryMix     = delayMix * 100
@@ -227,8 +223,7 @@ final class DrumEngine: ObservableObject {
 
     private func renderBlock(isSilence: UnsafeMutablePointer<ObjCBool>,
                              frameCount: Int,
-                             abl: UnsafeMutablePointer<AudioBufferList>,
-                             sampleRate: Double) {
+                             abl: UnsafeMutablePointer<AudioBufferList>) {
         let bufList = UnsafeMutableAudioBufferListPointer(abl)
         for buf in bufList { if let d = buf.mData { memset(d, 0, Int(buf.mDataByteSize)) } }
 
@@ -240,44 +235,43 @@ final class DrumEngine: ObservableObject {
 
         let loopTicks      = Double(_pattern.loopTicks)
         let tpb            = Double(_pattern.ticksPerBeat)
-        let ticksPerSample = (renderBpm / 60.0) * tpb / sampleRate
+        let ticksPerSample = (renderBpm / 60.0) * tpb / 44100.0
         let grit           = renderGrit
 
         for frame in 0 ..< frameCount {
             let prev = tickPosition
             tickPosition += ticksPerSample
 
-            // Loop-aware hit detection
             let prevMod = prev.truncatingRemainder(dividingBy: loopTicks)
             let currMod = tickPosition.truncatingRemainder(dividingBy: loopTicks)
 
             for hit in _pattern.hits {
-                let ht = Double(hit.tick)
+                let ht    = Double(hit.tick)
                 let fired = currMod > prevMod
                     ? (ht >= prevMod && ht < currMod)
                     : (ht >= prevMod || ht < currMod)
                 if fired { spawnVoice(type: hit.voice, velocity: hit.velocity) }
             }
 
-            // Mix voices
-            var s: Float = 0
+            var l: Float = 0
+            var r: Float = 0
             for i in 0 ..< voicePool.count {
                 guard voicePool[i] != nil else { continue }
-                s += voicePool[i]!.advance(sampleRate: sampleRate)
-                if voicePool[i]!.done { voicePool[i] = nil }
+                if voicePool[i]!.done { voicePool[i] = nil; continue }
+                let (sl, sr) = voicePool[i]!.nextStereo()
+                l += sl; r += sr
             }
 
-            // Soft saturation
             if grit > 0 {
-                let d = 1.0 + grit * 9.0
-                s = tanh(s * d) / d
+                let d = Float(1.0 + Double(grit) * 9.0)
+                l = tanh(l * d) / d
+                r = tanh(r * d) / d
             }
 
-            lPtr[frame] = s
-            rPtr[frame] = s
+            lPtr[frame] = l
+            rPtr[frame] = r
         }
 
-        // Publish beat fraction (throttled)
         beatCounter += frameCount
         if beatCounter >= 512 {
             beatCounter = 0
@@ -289,13 +283,13 @@ final class DrumEngine: ObservableObject {
     // MARK: Voice pool (render thread only)
 
     private func spawnVoice(type: DrumVoiceID, velocity: Float) {
+        guard let bufs = sampleBuffers[type], !bufs.isEmpty else { return }
+        let idx = rrIndex[type.rawValue] % bufs.count
+        rrIndex[type.rawValue] = idx + 1
+        let voice = SampleVoice(buffer: bufs[idx], velocity: velocity)
         for i in 0 ..< voicePool.count {
-            if voicePool[i] == nil {
-                voicePool[i] = DrumVoiceSynth(voiceType: type, velocity: velocity)
-                return
-            }
+            if voicePool[i] == nil || voicePool[i]!.done { voicePool[i] = voice; return }
         }
-        // Pool full: steal first slot
-        voicePool[0] = DrumVoiceSynth(voiceType: type, velocity: velocity)
+        voicePool[0] = voice  // pool full: steal oldest slot
     }
 }
