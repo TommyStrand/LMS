@@ -22,7 +22,7 @@ struct DrumVoiceSynth {
     var phase3: Double = 0
     var lpf1:   Double = 0
     var prevNoise: Double = 0
-    var rng = LCG()
+    fileprivate var rng = LCG()
     var done: Bool = false
 
     mutating func advance(sampleRate: Double) -> Float {
