@@ -71,7 +71,7 @@ final class SynthVoice: AnyVoice {
         let vibFactor = pow(2.0, vibCents / 1200.0)
 
         // Smooth pitch glide
-        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendFactor = pow(2.0, smoothPitchBend / 12.0)
 
         // Frequency with detune + LFO pitch mod + vibrato + glissando bend

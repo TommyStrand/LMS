@@ -68,7 +68,7 @@ final class RhodesVoice: AnyVoice {
         let vibFreq  = freq * pow(2.0, vibCents / 1200.0)
 
         // Smooth pitch glide
-        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendedFreq = vibFreq * pow(2.0, smoothPitchBend / 12.0)
 
         // FM: modulator at carrier + 0.5 Hz (slight inharmonicity)

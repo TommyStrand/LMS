@@ -13,6 +13,7 @@ struct XYPadView: View {
     let preset: SynthPreset
 
     @State private var activeTouches: [Int: TouchPoint] = [:]
+    @State private var glissandoRootNotes: [Int: Int] = [:]  // touchID → initial MIDI note
     @State private var gridOpacity: Double = 0.12
 
     private var notes: [Int] {
@@ -70,25 +71,23 @@ struct XYPadView: View {
                         case .began:
                             activeTouches[event.id] = TouchPoint(id: event.id, location: loc,
                                                                   note: note, velocity: 0.7 + y * 0.3)
+                            if isGlissando { glissandoRootNotes[event.id] = note }
                             engine.noteOn(touchID: event.id, note: note,
                                           velocity: 0.7 + y * 0.3, x: x, y: y)
                         case .moved:
                             activeTouches[event.id]?.location = loc
-                            if isGlissando, let touch = activeTouches[event.id] {
-                                // Interpolate continuously between scale notes
-                                let contIdx = max(0.0, min(Float(currentNotes.count - 1),
-                                                            x * Float(currentNotes.count)))
-                                let lo  = Int(contIdx)
-                                let hi  = min(lo + 1, currentNotes.count - 1)
-                                let fr  = contIdx - Float(lo)
-                                let contMidi = Float(currentNotes[lo]) * (1 - fr) + Float(currentNotes[hi]) * fr
-                                let semitones = contMidi - Float(touch.note)
-                                activeTouches[event.id]?.note = note  // track nearest note for label
+                            if isGlissando {
+                                // Snap to the nearest scale note (column) — no chromatic in-between.
+                                // Portamento is handled by the per-sample smooth pitch bend in the voice.
+                                let rootNote   = glissandoRootNotes[event.id] ?? note
+                                let semitones  = Float(note) - Float(rootNote)
+                                activeTouches[event.id]?.note = note  // update label to current column
                                 engine.updateGlissando(touchID: event.id, semitones: semitones, x: x, y: y)
                             } else {
                                 engine.updateTouch(touchID: event.id, x: x, y: y)
                             }
                         default:
+                            glissandoRootNotes.removeValue(forKey: event.id)
                             activeTouches.removeValue(forKey: event.id)
                             engine.noteOff(touchID: event.id)
                         }

@@ -75,7 +75,7 @@ final class OrganVoice: AnyVoice {
         click = clickLpf
 
         // Smooth pitch glide
-        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendFactor = pow(2.0, smoothPitchBend / 12.0)
 
         // Sum drawbar partials

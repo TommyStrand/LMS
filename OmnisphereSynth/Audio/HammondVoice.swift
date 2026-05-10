@@ -66,7 +66,7 @@ final class HammondVoice: AnyVoice {
         let dt = 1.0 / sampleRate
 
         // Smooth pitch glide
-        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendFactor = pow(2.0, smoothPitchBend / 12.0)
 
         // Additive synthesis

@@ -172,10 +172,10 @@ struct DrumMachineView: View {
 
     private func effectsGrid(theme: AppTheme, ac: Color) -> some View {
         HStack(spacing: 0) {
-            effectKnob(label: "VOL",     value: $drum.masterVolume, ac: ac, theme: theme)
-            effectKnob(label: "DELAY",   value: $drum.delayMix,     ac: ac, theme: theme)
-            effectKnob(label: "SHIMMER", value: $drum.shimmer,      ac: ac, theme: theme)
-            effectKnob(label: "DIRT",    value: $drum.grit,         ac: ac, theme: theme)
+            DrumKnob(label: "VOL",     value: $drum.masterVolume, ac: ac, theme: theme)
+            DrumKnob(label: "DELAY",   value: $drum.delayMix,     ac: ac, theme: theme)
+            DrumKnob(label: "SHIMMER", value: $drum.shimmer,      ac: ac, theme: theme)
+            DrumKnob(label: "DIRT",    value: $drum.grit,         ac: ac, theme: theme)
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 8)
@@ -187,38 +187,7 @@ struct DrumMachineView: View {
 
     private func effectKnob(label: String, value: Binding<Float>,
                              ac: Color, theme: AppTheme) -> some View {
-        let knobSize: CGFloat = 70
-        return VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .trim(from: 0.15, to: 0.85)
-                    .stroke(theme.panelBorder, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .rotationEffect(.degrees(90 + 180 * 0.15))
-                    .frame(width: knobSize, height: knobSize)
-
-                let filled = 0.15 + (0.85 - 0.15) * Double(value.wrappedValue)
-                Circle()
-                    .trim(from: 0.15, to: filled)
-                    .stroke(ac, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .rotationEffect(.degrees(90 + 180 * 0.15))
-                    .frame(width: knobSize, height: knobSize)
-                    .animation(.easeOut(duration: 0.08), value: value.wrappedValue)
-
-                Text(String(format: "%.0f", value.wrappedValue * 100))
-                    .font(.system(size: 14, weight: .semibold, design: theme.fontDesign))
-                    .foregroundColor(theme.primaryText)
-            }
-            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                let delta = Float(-drag.translation.height / 140)
-                value.wrappedValue = max(0, min(1, value.wrappedValue + delta))
-            })
-
-            Text(label)
-                .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
-                .foregroundColor(theme.secondaryText)
-                .kerning(1.5)
-        }
-        .frame(maxWidth: .infinity)
+        EmptyView()  // replaced by DrumKnob struct below
     }
 
     // MARK: - Voice activity
@@ -282,6 +251,62 @@ struct DrumMachineView: View {
             .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
                 .strokeBorder(theme.panelBorder, lineWidth: 1))
         }
+    }
+}
+
+// MARK: - Knob (drag-to-adjust, captures start value per gesture to avoid drift)
+
+private struct DrumKnob: View {
+    let label: String
+    @Binding var value: Float
+    let ac:    Color
+    let theme: AppTheme
+
+    private let knobSize: CGFloat = 70
+    @State private var dragStartValue: Float = 0
+    @State private var isDragging = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .trim(from: 0.15, to: 0.85)
+                    .stroke(theme.panelBorder, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .rotationEffect(.degrees(90 + 180 * 0.15))
+                    .frame(width: knobSize, height: knobSize)
+
+                let filled = 0.15 + (0.85 - 0.15) * Double(value)
+                Circle()
+                    .trim(from: 0.15, to: filled)
+                    .stroke(ac, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .rotationEffect(.degrees(90 + 180 * 0.15))
+                    .frame(width: knobSize, height: knobSize)
+                    .animation(.easeOut(duration: 0.08), value: value)
+
+                Text(String(format: "%.0f", value * 100))
+                    .font(.system(size: 14, weight: .semibold, design: theme.fontDesign))
+                    .foregroundColor(theme.primaryText)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        if !isDragging {
+                            isDragging = true
+                            dragStartValue = value
+                        }
+                        // 240 px = full 0–1 range, so small touches make small changes
+                        let delta = Float(-drag.translation.height / 240)
+                        value = max(0, min(1, dragStartValue + delta))
+                    }
+                    .onEnded { _ in isDragging = false }
+            )
+
+            Text(label)
+                .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
+                .kerning(1.5)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
