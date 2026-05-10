@@ -10,7 +10,7 @@ struct ControlsView: View {
         let theme  = themeManager.current
 
         VStack(spacing: 12) {
-            // Row 1 – always visible
+            // Row 1 – FILTER/RESON only for synth (organ/rhodes voices don't use the filter)
             HStack(spacing: 16) {
                 KnobView(label: "REVERB", value: preset.reverbMix, color: color) { v in
                     engine.setReverb(v)
@@ -18,11 +18,13 @@ struct ControlsView: View {
                 KnobView(label: "DELAY", value: preset.delayMix, color: color) { v in
                     engine.setDelay(v)
                 }
-                KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
-                    engine.currentPreset.filterCutoff = v * 20000
-                }
-                KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
-                    engine.currentPreset.filterResonance = v
+                if preset.voiceMode == .synth {
+                    KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
+                        engine.currentPreset.filterCutoff = v * 20000
+                    }
+                    KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
+                        engine.currentPreset.filterResonance = v
+                    }
                 }
             }
 
@@ -36,8 +38,10 @@ struct ControlsView: View {
                 ADSRRow(engine: engine, color: color)
             }
 
-            // Row 3 – Modulation (universal: tremolo + chorus)
-            ModulationRow(engine: engine, color: color, theme: theme)
+            // Row 3 – Modulation (synth only — organ/rhodes rows already include these controls)
+            if preset.voiceMode == .synth {
+                ModulationRow(engine: engine, color: color, theme: theme)
+            }
 
             // Row 4 – Texture (always visible)
             TextureRow(engine: engine, color: color, theme: theme)
@@ -98,13 +102,8 @@ struct OrganControlsRow: View {
                     .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
                     .foregroundColor(color.opacity(0.7))
                     .kerning(1.5)
-                HStack(spacing: 16) {
-                    KnobView(label: "DRIVE", value: preset.distortionAmount, color: color) { v in
-                        engine.setDistortion(v)
-                    }
-                    KnobView(label: "BITE", value: preset.filterCutoff / 20000, color: color) { v in
-                        engine.currentPreset.filterCutoff = v * 20000
-                    }
+                KnobView(label: "DRIVE", value: preset.distortionAmount, color: color) { v in
+                    engine.setDistortion(v)
                 }
             }
             .padding(.horizontal, 12)
@@ -127,6 +126,9 @@ struct OrganControlsRow: View {
                     }
                     KnobView(label: "TREMUL", value: preset.tremulantDepth, color: color) { v in
                         engine.currentPreset.tremulantDepth = v
+                    }
+                    KnobView(label: "CHORUS", value: preset.chorusMix, color: color) { v in
+                        engine.setChorus(v)
                     }
                 }
             }
@@ -157,6 +159,9 @@ struct RhodesControlsRow: View {
             }
             KnobView(label: "SHIMMER", value: preset.shimmerAmount, color: color) { v in
                 engine.setShimmer(v)
+            }
+            KnobView(label: "DRIVE", value: preset.distortionAmount, color: color) { v in
+                engine.setDistortion(v)
             }
         }
     }
