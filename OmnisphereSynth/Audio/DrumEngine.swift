@@ -55,6 +55,9 @@ final class DrumEngine: ObservableObject {
     @Published var grit: Float = 0.0 {
         didSet { renderGrit = grit }
     }
+    @Published var masterVolume: Float = 0.8 {
+        didSet { renderMasterVolume = masterVolume }
+    }
     @Published var beatFraction: Double = 0
 
     // MARK: Audio graph
@@ -82,9 +85,10 @@ final class DrumEngine: ObservableObject {
     private var renderBpm:       Double = 90
     private var renderGrit:      Float  = 0
     private var _pattern:        DrumPattern = DrumPattern.all[0]
-    private var renderIsPlaying: Bool   = false
-    private var beatCounter:     Int    = 0
-    private var shuffleBag:      [Int]  = []
+    private var renderIsPlaying:    Bool   = false
+    private var renderMasterVolume: Float  = 0.8
+    private var beatCounter:        Int    = 0
+    private var shuffleBag:         [Int]  = []
 
     // MARK: Init
 
@@ -313,8 +317,8 @@ final class DrumEngine: ObservableObject {
                 r = tanh(r * d) / d
             }
 
-            lPtr[frame] = l
-            rPtr[frame] = r
+            lPtr[frame] = l * renderMasterVolume
+            rPtr[frame] = r * renderMasterVolume
         }
 
         beatCounter += frameCount

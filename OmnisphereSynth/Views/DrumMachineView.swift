@@ -14,42 +14,34 @@ struct DrumMachineView: View {
         let ac      = theme.accent(for: accent)
         let pattern = DrumPattern.all[drum.patternIndex]
 
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                patternCard(pattern: pattern, theme: theme, ac: ac)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-
-                actionRow(theme: theme, ac: ac)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-
-                HStack(spacing: 16) {
-                    beatRing(pattern: pattern, ac: ac, theme: theme)
-                        .frame(width:  min(geo.size.width * 0.36, 190),
-                               height: min(geo.size.width * 0.36, 190))
-
-                    VStack(spacing: 10) {
-                        bpmRow(theme: theme, ac: ac)
-                        effectsGrid(theme: theme, ac: ac)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
+        VStack(spacing: 0) {
+            patternCard(pattern: pattern, theme: theme, ac: ac)
                 .padding(.horizontal, 16)
-                .frame(maxHeight: .infinity)
+                .padding(.bottom, 10)
 
-                voiceActivityRow(pattern: pattern, theme: theme, ac: ac)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
+            actionRow(theme: theme, ac: ac)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
-                favoritesButton(theme: theme, ac: ac)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-            }
-            .padding(.top, 8)
+            bpmRow(theme: theme, ac: ac)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            effectsGrid(theme: theme, ac: ac)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+            Spacer(minLength: 0)
+
+            voiceActivityRow(pattern: pattern, theme: theme, ac: ac)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+            favoritesButton(theme: theme, ac: ac)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
         }
+        .padding(.top, 8)
         .sheet(isPresented: $showFavorites) {
             FavoritesSheet(drum: drum, favorites: favorites,
                            theme: themeManager.current,
@@ -100,7 +92,7 @@ struct DrumMachineView: View {
             .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 
-    // MARK: - Action row (random + play)
+    // MARK: - Action row
 
     private func actionRow(theme: AppTheme, ac: Color) -> some View {
         HStack(spacing: 12) {
@@ -113,7 +105,7 @@ struct DrumMachineView: View {
                     .kerning(1.5)
                     .foregroundColor(ac)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 13)
                     .background(theme.panelBackground)
                     .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                     .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
@@ -130,41 +122,12 @@ struct DrumMachineView: View {
                     .kerning(1.5)
                     .foregroundColor(drum.isPlaying ? theme.appBackground : ac)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 13)
                     .background(drum.isPlaying ? ac : theme.panelBackground)
                     .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
                     .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
                         .strokeBorder(drum.isPlaying ? Color.clear : ac.opacity(0.5), lineWidth: 1.5))
             }
-        }
-    }
-
-    // MARK: - Beat ring (visual only)
-
-    private func beatRing(pattern: DrumPattern, ac: Color, theme: AppTheme) -> some View {
-        ZStack {
-            Circle().stroke(theme.panelBorder, lineWidth: 3)
-
-            Circle()
-                .trim(from: 0, to: drum.beatFraction)
-                .stroke(ac, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 0.05), value: drum.beatFraction)
-
-            let beats = max(2, pattern.bars * 4)
-            ForEach(0..<beats, id: \.self) { i in
-                let angle  = Double(i) / Double(beats) * 2 * .pi - .pi / 2
-                let isBar  = i % 4 == 0
-                Circle()
-                    .fill(isBar ? ac.opacity(0.8) : theme.secondaryText.opacity(0.25))
-                    .frame(width: isBar ? 6 : 3, height: isBar ? 6 : 3)
-                    .offset(x: cos(angle) * 46, y: sin(angle) * 46)
-            }
-
-            Text("\(Int(drum.bpm))")
-                .font(.system(size: 26, weight: .thin, design: theme.fontDesign))
-                .foregroundColor(ac)
-                .monospacedDigit()
         }
     }
 
@@ -198,55 +161,64 @@ struct DrumMachineView: View {
             }
             .padding(.horizontal, 4)
         }
-        .padding(10)
+        .padding(12)
         .background(theme.panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
             .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 
-    // MARK: - Effects grid
+    // MARK: - Effects grid (VOL + DELAY + SHIMMER + DIRT — full width, larger knobs)
 
     private func effectsGrid(theme: AppTheme, ac: Color) -> some View {
-        HStack(spacing: 12) {
-            effectKnob(label: "DELAY",   value: $drum.delayMix, ac: ac, theme: theme)
-            effectKnob(label: "SHIMMER", value: $drum.shimmer,  ac: ac, theme: theme)
-            effectKnob(label: "DIRT",    value: $drum.grit,     ac: ac, theme: theme)
+        HStack(spacing: 0) {
+            effectKnob(label: "VOL",     value: $drum.masterVolume, ac: ac, theme: theme)
+            effectKnob(label: "DELAY",   value: $drum.delayMix,     ac: ac, theme: theme)
+            effectKnob(label: "SHIMMER", value: $drum.shimmer,      ac: ac, theme: theme)
+            effectKnob(label: "DIRT",    value: $drum.grit,         ac: ac, theme: theme)
         }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 
     private func effectKnob(label: String, value: Binding<Float>,
                              ac: Color, theme: AppTheme) -> some View {
-        VStack(spacing: 6) {
+        let knobSize: CGFloat = 70
+        return VStack(spacing: 8) {
             ZStack {
                 Circle()
                     .trim(from: 0.15, to: 0.85)
-                    .stroke(theme.panelBorder, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(theme.panelBorder, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .rotationEffect(.degrees(90 + 180 * 0.15))
-                    .frame(width: 52, height: 52)
+                    .frame(width: knobSize, height: knobSize)
 
                 let filled = 0.15 + (0.85 - 0.15) * Double(value.wrappedValue)
                 Circle()
                     .trim(from: 0.15, to: filled)
-                    .stroke(ac, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(ac, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .rotationEffect(.degrees(90 + 180 * 0.15))
-                    .frame(width: 52, height: 52)
+                    .frame(width: knobSize, height: knobSize)
                     .animation(.easeOut(duration: 0.08), value: value.wrappedValue)
 
                 Text(String(format: "%.0f", value.wrappedValue * 100))
-                    .font(.system(size: 11, weight: .semibold, design: theme.fontDesign))
+                    .font(.system(size: 14, weight: .semibold, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText)
             }
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
-                let delta = Float(-drag.translation.height / 120)
+                let delta = Float(-drag.translation.height / 140)
                 value.wrappedValue = max(0, min(1, value.wrappedValue + delta))
             })
 
             Text(label)
-                .font(.system(size: 8, weight: .bold, design: theme.fontDesign))
+                .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
                 .foregroundColor(theme.secondaryText)
                 .kerning(1.5)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Voice activity
@@ -278,7 +250,7 @@ struct DrumMachineView: View {
         return pattern.hits.contains { abs(Double($0.tick) - currentTick) < window && $0.voice == voice }
     }
 
-    // MARK: - Favorites entry button
+    // MARK: - Favorites entry
 
     private func favoritesButton(theme: AppTheme, ac: Color) -> some View {
         Button { showFavorites = true } label: {
