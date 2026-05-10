@@ -14,34 +14,34 @@ struct DrumMachineView: View {
         let ac      = theme.accent(for: accent)
         let pattern = DrumPattern.all[drum.patternIndex]
 
-        VStack(spacing: 0) {
-            patternCard(pattern: pattern, theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 0) {
+                patternCard(pattern: pattern, theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
 
-            actionRow(theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                actionRow(theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
 
-            bpmRow(theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                bpmRow(pattern: pattern, theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
 
-            effectsGrid(theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                stepSequencerPanel(pattern: pattern, theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
 
-            Spacer(minLength: 0)
+                effectsGrid(theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
 
-            voiceActivityRow(pattern: pattern, theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-
-            favoritesButton(theme: theme, ac: ac)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                favoritesButton(theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
+            .padding(.top, 8)
         }
-        .padding(.top, 8)
         .sheet(isPresented: $showFavorites) {
             FavoritesSheet(drum: drum, favorites: favorites,
                            theme: themeManager.current,
@@ -131,10 +131,17 @@ struct DrumMachineView: View {
         }
     }
 
-    // MARK: - BPM row
+    // MARK: - BPM row (with 2-bar beat strip)
 
-    private func bpmRow(theme: AppTheme, ac: Color) -> some View {
-        VStack(spacing: 6) {
+    private func bpmRow(pattern: DrumPattern, theme: AppTheme, ac: Color) -> some View {
+        let totalSteps   = 32
+        let currentStep  = drum.isPlaying
+            ? Int(drum.beatFraction * Double(totalSteps)) % totalSteps
+            : -1
+        let allHits      = drum.customHits ?? pattern.hits
+        let ticksPerStep = Int(pattern.ticksPerBeat) / 4
+
+        return VStack(spacing: 6) {
             HStack {
                 Text("BPM")
                     .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
@@ -147,6 +154,11 @@ struct DrumMachineView: View {
                     .monospacedDigit()
             }
             .padding(.horizontal, 4)
+
+            BeatStripView(totalSteps: totalSteps, currentStep: currentStep,
+                          allHits: allHits, ticksPerStep: ticksPerStep, ac: ac, theme: theme)
+                .frame(height: 20)
+                .padding(.horizontal, 4)
 
             Slider(value: $drum.bpm, in: 50...180, step: 1)
                 .accentColor(ac)
@@ -168,7 +180,137 @@ struct DrumMachineView: View {
             .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 
-    // MARK: - Effects grid (VOL + DELAY + SHIMMER + DIRT — full width, larger knobs)
+    // MARK: - Step Sequencer (ReBirth RB-338 style)
+
+    private func stepSequencerPanel(pattern: DrumPattern, theme: AppTheme, ac: Color) -> some View {
+        let totalSteps  = 32
+        let currentStep = drum.isPlaying
+            ? Int(drum.beatFraction * Double(totalSteps)) % totalSteps
+            : -1
+        let allActive   = Dictionary(uniqueKeysWithValues: DrumVoiceID.allCases.map { v in
+            (v, drum.activeSteps(for: v))
+        })
+
+        return VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("SEQUENCER")
+                    .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText)
+                    .kerning(1.5)
+                Spacer()
+                Button {
+                    drum.resetPattern()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Text("RESET")
+                        .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
+                        .foregroundColor(ac.opacity(0.7))
+                        .kerning(1.2)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            // Bar column headers
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 40)
+                Text("BAR 1")
+                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText.opacity(0.4))
+                    .frame(maxWidth: .infinity)
+                Color.clear.frame(width: 9)
+                Text("BAR 2")
+                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText.opacity(0.4))
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
+
+            // One row per drum voice
+            VStack(spacing: 3) {
+                ForEach(DrumVoiceID.allCases, id: \.self) { voice in
+                    sequencerRow(voice: voice,
+                                 activeSteps: allActive[voice] ?? [],
+                                 currentStep: currentStep, ac: ac, theme: theme)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+        }
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
+    }
+
+    private func sequencerRow(voice: DrumVoiceID, activeSteps: Set<Int>, currentStep: Int,
+                               ac: Color, theme: AppTheme) -> some View {
+        HStack(spacing: 0) {
+            Text(voice.label)
+                .font(.system(size: 6, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(width: 40, alignment: .leading)
+
+            // Bar 1 — steps 0…15
+            HStack(spacing: 1) {
+                ForEach(0..<16, id: \.self) { step in
+                    stepCell(voice: voice, step: step, activeSteps: activeSteps,
+                             currentStep: currentStep, ac: ac, theme: theme)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            // Bar divider
+            Rectangle()
+                .fill(theme.secondaryText.opacity(0.2))
+                .frame(width: 1)
+                .padding(.horizontal, 4)
+
+            // Bar 2 — steps 16…31
+            HStack(spacing: 1) {
+                ForEach(16..<32, id: \.self) { step in
+                    stepCell(voice: voice, step: step, activeSteps: activeSteps,
+                             currentStep: currentStep, ac: ac, theme: theme)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func stepCell(voice: DrumVoiceID, step: Int, activeSteps: Set<Int>,
+                           currentStep: Int, ac: Color, theme: AppTheme) -> some View {
+        let isActive  = activeSteps.contains(step)
+        let isCurrent = step == currentStep
+        let isBeat    = step % 4 == 0   // quarter-note boundary — slightly brighter background
+
+        return RoundedRectangle(cornerRadius: 2)
+            .fill(
+                isActive  ? ac :
+                isBeat    ? theme.secondaryText.opacity(0.14) :
+                            theme.panelBorder.opacity(0.45)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .strokeBorder(isCurrent ? Color.white.opacity(0.9) : Color.clear,
+                                  lineWidth: 1.5)
+            )
+            .frame(height: 18)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeOut(duration: 0.08)) {
+                    drum.toggleStep(voice: voice, step: step)
+                }
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            }
+    }
+
+    // MARK: - Effects grid
 
     private func effectsGrid(theme: AppTheme, ac: Color) -> some View {
         HStack(spacing: 0) {
@@ -183,40 +325,6 @@ struct DrumMachineView: View {
         .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
         .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
             .strokeBorder(theme.panelBorder, lineWidth: 1))
-    }
-
-    private func effectKnob(label: String, value: Binding<Float>,
-                             ac: Color, theme: AppTheme) -> some View {
-        EmptyView()  // replaced by DrumKnob struct below
-    }
-
-    // MARK: - Voice activity
-
-    private func voiceActivityRow(pattern: DrumPattern, theme: AppTheme, ac: Color) -> some View {
-        HStack(spacing: 6) {
-            ForEach(DrumVoiceID.allCases, id: \.self) { v in
-                let active = isVoiceActive(v, in: pattern)
-                VStack(spacing: 3) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(active ? ac : theme.panelBorder)
-                        .frame(width: 28, height: 20)
-                        .animation(.easeOut(duration: 0.06), value: active)
-                    Text(v.label)
-                        .font(.system(size: 6, weight: .bold, design: theme.fontDesign))
-                        .foregroundColor(theme.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(width: 28)
-                }
-            }
-        }
-    }
-
-    private func isVoiceActive(_ voice: DrumVoiceID, in pattern: DrumPattern) -> Bool {
-        guard drum.isPlaying else { return false }
-        let currentTick = drum.beatFraction * Double(pattern.loopTicks)
-        let window      = Double(pattern.ticksPerBeat) * 0.35
-        return pattern.hits.contains { abs(Double($0.tick) - currentTick) < window && $0.voice == voice }
     }
 
     // MARK: - Favorites entry
@@ -250,6 +358,63 @@ struct DrumMachineView: View {
             .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
                 .strokeBorder(theme.panelBorder, lineWidth: 1))
+        }
+    }
+}
+
+// MARK: - 2-bar beat strip
+
+private struct BeatStripView: View {
+    let totalSteps:   Int
+    let currentStep:  Int
+    let allHits:      [DrumHit]
+    let ticksPerStep: Int
+    let ac:    Color
+    let theme: AppTheme
+
+    private var stepsWithHits: Set<Int> {
+        Set(allHits.map { Int($0.tick) / ticksPerStep })
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let barGap:  CGFloat = 6
+            let cellGap: CGFloat = 1
+            let totalGapWidth = CGFloat(totalSteps - 1) * cellGap + (barGap - cellGap)
+            let cellW = (geo.size.width - totalGapWidth) / CGFloat(totalSteps)
+            let hits  = stepsWithHits
+
+            HStack(spacing: 0) {
+                ForEach(0..<totalSteps, id: \.self) { step in
+                    if step == totalSteps / 2 {
+                        Spacer().frame(width: barGap - cellGap)
+                    } else if step > 0 {
+                        Spacer().frame(width: cellGap)
+                    }
+
+                    let isCurrent = step == currentStep
+                    let hasHit   = hits.contains(step)
+                    let isBeat   = step % 4 == 0
+
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(
+                                isCurrent ? ac :
+                                hasHit    ? ac.opacity(0.45) :
+                                isBeat    ? theme.secondaryText.opacity(0.2) :
+                                            theme.panelBorder.opacity(0.5)
+                            )
+                            .frame(width: cellW,
+                                   height: isBeat ? geo.size.height : geo.size.height * 0.6)
+
+                        if isCurrent {
+                            RoundedRectangle(cornerRadius: 2)
+                                .strokeBorder(Color.white.opacity(0.7), lineWidth: 1)
+                                .frame(width: cellW, height: geo.size.height)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -294,7 +459,6 @@ private struct DrumKnob: View {
                             isDragging = true
                             dragStartValue = value
                         }
-                        // 240 px = full 0–1 range, so small touches make small changes
                         let delta = Float(-drag.translation.height / 240)
                         value = max(0, min(1, dragStartValue + delta))
                     }

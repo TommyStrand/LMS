@@ -42,8 +42,10 @@ final class DrumEngine: ObservableObject {
     @Published var patternIndex: Int = 0 {
         didSet {
             let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
-            _pattern     = DrumPattern.all[idx]
-            tickPosition = 0
+            _pattern         = DrumPattern.all[idx]
+            tickPosition     = 0
+            customHits       = nil
+            renderCustomHits = nil
         }
     }
     @Published var delayMix: Float = 0.22 {
@@ -59,6 +61,7 @@ final class DrumEngine: ObservableObject {
         didSet { renderMasterVolume = masterVolume }
     }
     @Published var beatFraction: Double = 0
+    @Published var customHits: [DrumHit]?
 
     // MARK: Audio graph
 
@@ -85,6 +88,7 @@ final class DrumEngine: ObservableObject {
     private var renderBpm:       Double = 90
     private var renderGrit:      Float  = 0
     private var _pattern:        DrumPattern = DrumPattern.all[0]
+    private var renderCustomHits: [DrumHit]?
     private var renderIsPlaying:    Bool   = false
     private var renderMasterVolume: Float  = 0.8
     private var beatCounter:        Int    = 0
@@ -131,6 +135,35 @@ final class DrumEngine: ObservableObject {
         } else {
             patternIndex = shuffleBag.removeLast()
         }
+    }
+
+    // MARK: Step sequencer
+
+    func toggleStep(voice: DrumVoiceID, step: Int) {
+        let pat = DrumPattern.all[max(0, min(patternIndex, DrumPattern.all.count - 1))]
+        var hits = customHits ?? Array(pat.hits)
+        let ticksPerStep = Int(pat.ticksPerBeat) / 4   // 16th-note grid
+        let tick = Int32(step * ticksPerStep)
+        if let idx = hits.firstIndex(where: { $0.voice == voice && $0.tick == tick }) {
+            hits.remove(at: idx)
+        } else {
+            hits.append(DrumHit(tick: tick, voice: voice, velocity: 0.85))
+            hits.sort { $0.tick < $1.tick }
+        }
+        customHits       = hits
+        renderCustomHits = hits
+    }
+
+    func resetPattern() {
+        customHits       = nil
+        renderCustomHits = nil
+    }
+
+    func activeSteps(for voice: DrumVoiceID) -> Set<Int> {
+        let pat = DrumPattern.all[max(0, min(patternIndex, DrumPattern.all.count - 1))]
+        let hits = customHits ?? pat.hits
+        let ticksPerStep = Int(pat.ticksPerBeat) / 4
+        return Set(hits.filter { $0.voice == voice }.map { Int($0.tick) / ticksPerStep })
     }
 
     // MARK: Sample loading
@@ -294,7 +327,7 @@ final class DrumEngine: ObservableObject {
             let prevMod = prev.truncatingRemainder(dividingBy: loopTicks)
             let currMod = tickPosition.truncatingRemainder(dividingBy: loopTicks)
 
-            for hit in _pattern.hits {
+            for hit in renderCustomHits ?? _pattern.hits {
                 let ht    = Double(hit.tick)
                 let fired = currMod > prevMod
                     ? (ht >= prevMod && ht < currMod)
