@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - PRNG (lock-free, no heap allocations — safe on the audio thread)
 
-private struct LCG {
+fileprivate struct LCG {
     var state: UInt64 = 2463534242
     mutating func next() -> Double {
         state = state &* 6364136223846793005 &+ 1442695040888963407
@@ -119,7 +119,7 @@ final class DrumEngine: ObservableObject {
 
     @Published var isPlaying   = false
     @Published var bpm: Double = 90 {
-        didSet { _bpm = bpm; updateDelayTime() }
+        didSet { renderBpm = bpm; updateDelayTime() }
     }
     @Published var patternIndex: Int = 0 {
         didSet {
@@ -135,7 +135,7 @@ final class DrumEngine: ObservableObject {
         didSet { reverbNode.wetDryMix = shimmer * 100 }
     }
     @Published var grit: Float = 0.0 {
-        didSet { _grit = grit }
+        didSet { renderGrit = grit }
     }
     // 0…1 fraction through the current loop bar (drives the beat ring in the UI)
     @Published var beatFraction: Double = 0
@@ -150,32 +150,32 @@ final class DrumEngine: ObservableObject {
 
     // MARK: Render-thread shadow vars (written from main, read from audio thread)
 
-    private var voicePool: [DrumVoiceSynth?] = Array(repeating: nil, count: 24)
-    private var tickPosition:  Double = 0
-    private var _bpm:          Double = 90
-    private var _grit:         Float  = 0
-    private var _pattern:      DrumPattern = DrumPattern.all[0]
-    private var _isPlaying:    Bool   = false
-    private var beatCounter:   Int    = 0
+    private var voicePool:    [DrumVoiceSynth?] = Array(repeating: nil, count: 24)
+    private var tickPosition: Double = 0
+    private var renderBpm:    Double = 90
+    private var renderGrit:   Float  = 0
+    private var _pattern:     DrumPattern = DrumPattern.all[0]
+    private var renderIsPlaying: Bool = false
+    private var beatCounter:  Int    = 0
 
     // MARK: Init
 
     init() {
-        _bpm     = bpm
-        _pattern = DrumPattern.all[0]
+        renderBpm = bpm
+        _pattern  = DrumPattern.all[0]
         setupAudio()
     }
 
     // MARK: Playback
 
     func play() {
-        tickPosition = 0
-        _isPlaying   = true
+        tickPosition    = 0
+        renderIsPlaying = true
         DispatchQueue.main.async { self.isPlaying = true }
     }
 
     func stop() {
-        _isPlaying = false
+        renderIsPlaying = false
         DispatchQueue.main.async {
             self.isPlaying    = false
             self.beatFraction = 0
@@ -207,7 +207,7 @@ final class DrumEngine: ObservableObject {
         audioEngine.connect(delayNode,  to: reverbNode,           format: fmt)
         audioEngine.connect(reverbNode, to: audioEngine.mainMixerNode, format: fmt)
 
-        delayNode.delayTime     = 60.0 / _bpm * 0.75  // dotted-eighth feel
+        delayNode.delayTime     = 60.0 / renderBpm * 0.75  // dotted-eighth feel
         delayNode.feedback      = 28
         delayNode.lowPassCutoff = 5500
         delayNode.wetDryMix     = delayMix * 100
@@ -220,7 +220,7 @@ final class DrumEngine: ObservableObject {
     }
 
     private func updateDelayTime() {
-        delayNode.delayTime = 60.0 / _bpm * 0.75
+        delayNode.delayTime = 60.0 / renderBpm * 0.75
     }
 
     // MARK: Render block
@@ -232,7 +232,7 @@ final class DrumEngine: ObservableObject {
         let bufList = UnsafeMutableAudioBufferListPointer(abl)
         for buf in bufList { if let d = buf.mData { memset(d, 0, Int(buf.mDataByteSize)) } }
 
-        guard _isPlaying else { isSilence.pointee = true; return }
+        guard renderIsPlaying else { isSilence.pointee = true; return }
         guard let lPtr = bufList[0].mData?.assumingMemoryBound(to: Float.self),
               let rPtr = (bufList.count > 1 ? bufList[1].mData : bufList[0].mData)?
                 .assumingMemoryBound(to: Float.self)
@@ -240,8 +240,8 @@ final class DrumEngine: ObservableObject {
 
         let loopTicks      = Double(_pattern.loopTicks)
         let tpb            = Double(_pattern.ticksPerBeat)
-        let ticksPerSample = (_bpm / 60.0) * tpb / sampleRate
-        let grit           = _grit
+        let ticksPerSample = (renderBpm / 60.0) * tpb / sampleRate
+        let grit           = renderGrit
 
         for frame in 0 ..< frameCount {
             let prev = tickPosition
