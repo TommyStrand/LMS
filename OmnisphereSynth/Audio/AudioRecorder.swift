@@ -22,11 +22,11 @@ final class AudioRecorder: ObservableObject {
         exportURL = nil
         failed    = false
 
-        let ts       = Int(Date().timeIntervalSince1970)
+        let stamp    = Int(Date().timeIntervalSince1970)
         let synthURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("jam_synth_\(ts).caf")
+            .appendingPathComponent("jam_synth_\(stamp).caf")
         let drumURL  = FileManager.default.temporaryDirectory
-            .appendingPathComponent("jam_drum_\(ts).caf")
+            .appendingPathComponent("jam_drum_\(stamp).caf")
 
         // CAF with 16-bit PCM — readable by AVMutableComposition on all OS versions
         let recSettings: [String: Any] = [
@@ -79,18 +79,17 @@ final class AudioRecorder: ObservableObject {
         }
 
         DispatchQueue.main.async { self.isRecording = false; self.isExporting = true }
-        exportMix()
+        Task { await exportMix() }
     }
 
     // MARK: - Export
 
-    private func exportMix() {
+    @MainActor
+    private func exportMix() async {
         guard let synthURL = synthTempURL, let drumURL = drumTempURL else {
-            DispatchQueue.main.async { self.isExporting = false; self.failed = true }
-            return
+            isExporting = false; failed = true; return
         }
 
-        let ts     = Int(Date().timeIntervalSince1970)
         let outURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("Jam \(formattedDate()).m4a")
 
@@ -99,45 +98,46 @@ final class AudioRecorder: ObservableObject {
         let drumAsset   = AVURLAsset(url: drumURL)
 
         do {
-            if let src = synthAsset.tracks(withMediaType: .audio).first,
+            let synthTracks   = try await synthAsset.loadTracks(withMediaType: .audio)
+            let synthDuration = try await synthAsset.load(.duration)
+            if let src = synthTracks.first,
                let trk = composition.addMutableTrack(withMediaType: .audio,
                                                       preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try trk.insertTimeRange(CMTimeRange(start: .zero, duration: synthAsset.duration),
+                try trk.insertTimeRange(CMTimeRange(start: .zero, duration: synthDuration),
                                         of: src, at: .zero)
             }
-            if let src = drumAsset.tracks(withMediaType: .audio).first,
+
+            let drumTracks   = try await drumAsset.loadTracks(withMediaType: .audio)
+            let drumDuration = try await drumAsset.load(.duration)
+            if let src = drumTracks.first,
                let trk = composition.addMutableTrack(withMediaType: .audio,
                                                       preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try trk.insertTimeRange(CMTimeRange(start: .zero, duration: drumAsset.duration),
+                try trk.insertTimeRange(CMTimeRange(start: .zero, duration: drumDuration),
                                         of: src, at: .zero)
             }
         } catch {
             print("AudioRecorder: composition failed – \(error)")
-            DispatchQueue.main.async { self.isExporting = false; self.failed = true }
-            return
+            isExporting = false; failed = true; return
         }
 
         guard let session = AVAssetExportSession(asset: composition,
                                                   presetName: AVAssetExportPresetAppleM4A) else {
-            DispatchQueue.main.async { self.isExporting = false; self.failed = true }
-            return
+            isExporting = false; failed = true; return
         }
 
         session.outputURL      = outURL
         session.outputFileType = .m4a
 
-        session.exportAsynchronously { [weak self] in
-            DispatchQueue.main.async {
-                self?.isExporting = false
-                if session.status == .completed {
-                    self?.exportURL = outURL
-                    try? FileManager.default.removeItem(at: synthURL)
-                    try? FileManager.default.removeItem(at: drumURL)
-                } else {
-                    print("AudioRecorder: export failed – \(session.error?.localizedDescription ?? "unknown")")
-                    self?.failed = true
-                }
-            }
+        await session.export()
+
+        isExporting = false
+        if session.status == .completed {
+            exportURL = outURL
+            try? FileManager.default.removeItem(at: synthURL)
+            try? FileManager.default.removeItem(at: drumURL)
+        } else {
+            print("AudioRecorder: export failed – \(session.error?.localizedDescription ?? "unknown")")
+            failed = true
         }
     }
 
