@@ -110,7 +110,14 @@ final class AudioEngine: ObservableObject {
     // MARK: - Touch Events
 
     func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
-        guard voiceNodes[touchID] == nil else { return }
+        // Tear down any existing voice for this ID — handles touch-ID reuse (iOS
+        // recycles UITouch memory addresses) and rapid re-taps during the tail window.
+        if let existing = voiceNodes[touchID] {
+            engine.detach(existing)
+            voiceNodes.removeValue(forKey: touchID)
+            voices.removeValue(forKey: touchID)
+            voiceMods.removeValue(forKey: touchID)
+        }
         let preset = currentPreset
 
         let voice: any AnyVoice
