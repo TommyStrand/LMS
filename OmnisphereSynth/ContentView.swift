@@ -238,7 +238,7 @@ struct ContentView: View {
             }
 
             // Drum machine toggle
-            iconButton(systemName: "drum\(showDrumMachine ? ".fill" : "")",
+            iconButton(systemName: showDrumMachine ? "metronome.fill" : "metronome",
                        active: showDrumMachine, theme: theme) {
                 withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
