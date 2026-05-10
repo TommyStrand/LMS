@@ -15,11 +15,11 @@ final class AudioEngine: ObservableObject {
     private let shimmerMixer  = AVAudioMixerNode()
 
     // MARK: - Per-instance texture effects
-    private var lofi      = (LofiProcessor(),  LofiProcessor())
-    private var vinyl     = (VinylProcessor(sampleRate: 44100), VinylProcessor(sampleRate: 44100))
-    private var grit      = GritProcessor()
-    private var tape      = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
-    private var doubler   = DoublerProcessor(sampleRate: 44100)
+    private var lofi       = (LofiProcessor(),  LofiProcessor())
+    private var spaceEcho  = (SpaceEchoProcessor(sampleRate: 44100), SpaceEchoProcessor(sampleRate: 44100))
+    private var grit       = GritProcessor()
+    private var tape       = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
+    private var bloom      = BloomReverbProcessor(sampleRate: 44100)
 
     // MARK: - State
     private(set) var voices: [Int: any AnyVoice] = [:]
@@ -102,10 +102,10 @@ final class AudioEngine: ObservableObject {
     func setTremolo(_ v: Float)    { currentPreset.tremulantDepth = v }
     func setChorus(_ v: Float)     { currentPreset.chorusMix = v }
     func setLofi(_ v: Float)       { currentPreset.lofiAmount = v }
-    func setVinyl(_ v: Float)      { currentPreset.vinylAmount = v }
+    func setSpaceEcho(_ v: Float)  { currentPreset.spaceEchoAmount = v }
     func setBrokenTape(_ v: Float) { currentPreset.brokenTape = v }
     func setGrit(_ v: Float)       { currentPreset.gritAmount = v }
-    func setDoubler(_ v: Float)    { currentPreset.doublerAmount = v }
+    func setBloom(_ v: Float)      { currentPreset.bloomAmount = v }
 
     // MARK: - Touch Events
 
@@ -135,11 +135,11 @@ final class AudioEngine: ObservableObject {
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
 
         // Capture by value/ref so render block reads consistent params
-        let lofiRef    = lofi
-        let vinylRef   = vinyl
-        let gritRef    = grit
-        let tapeRef    = tape
-        let doublerRef = doubler
+        let lofiRef       = lofi
+        let spaceEchoRef  = spaceEcho
+        let gritRef       = grit
+        let tapeRef       = tape
+        let bloomRef      = bloom
 
         let node = AVAudioSourceNode(format: format) { [weak self, weak voice, weak mod] _, _, frameCount, audioBufferList in
             guard let self, let voice else { return noErr }
@@ -161,20 +161,20 @@ final class AudioEngine: ObservableObject {
                 l = lofiRef.0.process(l, amount: lfAmt)
                 r = lofiRef.1.process(r, amount: lfAmt)
 
-                // Vinyl
-                let viAmt = preset.vinylAmount
-                l = vinylRef.0.process(l, amount: viAmt)
-                r = vinylRef.1.process(r, amount: viAmt)
+                // Space Echo (independent instances per channel for natural stereo spread)
+                let seAmt = preset.spaceEchoAmount
+                l = spaceEchoRef.0.process(l, amount: seAmt)
+                r = spaceEchoRef.1.process(r, amount: seAmt)
 
                 // Broken tape delay
                 let btAmt = preset.brokenTape
                 l = tapeRef.0.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
                 r = tapeRef.1.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
 
-                // Doubler
-                let dAmt = preset.doublerAmount
-                let (dl, dr) = doublerRef.process(l, amount: dAmt)
-                l = dl; r = dr
+                // Bloom Reverb (mono sum in, stereo bloom out)
+                let blAmt = preset.bloomAmount
+                let (bl, br) = bloomRef.process((l + r) * 0.5, amount: blAmt)
+                l = bl; r = br
 
                 // Universal modulation: tremolo + chorus (works on every voice mode)
                 if let mod {

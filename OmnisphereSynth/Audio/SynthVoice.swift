@@ -14,6 +14,9 @@ final class SynthVoice: AnyVoice {
     // Smooth pitch glide (audio-thread only)
     private var smoothPitchBend: Double = 0
 
+    // Smooth filter cutoff — prevents biquad instability from rapid LFO jumps
+    private var smoothCutoff: Double = 0
+
     // Oscillator state
     private var phase1: Double = 0
     private var phase2: Double = 0
@@ -45,6 +48,7 @@ final class SynthVoice: AnyVoice {
         self.preset = preset
         self.sampleRate = sampleRate
         self.freq = 440.0 * pow(2.0, Double(note - 69) / 12.0)
+        self.smoothCutoff = Double(preset.filterCutoff)
     }
 
     func start() { envStage = .attack; envTime = 0 }
@@ -98,14 +102,15 @@ final class SynthVoice: AnyVoice {
             raw *= env
         }
 
-        // Filter
-        var cutoff = Double(preset.filterCutoff) * Double(filterCutoffMod * 1.8 + 0.1)
-        cutoff = max(30, min(cutoff, 18000))
+        // Filter — smooth cutoff to prevent biquad instability from rapid LFO changes
+        var targetCutoff = Double(preset.filterCutoff) * Double(filterCutoffMod * 1.8 + 0.1)
+        targetCutoff = max(30, min(targetCutoff, 18000))
         if preset.lfoTarget == .filter {
-            cutoff *= pow(2.0, lfoVal)
-            cutoff = max(30, min(cutoff, 18000))
+            targetCutoff *= pow(2.0, lfoVal)
+            targetCutoff = max(30, min(targetCutoff, 18000))
         }
-        let filtered = applyBiquadLP(input: raw, cutoff: cutoff, resonance: Double(preset.filterResonance))
+        smoothCutoff += (targetCutoff - smoothCutoff) * 0.05
+        let filtered = applyBiquadLP(input: raw, cutoff: smoothCutoff, resonance: Double(preset.filterResonance))
 
         let s = Float(filtered * Double(velocity))
         return (s, s)

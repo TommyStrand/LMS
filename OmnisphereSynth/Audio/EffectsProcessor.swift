@@ -19,41 +19,113 @@ final class LofiProcessor {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Vinyl: wow/flutter + crackle
+// Space Echo: Roland RE-201-style multi-head tape echo
+// Three heads at increasing delays, wow/flutter pitch modulation,
+// bandwidth-limited feedback with tape saturation.
 // ─────────────────────────────────────────────────────────────────────────────
-final class VinylProcessor {
-    private let bufSize = 8192
+final class SpaceEchoProcessor {
+    private let bufSize = 65536
     private var buf: [Float]
     private var writePos = 0
     private var wowPhase:     Double = 0
     private var flutterPhase: Double = 0
-    private var rng: UInt32 = 54321
-    private let sampleRate: Double
+    private var lpState:      Float  = 0
+    private let sampleRate:   Float
+    private let headSamples:  [Float]           // three head positions in samples
 
     init(sampleRate: Double) {
-        self.sampleRate = sampleRate
-        buf = Array(repeating: 0, count: 8192)
+        self.sampleRate = Float(sampleRate)
+        buf = Array(repeating: 0, count: 65536)
+        headSamples = [110, 240, 430].map { $0 * Float(sampleRate) / 1000 }
     }
 
     func process(_ input: Float, amount: Float) -> Float {
         guard amount > 0.005 else { return input }
-        buf[writePos & (bufSize - 1)] = input
-        wowPhase     += 0.30 / sampleRate
-        flutterPhase += 4.20 / sampleRate
-        let wow     = sin(wowPhase     * 2 * .pi) * Double(amount) * 32
-        let flutter = sin(flutterPhase * 2 * .pi) * Double(amount) *  9
-        var rpos    = Float(writePos) - Float(120 + wow + flutter)
-        if rpos < 0 { rpos += Float(bufSize) }
-        let r0 = Int(rpos) & (bufSize - 1)
-        let r1 = (r0 + 1)  & (bufSize - 1)
-        let fr = rpos - rpos.rounded(.down)
-        var out = buf[r0] * (1 - fr) + buf[r1] * fr
+        let dt = 1.0 / Double(sampleRate)
+        wowPhase     += 0.45 * dt
+        flutterPhase += 5.20 * dt
+        let wobble = Float(sin(wowPhase     * 2 * .pi) * 0.30
+                          + sin(flutterPhase * 2 * .pi) * 0.08) * amount
+
+        var wet: Float = 0
+        let headGains: [Float] = [0.55, 0.38, 0.22]
+        for (i, base) in headSamples.enumerated() {
+            wet += readAt(Float(writePos) - (base + wobble * Float(i + 1) * 2.5))
+                   * headGains[i]
+        }
+
+        // Tape bandwidth LPF + soft saturation on feedback
+        lpState = lpState * 0.72 + wet * 0.28
+        let fb = tanh(lpState * (1 + amount * 0.8)) * 0.45
+
+        buf[writePos & (bufSize - 1)] = input + fb * amount
         writePos = (writePos + 1) & (bufSize - 1)
-        // Crackle
-        rng = rng &* 1664525 &+ 1013904223
-        let n = Float(Int32(bitPattern: rng)) / Float(Int32.max)
-        if abs(n) > 1 - amount * 0.004 { out += n * 0.22 }
-        return out
+
+        return input * (1 - amount * 0.35) + wet * amount
+    }
+
+    private func readAt(_ pos: Float) -> Float {
+        var p = pos; if p < 0 { p += Float(bufSize) }
+        let i0 = Int(p) & (bufSize - 1)
+        let i1 = (i0 + 1) & (bufSize - 1)
+        let fr = p - p.rounded(.down)
+        return buf[i0] * (1 - fr) + buf[i1] * fr
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bloom Reverb: reverse-reverb character
+// Four taps at increasing delays with rising gain (soft-to-loud) creates a
+// swell that builds over time, approximating the reverse-reverb effect.
+// Alternating L/R panning of taps gives stereo width from a mono source.
+// ─────────────────────────────────────────────────────────────────────────────
+final class BloomReverbProcessor {
+    private let bufSize = 65536
+    private var buf: [Float]
+    private var writePos = 0
+    private var lfoPhase: Double = 0
+    private var lpState:  Float  = 0
+    private let tapSamples: [Float]
+    private let tapGains: [Float] = [0.18, 0.32, 0.54, 0.78]
+
+    init(sampleRate: Double) {
+        buf = Array(repeating: 0, count: 65536)
+        // Rising delays: soft early reflections → loud late bloom
+        tapSamples = [80, 180, 320, 530].map { $0 * Float(sampleRate) / 1000 }
+    }
+
+    func process(_ input: Float, amount: Float) -> (Float, Float) {
+        guard amount > 0.005 else { return (input, input) }
+        lfoPhase += 0.19 / 44100   // very slow shimmer, prevents metallic coloration
+        let lfoMod = Float(sin(lfoPhase * 2 * .pi)) * amount * 4
+
+        var outL: Float = 0, outR: Float = 0
+        for (i, (samples, gain)) in zip(tapSamples, tapGains).enumerated() {
+            let mod = (i % 2 == 0) ? lfoMod : -lfoMod
+            let tap = readAt(Float(writePos) - (samples + mod))
+            if i % 2 == 0 { outL += tap * gain } else { outR += tap * gain }
+        }
+
+        // Light cross-mix for coherent stereo image
+        let l = outL * 0.75 + outR * 0.25
+        let r = outR * 0.75 + outL * 0.25
+
+        // Diffuse feedback — keeps the bloom alive without runaway buildup
+        lpState = lpState * 0.68 + (l + r) * 0.14 * amount
+        buf[writePos & (bufSize - 1)] = input + lpState
+        writePos = (writePos + 1) & (bufSize - 1)
+
+        let dry = 1 - amount * 0.4
+        return (input * dry + l * amount * 0.65,
+                input * dry + r * amount * 0.65)
+    }
+
+    private func readAt(_ pos: Float) -> Float {
+        var p = pos; if p < 0 { p += Float(bufSize) }
+        let i0 = Int(p) & (bufSize - 1)
+        let i1 = (i0 + 1) & (bufSize - 1)
+        let fr = p - p.rounded(.down)
+        return buf[i0] * (1 - fr) + buf[i1] * fr
     }
 }
 
@@ -70,50 +142,7 @@ struct GritProcessor {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Doubler: two detuned + delayed copies, hard-panned L/R (NeuralDSP style)
-// ─────────────────────────────────────────────────────────────────────────────
-final class DoublerProcessor {
-    private let bufSize = 8192
-    private var bufA: [Float]
-    private var bufB: [Float]
-    private var writePos = 0
-    private var lfoA: Float = 0
-    private var lfoB: Float = 0.25
-    private let sampleRate: Float
-
-    init(sampleRate: Double) {
-        self.sampleRate = Float(sampleRate)
-        bufA = Array(repeating: 0, count: 8192)
-        bufB = Array(repeating: 0, count: 8192)
-    }
-
-    func process(_ input: Float, amount: Float) -> (Float, Float) {
-        guard amount > 0.005 else { return (input, input) }
-        bufA[writePos & (bufSize - 1)] = input
-        bufB[writePos & (bufSize - 1)] = input
-        let dt = 1 / sampleRate
-        lfoA += 0.20 * dt
-        lfoB += 0.23 * dt
-        let mod = amount * 8
-        let dA = sampleRate * 0.012 + sin(lfoA * 2 * .pi) * mod
-        let dB = sampleRate * 0.018 + sin(lfoB * 2 * .pi) * mod
-
-        func read(_ buf: [Float], _ delay: Float) -> Float {
-            var rp = Float(writePos) - delay
-            if rp < 0 { rp += Float(bufSize) }
-            let i0 = Int(rp) & (bufSize - 1)
-            let i1 = (i0 + 1) & (bufSize - 1)
-            let fr = rp - rp.rounded(.down)
-            return buf[i0] * (1 - fr) + buf[i1] * fr
-        }
-
-        writePos = (writePos + 1) & (bufSize - 1)
-        let dry = 1 - amount * 0.35
-        return (input * dry + read(bufA, dA) * amount,
-                input * dry + read(bufB, dB) * amount)
-    }
-}
+// (DoublerProcessor replaced by BloomReverbProcessor above)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Broken Tape Delay: wow/flutter on delay time + random dropouts + tape sat

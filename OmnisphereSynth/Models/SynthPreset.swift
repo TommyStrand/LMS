@@ -42,11 +42,11 @@ struct SynthPreset: Identifiable, Equatable {
     var tremulantDepth: Float
 
     // Texture effects
-    var lofiAmount: Float
-    var vinylAmount: Float
-    var brokenTape: Float
-    var gritAmount: Float
-    var doublerAmount: Float
+    var lofiAmount:    Float
+    var spaceEchoAmount: Float
+    var brokenTape:    Float
+    var gritAmount:    Float
+    var bloomAmount:   Float
 
     // Preset chip icon style
     var iconStyle: IconStyle
@@ -88,10 +88,10 @@ struct SynthPreset: Identifiable, Equatable {
         shimmerAmount: Float = 0,
         tremulantDepth: Float = 0,
         lofiAmount: Float = 0,
-        vinylAmount: Float = 0,
+        spaceEchoAmount: Float = 0,
         brokenTape: Float = 0,
         gritAmount: Float = 0,
-        doublerAmount: Float = 0,
+        bloomAmount: Float = 0,
         iconStyle: IconStyle = .mysticWave
     ) {
         self.name = name; self.color = color
@@ -108,10 +108,10 @@ struct SynthPreset: Identifiable, Equatable {
         self.shimmerAmount = shimmerAmount
         self.tremulantDepth = tremulantDepth
         self.lofiAmount = lofiAmount
-        self.vinylAmount = vinylAmount
+        self.spaceEchoAmount = spaceEchoAmount
         self.brokenTape = brokenTape
         self.gritAmount = gritAmount
-        self.doublerAmount = doublerAmount
+        self.bloomAmount = bloomAmount
         self.iconStyle = iconStyle
     }
 
@@ -124,9 +124,9 @@ extension SynthPreset {
             name: "Hammond B3",
             color: "#B45309",
             voiceMode: .hammondB3,
-            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25,
-            tremulantDepth: 0.5,
-            gritAmount: 0.18,
+            reverbMix: 0.22, delayMix: 0.04, delayTime: 0.25,
+            // Leslie rotation and key-click are built into HammondVoice —
+            // no external tremulo or grit needed here.
             iconStyle: .hammondTonewheel
         ),
         SynthPreset(
@@ -262,7 +262,7 @@ extension SynthPreset {
             attack: 0.45, decay: 0.5, sustain: 0.75, release: 1.6,
             reverbMix: 0.55, delayMix: 0.10, chorusMix: 0.30,
             tremulantDepth: 0.12,
-            vinylAmount: 0.28, brokenTape: 0.18,
+            spaceEchoAmount: 0.28, brokenTape: 0.18,
             iconStyle: .mysticWave
         ),
         SynthPreset(

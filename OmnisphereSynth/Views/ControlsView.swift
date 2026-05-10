@@ -206,8 +206,8 @@ struct TextureRow: View {
                 KnobView(label: "LO-FI", value: preset.lofiAmount, color: color) { v in
                     engine.setLofi(v)
                 }
-                KnobView(label: "VINYL", value: preset.vinylAmount, color: color) { v in
-                    engine.setVinyl(v)
+                KnobView(label: "S.ECHO", value: preset.spaceEchoAmount, color: color) { v in
+                    engine.setSpaceEcho(v)
                 }
                 KnobView(label: "B.TAPE", value: preset.brokenTape, color: color) { v in
                     engine.setBrokenTape(v)
@@ -215,8 +215,8 @@ struct TextureRow: View {
                 KnobView(label: "GRIT", value: preset.gritAmount, color: color) { v in
                     engine.setGrit(v)
                 }
-                KnobView(label: "DBLR", value: preset.doublerAmount, color: color) { v in
-                    engine.setDoubler(v)
+                KnobView(label: "BLOOM", value: preset.bloomAmount, color: color) { v in
+                    engine.setBloom(v)
                 }
             }
         }
