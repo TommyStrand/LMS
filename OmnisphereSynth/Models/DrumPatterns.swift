@@ -69,18 +69,24 @@ struct DrumPattern {
 }
 
 extension DrumPattern {
-    static let all: [DrumPattern] = drumPatternRaw.map { raw in
-        DrumPattern(
-            name: raw.0,
-            feel: DrumFeel(rawValue: raw.1) ?? .build,
-            loopTicks: Int32(raw.2),
-            ticksPerBeat: Int32(raw.3),
-            hits: raw.4.compactMap { tick, vi, vel in
-                guard let v = DrumVoiceID(rawValue: vi) else { return nil }
-                return DrumHit(tick: Int32(tick), voice: v, velocity: vel)
-            }
-        )
-    }
+    /// All available patterns: 30 hardcoded grooves + any MIDI files found in the app bundle.
+    /// MIDI files are discovered by GrooveImporter at first access (lazy, runs once).
+    static let all: [DrumPattern] = {
+        let hardcoded = drumPatternRaw.map { raw in
+            DrumPattern(
+                name: raw.0,
+                feel: DrumFeel(rawValue: raw.1) ?? .build,
+                loopTicks: Int32(raw.2),
+                ticksPerBeat: Int32(raw.3),
+                hits: raw.4.compactMap { tick, vi, vel in
+                    guard let v = DrumVoiceID(rawValue: vi) else { return nil }
+                    return DrumHit(tick: Int32(tick), voice: v, velocity: vel)
+                }
+            )
+        }
+        let imported = GrooveImporter.importFromBundle()
+        return hardcoded + imported
+    }()
 
     static func patterns(for feel: DrumFeel) -> [DrumPattern] {
         all.filter { $0.feel == feel }
