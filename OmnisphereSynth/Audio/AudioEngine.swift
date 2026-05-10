@@ -14,20 +14,7 @@ final class AudioEngine: ObservableObject {
     private let timePitch     = AVAudioUnitTimePitch()
     private let shimmerMixer  = AVAudioMixerNode()
 
-    // MARK: - Per-instance texture effects
-    private var lofi       = (LofiProcessor(),  LofiProcessor())
-    private var spaceEcho  = (SpaceEchoProcessor(sampleRate: 44100), SpaceEchoProcessor(sampleRate: 44100))
-    private var grit       = GritProcessor()
-    private var tape       = (BrokenTapeDelay(sampleRate: 44100), BrokenTapeDelay(sampleRate: 44100))
-    private var bloom      = BloomReverbProcessor(sampleRate: 44100)
-    // L/R phaser with 180° offset so the notches sweep in opposite directions
-    private var phaser     = (PhaserProcessor(sampleRate: 44100),
-                              PhaserProcessor(sampleRate: 44100, lfoPhaseOffset: 0.5))
-    private var autoWah    = (AutoWahProcessor(sampleRate: 44100),
-                              AutoWahProcessor(sampleRate: 44100))
-    // Slightly different LFO rates give natural stereo movement in the delay
-    private var modDelay   = (ModulatingDelayProcessor(sampleRate: 44100, lfoRate: 0.33),
-                              ModulatingDelayProcessor(sampleRate: 44100, lfoRate: 0.37))
+    // Effects are created fresh per-voice in noteOn — no shared instances.
 
     // MARK: - State
     private(set) var voices: [Int: any AnyVoice] = [:]
@@ -152,78 +139,81 @@ final class AudioEngine: ObservableObject {
 
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
 
-        // Capture by value/ref so render block reads consistent params
-        let lofiRef      = lofi
-        let spaceEchoRef = spaceEcho
-        let gritRef      = grit
-        let tapeRef      = tape
-        let bloomRef     = bloom
-        let phaserRef    = phaser
-        let autoWahRef   = autoWah
-        let modDelayRef  = modDelay
+        // Fresh effect instances per voice — every render block gets its own state,
+        // preventing data races when multiple voices play concurrently.
+        let sr           = sampleRate
+        let lofiRef      = (LofiProcessor(), LofiProcessor())
+        let spaceEchoRef = (SpaceEchoProcessor(sampleRate: sr), SpaceEchoProcessor(sampleRate: sr))
+        let gritRef      = GritProcessor()
+        let tapeRef      = (BrokenTapeDelay(sampleRate: sr), BrokenTapeDelay(sampleRate: sr))
+        let bloomRef     = BloomReverbProcessor(sampleRate: sr)
+        let phaserRef    = (PhaserProcessor(sampleRate: sr),
+                            PhaserProcessor(sampleRate: sr, lfoPhaseOffset: 0.5))
+        let autoWahRef   = (AutoWahProcessor(sampleRate: sr), AutoWahProcessor(sampleRate: sr))
+        let modDelayRef  = (ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.33),
+                            ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.37))
 
-        let node = AVAudioSourceNode(format: format) { [weak self, weak voice, weak mod] _, _, frameCount, audioBufferList in
+        // mod is captured strongly so tremolo/chorus persist through the full note tail.
+        let node = AVAudioSourceNode(format: format) { [weak self, weak voice] _, _, frameCount, audioBufferList in
             guard let self, let voice else { return noErr }
             let preset = self.currentPreset
-            let abl    = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let left   = abl[0].mData!.assumingMemoryBound(to: Float.self)
-            let right  = abl[1].mData!.assumingMemoryBound(to: Float.self)
+
+            // Sync live-knob param that OrganVoice captures at init time
+            if let ov = voice as? OrganVoice { ov.tremulantDepth = preset.tremulantDepth }
+
+            let abl   = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            let left  = abl[0].mData!.assumingMemoryBound(to: Float.self)
+            let right = abl[1].mData!.assumingMemoryBound(to: Float.self)
 
             for i in 0..<Int(frameCount) {
                 var (l, r) = voice.nextStereoSample()
 
                 // Auto-Wah (before grit: envelope filter shapes voice before distortion)
-                let awAmt = preset.autoWahAmount
-                l = autoWahRef.0.process(l, amount: awAmt)
-                r = autoWahRef.1.process(r, amount: awAmt)
+                l = autoWahRef.0.process(l, amount: preset.autoWahAmount)
+                r = autoWahRef.1.process(r, amount: preset.autoWahAmount)
 
                 // Grit
-                let gAmt = preset.gritAmount
-                l = gritRef.process(l, amount: gAmt)
-                r = gritRef.process(r, amount: gAmt)
+                l = gritRef.process(l, amount: preset.gritAmount)
+                r = gritRef.process(r, amount: preset.gritAmount)
 
                 // Lo-Fi
-                let lfAmt = preset.lofiAmount
-                l = lofiRef.0.process(l, amount: lfAmt)
-                r = lofiRef.1.process(r, amount: lfAmt)
+                l = lofiRef.0.process(l, amount: preset.lofiAmount)
+                r = lofiRef.1.process(r, amount: preset.lofiAmount)
 
-                // Space Echo (independent instances per channel for natural stereo spread)
-                let seAmt = preset.spaceEchoAmount
-                l = spaceEchoRef.0.process(l, amount: seAmt)
-                r = spaceEchoRef.1.process(r, amount: seAmt)
+                // Space Echo (independent L/R instances for natural stereo spread)
+                l = spaceEchoRef.0.process(l, amount: preset.spaceEchoAmount)
+                r = spaceEchoRef.1.process(r, amount: preset.spaceEchoAmount)
 
                 // Broken tape delay
                 let btAmt = preset.brokenTape
                 l = tapeRef.0.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
                 r = tapeRef.1.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
 
-                // Bloom Reverb (mono sum in, stereo bloom out)
+                // Bloom Reverb — parallel swell preserves prior-stage stereo width
                 let blAmt = preset.bloomAmount
-                let (bl, br) = bloomRef.process((l + r) * 0.5, amount: blAmt)
-                l = bl; r = br
-
-                // Universal modulation: tremolo + chorus (works on every voice mode)
-                if let mod {
-                    let (ml, mr) = mod.process(l: l, r: r,
-                                               tremDepth: preset.tremulantDepth,
-                                               chorusMix: preset.chorusMix)
-                    l = ml; r = mr
+                if blAmt > 0.005 {
+                    let (bl, br) = bloomRef.process((l + r) * 0.5, amount: blAmt)
+                    l = l * (1.0 - blAmt * 0.3) + bl
+                    r = r * (1.0 - blAmt * 0.3) + br
                 }
 
+                // Universal modulation: tremolo + chorus
+                let (ml, mr) = mod.process(l: l, r: r,
+                                           tremDepth: preset.tremulantDepth,
+                                           chorusMix: preset.chorusMix)
+                l = ml; r = mr
+
                 // Warm tube overdrive
-                let drive = preset.distortionAmount
-                l = tubeSaturate(l, drive: drive)
-                r = tubeSaturate(r, drive: drive)
+                l = tubeSaturate(l, drive: preset.distortionAmount)
+                r = tubeSaturate(r, drive: preset.distortionAmount)
 
                 // Phaser (after saturation: sweeps the harmonically-rich tone)
-                let phAmt = preset.phaserAmount
-                l = phaserRef.0.process(l, amount: phAmt)
-                r = phaserRef.1.process(r, amount: phAmt)
+                l = phaserRef.0.process(l, amount: preset.phaserAmount)
+                r = phaserRef.1.process(r, amount: preset.phaserAmount)
 
                 // Modulating Delay (last in chain: warps the full processed signal)
-                let mdAmt = preset.modDelayAmount
-                l = modDelayRef.0.process(l, amount: mdAmt)
-                r = modDelayRef.1.process(r, amount: mdAmt)
+                l = modDelayRef.0.process(l, amount: preset.modDelayAmount)
+                r = modDelayRef.1.process(r, amount: preset.modDelayAmount)
 
                 left[i]  = l
                 right[i] = r

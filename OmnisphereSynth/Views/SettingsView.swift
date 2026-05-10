@@ -163,7 +163,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             infoRow("App",     value: "SuperNovaPad 1.0",                theme: theme)
                             infoRow("Voices",  value: "Synth · Hammond · Rhodes · Organ", theme: theme)
-                            infoRow("Effects", value: "Grit · Lo-Fi · Vinyl · Tape · Doubler", theme: theme)
+                            infoRow("Effects", value: "Lo-Fi · S.Echo · B.Tape · Grit · Bloom · Phaser · A.Wah · Waver", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)

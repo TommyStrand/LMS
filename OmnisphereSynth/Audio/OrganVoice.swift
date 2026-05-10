@@ -7,12 +7,14 @@ import Foundation
 final class OrganVoice: AnyVoice {
 
     // Drawbar levels (0–1). Church cathedral registration by default.
-    static let churchLevels: [Float] = [0.55, 1.0, 0.7, 0.8, 0.5, 0.35, 0.15, 0.1, 0.05]
-    static let ratios: [Double]      = [0.5,  1.0, 1.5, 2.0, 3.0,  4.0,  5.0, 6.0, 8.0]
+    static let churchLevels: [Float]    = [0.55, 1.0, 0.7, 0.8, 0.5, 0.35, 0.15, 0.1, 0.05]
+    static let ratios: [Double]         = [0.5,  1.0, 1.5, 2.0, 3.0,  4.0,  5.0, 6.0, 8.0]
+    private static let churchLevelSum: Double = churchLevels.reduce(0) { $0 + Double($1) }
 
     var filterCutoffMod: Float = 0.5  // unused for organ, kept for protocol
     var lfoDepthMod: Float = 0.5      // maps to tremulant depth
     var pitchBendSemitones: Float = 0
+    var tremulantDepth: Float         // mutable so AudioEngine can push live knob changes
 
     var isFinished: Bool { envStage == .idle }
 
@@ -41,7 +43,7 @@ final class OrganVoice: AnyVoice {
         self.freq = 440.0 * pow(2.0, Double(note - 69) / 12.0)
         self.velocity = velocity
         self.sampleRate = sampleRate
-        self.tremulantDepth = preset.tremulantDepth
+        self.tremulantDepth = preset.tremulantDepth  // initial value; AudioEngine updates this live
         self.phases = Array(repeating: 0, count: Self.ratios.count)
         self.clickSamplesLeft = Int(sampleRate * 0.012)  // 12 ms click
     }
@@ -89,7 +91,7 @@ final class OrganVoice: AnyVoice {
         }
 
         // Normalise (sum of all drawbar levels)
-        sum /= Double(Self.churchLevels.reduce(0, +))
+        sum /= Self.churchLevelSum
 
         // Tremulant amplitude
         sum *= 1.0 + tremVal

@@ -87,16 +87,18 @@ final class BloomReverbProcessor {
     private var lpState:  Float  = 0
     private let tapSamples: [Float]
     private let tapGains: [Float] = [0.18, 0.32, 0.54, 0.78]
+    private let sampleRate: Double
 
     init(sampleRate: Double) {
+        self.sampleRate = sampleRate
         buf = Array(repeating: 0, count: 65536)
-        // Rising delays: soft early reflections → loud late bloom
         tapSamples = [80, 180, 320, 530].map { $0 * Float(sampleRate) / 1000 }
     }
 
+    // Returns the wet swell only — caller blends dry/wet to preserve prior stereo.
     func process(_ input: Float, amount: Float) -> (Float, Float) {
-        guard amount > 0.005 else { return (input, input) }
-        lfoPhase += 0.19 / 44100   // very slow shimmer, prevents metallic coloration
+        guard amount > 0.005 else { return (0, 0) }
+        lfoPhase += 0.19 / sampleRate
         let lfoMod = Float(sin(lfoPhase * 2 * .pi)) * amount * 4
 
         var outL: Float = 0, outR: Float = 0
@@ -106,18 +108,14 @@ final class BloomReverbProcessor {
             if i % 2 == 0 { outL += tap * gain } else { outR += tap * gain }
         }
 
-        // Light cross-mix for coherent stereo image
         let l = outL * 0.75 + outR * 0.25
         let r = outR * 0.75 + outL * 0.25
 
-        // Diffuse feedback — keeps the bloom alive without runaway buildup
         lpState = lpState * 0.68 + (l + r) * 0.14 * amount
         buf[writePos & (bufSize - 1)] = input + lpState
         writePos = (writePos + 1) & (bufSize - 1)
 
-        let dry = 1 - amount * 0.4
-        return (input * dry + l * amount * 0.65,
-                input * dry + r * amount * 0.65)
+        return (l * amount * 0.65, r * amount * 0.65)
     }
 
     private func readAt(_ pos: Float) -> Float {
@@ -230,9 +228,13 @@ final class ModulationProcessor {
             if tremPhase >= 1.0 { tremPhase -= 1.0 }
         }
 
+        // Always advance the chorus buffer so the delay line has valid history
+        // when chorusMix is raised mid-note (avoids a silence burst on onset).
+        buf[writePos & (bufSize - 1)] = (lOut + rOut) * 0.5
+        writePos = (writePos + 1) & (bufSize - 1)
+
         // Chorus: LFO-modulated short delay, opposite-phase L/R for stereo width
         if chorusMix > 0.001 {
-            buf[writePos & (bufSize - 1)] = (lOut + rOut) * 0.5
             chorusLfoPhase += 0.65 * dt
             if chorusLfoPhase >= 1.0 { chorusLfoPhase -= 1.0 }
             let lfo = Float(sin(chorusLfoPhase * 2 * .pi))
@@ -243,7 +245,6 @@ final class ModulationProcessor {
             let mix = min(chorusMix, 1)
             lOut = lOut * (1 - mix * 0.5) + chL * mix
             rOut = rOut * (1 - mix * 0.5) + chR * mix
-            writePos = (writePos + 1) & (bufSize - 1)
         }
 
         return (lOut, rOut)

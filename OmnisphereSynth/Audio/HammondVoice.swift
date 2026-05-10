@@ -5,9 +5,10 @@ import Foundation
 final class HammondVoice: AnyVoice {
 
     // Drawbar ratios (footage) and classic "888000000" rock levels
-    private static let ratios:  [Double] = [0.5,1.0,1.5,2.0,3.0,4.0,5.0,6.0,8.0]
-    private static let levels:  [Float]  = [0.8,0.8,0.8,0.0,0.0,0.0,0.0,0.0,0.0]
-    private static let detunes: [Double] = [0.0,0.0,1.2,-0.8,0.5,-1.1,0.9,-0.6,0.3]
+    private static let ratios:     [Double] = [0.5,1.0,1.5,2.0,3.0,4.0,5.0,6.0,8.0]
+    private static let levels:     [Float]  = [0.8,0.8,0.8,0.0,0.0,0.0,0.0,0.0,0.0]
+    private static let detunes:    [Double] = [0.0,0.0,1.2,-0.8,0.5,-1.1,0.9,-0.6,0.3]
+    private static let totalLevel: Double   = levels.reduce(0) { $0 + Double($1) }
 
     var filterCutoffMod: Float = 0.5  // unused (organ), kept for protocol
     var lfoDepthMod:     Float = 0.5  // → Leslie speed (high = fast/tremolo)
@@ -77,8 +78,7 @@ final class HammondVoice: AnyVoice {
             phases[k] = (phases[k] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[k] * 2 * .pi) * Double(Self.levels[k])
         }
-        let totalLvl = Self.levels.reduce(0, +)
-        sum /= Double(totalLvl)
+        sum /= Self.totalLevel
 
         // Percussion (2nd harmonic)
         percPhase = (percPhase + freq * 2.0 * bendFactor * dt).truncatingRemainder(dividingBy: 1.0)

@@ -256,6 +256,7 @@ struct KnobView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @Environment(\.horizontalSizeClass) var sizeClass
     @State private var lastDragY: CGFloat = 0
+    @State private var isDragging = false
 
     private let minAngle: Double = -135
     private let maxAngle: Double =  135
@@ -288,11 +289,12 @@ struct KnobView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { v in
+                            if !isDragging { isDragging = true; lastDragY = v.location.y }
                             let delta = Float(lastDragY - v.location.y) * dragSensitivity
                             lastDragY = v.location.y
                             onChange(max(0, min(1, value + delta)))
                         }
-                        .onEnded { _ in lastDragY = 0 }
+                        .onEnded { _ in isDragging = false }
                 )
 
             Text(label)
@@ -471,6 +473,7 @@ struct ADSRView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @Environment(\.horizontalSizeClass) var sizeClass
     @State private var lastDragY: CGFloat = 0
+    @State private var isDragging = false
 
     private var isPad: Bool      { sizeClass == .regular }
     private var sliderW: CGFloat  { isPad ? 48 : 36 }
@@ -497,11 +500,12 @@ struct ADSRView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
+                        if !isDragging { isDragging = true; lastDragY = v.location.y }
                         let delta = Float(lastDragY - v.location.y) * (isPad ? 0.005 : 0.007)
                         lastDragY = v.location.y
                         onChange(max(0.001, min(1, value + delta)))
                     }
-                    .onEnded { _ in lastDragY = 0 }
+                    .onEnded { _ in isDragging = false }
             )
 
             Text(label)
