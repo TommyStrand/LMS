@@ -157,23 +157,29 @@ final class DrumEngine: ObservableObject {
             print("DrumEngine: missing \(name).wav")
             return nil
         }
-        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        guard let file = try? AVAudioFile(forReading: url) else {
+            print("DrumEngine: can't open \(name).wav")
+            return nil
+        }
 
         let fileFmt = file.processingFormat
         let frames  = AVAudioFrameCount(file.length)
         guard let src = AVAudioPCMBuffer(pcmFormat: fileFmt, frameCapacity: frames),
               (try? file.read(into: src)) != nil else { return nil }
 
-        // Fast path: formats already match
-        if fileFmt.sampleRate  == targetFormat.sampleRate &&
-           fileFmt.channelCount == targetFormat.channelCount { return src }
+        // Fast path: sample rate already matches — SampleVoice handles mono natively
+        // (mirrors ch[0] to both L and R), so skip any channel-count conversion.
+        if fileFmt.sampleRate == targetFormat.sampleRate { return src }
 
-        // Convert sample rate / channel count
+        // Only convert when sample rate differs; keep the file's native channel count
+        // to avoid the AVAudioConverter mono→stereo failure mode.
+        let nativeFmt = AVAudioFormat(standardFormatWithSampleRate: targetFormat.sampleRate,
+                                      channels: fileFmt.channelCount)!
         let dstFrames = AVAudioFrameCount(
             Double(frames) * targetFormat.sampleRate / fileFmt.sampleRate
         ) + 1
-        guard let dst       = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: dstFrames),
-              let converter = AVAudioConverter(from: fileFmt, to: targetFormat) else { return nil }
+        guard let dst       = AVAudioPCMBuffer(pcmFormat: nativeFmt, frameCapacity: dstFrames),
+              let converter = AVAudioConverter(from: fileFmt, to: nativeFmt) else { return nil }
 
         var err: NSError?
         var done = false
