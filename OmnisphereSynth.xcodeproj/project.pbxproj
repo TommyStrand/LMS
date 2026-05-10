@@ -34,6 +34,7 @@
 		A1000019 /* MidiParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* MidiParser.swift */; };
 		A100001A /* GrooveImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* GrooveImporter.swift */; };
 		A100001B /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* FavoritesStore.swift */; };
+		A100001C /* DrumSamples in Resources */       = {isa = PBXBuildFile; fileRef = A2000025 /* DrumSamples */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,14 +60,15 @@
 		A2000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000015 /* PianoKeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PianoKeyboardView.swift; sourceTree = "<group>"; };
 		A2000016 /* SuperNovaPad.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SuperNovaPad.entitlements; sourceTree = "<group>"; };
-		A2000017 /* MIDIController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIController.swift; sourceTree = "<group>"; };
-		A2000018 /* DrumEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumEngine.swift; sourceTree = "<group>"; };
-		A2000019 /* DrumPatterns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumPatterns.swift; sourceTree = "<group>"; };
-		A2000020 /* DrumMachineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumMachineView.swift; sourceTree = "<group>"; };
-		A2000021 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
-		A2000022 /* MidiParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MidiParser.swift; sourceTree = "<group>"; };
-		A2000023 /* GrooveImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrooveImporter.swift; sourceTree = "<group>"; };
-		A2000024 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
+		A2000017 /* MIDIController.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIController.swift;   sourceTree = "<group>"; };
+		A2000018 /* DrumEngine.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumEngine.swift;       sourceTree = "<group>"; };
+		A2000019 /* DrumPatterns.swift */     = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumPatterns.swift;     sourceTree = "<group>"; };
+		A2000020 /* DrumMachineView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumMachineView.swift;  sourceTree = "<group>"; };
+		A2000021 /* AudioRecorder.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift;    sourceTree = "<group>"; };
+		A2000022 /* MidiParser.swift */       = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MidiParser.swift;       sourceTree = "<group>"; };
+		A2000023 /* GrooveImporter.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrooveImporter.swift;   sourceTree = "<group>"; };
+		A2000024 /* FavoritesStore.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift;   sourceTree = "<group>"; };
+		A2000025 /* DrumSamples */            = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/DrumSamples;   sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +101,7 @@
 				A4000003 /* Views */,
 				A4000004 /* Models */,
 				A2000014 /* Assets.xcassets */,
+				A2000025 /* DrumSamples */,
 				A200000B /* Info.plist */,
 				A2000016 /* SuperNovaPad.entitlements */,
 			);
@@ -224,6 +227,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000012 /* Assets.xcassets in Resources */,
+				A100001C /* DrumSamples in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
