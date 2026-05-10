@@ -81,6 +81,7 @@ struct ContentView: View {
         } else if themeManager.playMode == .keyboard {
             PianoKeyboardView(engine: engine, preset: preset)
         } else {
+            // .grid and .glissando both use the XY pad; glissando changes touch behaviour
             XYPadView(engine: engine, preset: preset)
         }
     }
@@ -246,10 +247,11 @@ struct ContentView: View {
 
             // Play mode toggle (hidden while drum machine is active)
             if !showDrumMachine {
-                iconButton(systemName: themeManager.playMode == .grid ? "square.grid.3x3" : "pianokeys",
-                           active: false, theme: theme) {
+                iconButton(systemName: themeManager.playMode.icon, active: false, theme: theme) {
                     withAnimation(.spring(response: 0.3)) {
-                        themeManager.selectPlayMode(themeManager.playMode == .grid ? .keyboard : .grid)
+                        let modes = PlayMode.allCases
+                        let idx   = modes.firstIndex(of: themeManager.playMode) ?? 0
+                        themeManager.selectPlayMode(modes[(idx + 1) % modes.count])
                     }
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }

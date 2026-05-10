@@ -57,6 +57,7 @@ struct XYPadView: View {
             .overlay(
                 SimultaneousTouchGesture { events in
                     let currentNotes = notes
+                    let isGlissando  = themeManager.playMode == .glissando
                     guard !currentNotes.isEmpty else { return }
                     for event in events {
                         let loc = event.location
@@ -73,7 +74,20 @@ struct XYPadView: View {
                                           velocity: 0.7 + y * 0.3, x: x, y: y)
                         case .moved:
                             activeTouches[event.id]?.location = loc
-                            engine.updateTouch(touchID: event.id, x: x, y: y)
+                            if isGlissando, let touch = activeTouches[event.id] {
+                                // Interpolate continuously between scale notes
+                                let contIdx = max(0.0, min(Float(currentNotes.count - 1),
+                                                            x * Float(currentNotes.count)))
+                                let lo  = Int(contIdx)
+                                let hi  = min(lo + 1, currentNotes.count - 1)
+                                let fr  = contIdx - Float(lo)
+                                let contMidi = Float(currentNotes[lo]) * (1 - fr) + Float(currentNotes[hi]) * fr
+                                let semitones = contMidi - Float(touch.note)
+                                activeTouches[event.id]?.note = note  // track nearest note for label
+                                engine.updateGlissando(touchID: event.id, semitones: semitones, x: x, y: y)
+                            } else {
+                                engine.updateTouch(touchID: event.id, x: x, y: y)
+                            }
                         default:
                             activeTouches.removeValue(forKey: event.id)
                             engine.noteOff(touchID: event.id)
@@ -155,7 +169,7 @@ struct XYPadView: View {
             .components(separatedBy: CharacterSet.decimalDigits).joined()
         VStack {
             HStack {
-                Text("← Brightness")
+                Text(themeManager.playMode == .glissando ? "← Slide" : "← Brightness")
                     .font(.system(size: 10, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText.opacity(0.35))
                 Spacer()

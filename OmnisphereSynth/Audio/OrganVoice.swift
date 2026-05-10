@@ -12,6 +12,7 @@ final class OrganVoice: AnyVoice {
 
     var filterCutoffMod: Float = 0.5  // unused for organ, kept for protocol
     var lfoDepthMod: Float = 0.5      // maps to tremulant depth
+    var pitchBendSemitones: Float = 0
 
     var isFinished: Bool { envStage == .idle }
 
@@ -22,6 +23,7 @@ final class OrganVoice: AnyVoice {
 
     private var phases: [Double]
     private var tremPhase: Double = 0
+    private var smoothPitchBend: Double = 0
     private var envValue: Double = 0
     private var envStage: EnvStage = .idle
 
@@ -72,12 +74,16 @@ final class OrganVoice: AnyVoice {
         clickLpf = clickLpf * 0.7 + click * 0.3
         click = clickLpf
 
+        // Smooth pitch glide
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        let bendFactor = pow(2.0, smoothPitchBend / 12.0)
+
         // Sum drawbar partials
         var sum: Double = 0
         for i in 0..<Self.ratios.count {
             let detuneCents = Self.detuneOffsets[i]
             let detuneFactor = pow(2.0, detuneCents / 1200.0)
-            let f = freq * Self.ratios[i] * detuneFactor * (1.0 + tremVal * 0.3)
+            let f = freq * Self.ratios[i] * detuneFactor * bendFactor * (1.0 + tremVal * 0.3)
             phases[i] = (phases[i] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[i] * 2 * .pi) * Double(Self.churchLevels[i])
         }

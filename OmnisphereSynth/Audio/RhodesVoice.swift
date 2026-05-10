@@ -7,6 +7,7 @@ final class RhodesVoice: AnyVoice {
 
     var filterCutoffMod: Float = 0.5
     var lfoDepthMod:     Float = 0.5  // → tremolo depth
+    var pitchBendSemitones: Float = 0
     var isFinished: Bool { envStage == .idle && decayEnv < 0.0001 }
 
     private let freq:       Double
@@ -27,6 +28,7 @@ final class RhodesVoice: AnyVoice {
     // Long-press vibrato
     private var noteAge:  Double = 0
     private var vibPhase: Double = 0
+    private var smoothPitchBend: Double = 0
 
     // Key-gated envelope (fast attack, instant release)
     private enum EnvStage { case idle, attack, sustain, release }
@@ -65,12 +67,16 @@ final class RhodesVoice: AnyVoice {
         let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 18.0
         let vibFreq  = freq * pow(2.0, vibCents / 1200.0)
 
+        // Smooth pitch glide
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        let bendedFreq = vibFreq * pow(2.0, smoothPitchBend / 12.0)
+
         // FM: modulator at carrier + 0.5 Hz (slight inharmonicity)
-        modPhase = (modPhase + (vibFreq + 0.5) * dt).truncatingRemainder(dividingBy: 1.0)
+        modPhase = (modPhase + (bendedFreq + 0.5) * dt).truncatingRemainder(dividingBy: 1.0)
         let modIdx = Double(velocity) * 1.6 * decayEnv    // velocity-sensitive brightness
         let modSig = sin(modPhase * 2 * .pi) * modIdx
 
-        carPhase = (carPhase + vibFreq * dt).truncatingRemainder(dividingBy: 1.0)
+        carPhase = (carPhase + bendedFreq * dt).truncatingRemainder(dividingBy: 1.0)
         var out = sin(carPhase * 2 * .pi + modSig)
 
         // Tremolo (~5 Hz, depth from lfoDepthMod)

@@ -227,6 +227,12 @@ final class AudioEngine: ObservableObject {
         voices[touchID]?.lfoDepthMod     = y
     }
 
+    func updateGlissando(touchID: Int, semitones: Float, x: Float, y: Float) {
+        voices[touchID]?.pitchBendSemitones = semitones
+        voices[touchID]?.filterCutoffMod    = x
+        voices[touchID]?.lfoDepthMod        = y
+    }
+
     // MARK: - Waveform Analysis
 
     private func feedAnalysis(_ sample: Float) {

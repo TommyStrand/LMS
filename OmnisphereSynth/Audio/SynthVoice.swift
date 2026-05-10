@@ -9,6 +9,10 @@ final class SynthVoice: AnyVoice {
     // Real-time modifiable
     var filterCutoffMod: Float = 0.5  // 0–1, mapped from touch X
     var lfoDepthMod: Float = 0.5      // 0–1, mapped from touch Y
+    var pitchBendSemitones: Float = 0
+
+    // Smooth pitch glide (audio-thread only)
+    private var smoothPitchBend: Double = 0
 
     // Oscillator state
     private var phase1: Double = 0
@@ -66,9 +70,13 @@ final class SynthVoice: AnyVoice {
         let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 22.0
         let vibFactor = pow(2.0, vibCents / 1200.0)
 
-        // Frequency with detune + LFO pitch mod + vibrato
-        var f1 = freq * vibFactor
-        var f2 = freq * pow(2.0, Double(preset.osc2Detune) / 12.0) * vibFactor
+        // Smooth pitch glide
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        let bendFactor = pow(2.0, smoothPitchBend / 12.0)
+
+        // Frequency with detune + LFO pitch mod + vibrato + glissando bend
+        var f1 = freq * vibFactor * bendFactor
+        var f2 = freq * pow(2.0, Double(preset.osc2Detune) / 12.0) * vibFactor * bendFactor
         if preset.lfoTarget == .pitch {
             f1 *= pow(2.0, lfoVal / 12.0)
             f2 *= pow(2.0, lfoVal / 12.0)

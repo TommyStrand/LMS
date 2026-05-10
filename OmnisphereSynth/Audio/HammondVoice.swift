@@ -11,6 +11,7 @@ final class HammondVoice: AnyVoice {
 
     var filterCutoffMod: Float = 0.5  // unused (organ), kept for protocol
     var lfoDepthMod:     Float = 0.5  // → Leslie speed (high = fast/tremolo)
+    var pitchBendSemitones: Float = 0
     var isFinished: Bool { envStage == .idle }
 
     private let freq:       Double
@@ -40,6 +41,7 @@ final class HammondVoice: AnyVoice {
 
     private var noiseState: UInt32 = 44444
     private var clickLpf:   Double = 0   // smooths the key-click noise
+    private var smoothPitchBend: Double = 0
 
     init(note: Int, velocity: Float, sampleRate: Double) {
         self.freq       = 440.0 * pow(2.0, Double(note - 69) / 12.0)
@@ -63,11 +65,15 @@ final class HammondVoice: AnyVoice {
     func nextStereoSample() -> (Float, Float) {
         let dt = 1.0 / sampleRate
 
+        // Smooth pitch glide
+        smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.005
+        let bendFactor = pow(2.0, smoothPitchBend / 12.0)
+
         // Additive synthesis
         var sum: Double = 0
         for k in 0..<Self.ratios.count {
             let df = pow(2.0, Self.detunes[k] / 1200.0)
-            let f  = freq * Self.ratios[k] * df
+            let f  = freq * Self.ratios[k] * df * bendFactor
             phases[k] = (phases[k] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[k] * 2 * .pi) * Double(Self.levels[k])
         }
@@ -75,7 +81,7 @@ final class HammondVoice: AnyVoice {
         sum /= Double(totalLvl)
 
         // Percussion (2nd harmonic)
-        percPhase = (percPhase + freq * 2.0 * dt).truncatingRemainder(dividingBy: 1.0)
+        percPhase = (percPhase + freq * 2.0 * bendFactor * dt).truncatingRemainder(dividingBy: 1.0)
         percEnv   = max(0, percEnv - dt / 0.04)
         sum      += sin(percPhase * 2 * .pi) * percEnv * 0.35
 
