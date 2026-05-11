@@ -21,7 +21,6 @@ final class OrganVoice: AnyVoice {
     private let freq: Double
     private let velocity: Float
     private let sampleRate: Double
-    private let tremulantDepth: Float
 
     private var phases: [Double]
     private var tremPhase: Double = 0
