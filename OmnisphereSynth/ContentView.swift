@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import MediaPlayer
 
 struct ContentView: View {
     @StateObject private var engine: AudioEngine
@@ -14,6 +16,9 @@ struct ContentView: View {
     @State private var showDrumMachine = false
     @State private var showShareSheet  = false
     @State private var recBlink        = false
+
+    // Initialise NowPlayingManager once so remote commands are registered early
+    private let nowPlaying = NowPlayingManager.shared
 
     init() {
         let e = AudioEngine()
@@ -69,6 +74,40 @@ struct ContentView: View {
             } else {
                 withAnimation(.default) { recBlink = false }
             }
+        }
+        // MARK: - AirPlay 2 / Now Playing updates
+        .onChange(of: selectedPresetIndex) { idx in
+            nowPlaying.update(presetName: SynthPreset.presets[idx].name,
+                              isLiveInstrument: true, isPlaying: false)
+        }
+        .onChange(of: showDrumMachine) { drumActive in
+            let title = drumActive
+                ? DrumPattern.all[drum.patternIndex].name + " — Drum"
+                : SynthPreset.presets[selectedPresetIndex].name
+            nowPlaying.update(presetName: title, isLiveInstrument: true,
+                              isPlaying: drumActive && drum.isPlaying)
+        }
+        .onChange(of: drum.patternIndex) { idx in
+            guard showDrumMachine else { return }
+            nowPlaying.update(presetName: DrumPattern.all[idx].name + " — Drum",
+                              isLiveInstrument: true, isPlaying: drum.isPlaying)
+        }
+        .onChange(of: drum.isPlaying) { playing in
+            nowPlaying.setPlaybackState(playing)
+        }
+        // Remote commands from lock screen / AirPlay device / Control Centre
+        .onReceive(NotificationCenter.default.publisher(for: .remotePlay)) { _ in
+            if showDrumMachine && !drum.isPlaying { drum.play() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .remotePause)) { _ in
+            if drum.isPlaying { drum.stop() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .remoteToggle)) { _ in
+            if showDrumMachine { drum.togglePlay() }
+        }
+        .onAppear {
+            nowPlaying.update(presetName: SynthPreset.presets[selectedPresetIndex].name,
+                              isLiveInstrument: true, isPlaying: false)
         }
     }
 
@@ -266,6 +305,16 @@ struct ContentView: View {
             // Record / export
             recordButton(theme: theme, accent: accent)
 
+            // AirPlay output picker
+            AirPlayButton(tintColor: UIColor(theme.secondaryText))
+                .frame(width: 36, height: 36)
+                .background(theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                        .strokeBorder(theme.panelBorder, lineWidth: 1)
+                )
+
             // Settings
             iconButton(systemName: "gearshape", active: false, theme: theme) {
                 showSettings = true
@@ -326,6 +375,25 @@ struct ContentView: View {
             .frame(width: 36, height: 36)
         }
         .disabled(recorder.isExporting)
+    }
+}
+
+// MARK: - AirPlay route picker (wraps AVRoutePickerView for SwiftUI)
+
+struct AirPlayButton: UIViewRepresentable {
+    var tintColor: UIColor
+
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let picker = AVRoutePickerView()
+        picker.tintColor = tintColor
+        picker.activeTintColor = tintColor
+        picker.prioritizesVideoDevices = false
+        return picker
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.tintColor = tintColor
+        uiView.activeTintColor = tintColor
     }
 }
 
