@@ -69,7 +69,7 @@ final class OrganVoice: AnyVoice {
             noiseState = noiseState &* 1664525 &+ 1013904223
             let n = Double(Int32(bitPattern: noiseState)) / Double(Int32.max)
             let clickEnv = Double(clickSamplesLeft) / (sampleRate * 0.012)
-            click = n * clickEnv * 0.03
+            click = n * clickEnv * 0.012
             clickSamplesLeft -= 1
         }
         clickLpf = clickLpf * 0.7 + click * 0.3

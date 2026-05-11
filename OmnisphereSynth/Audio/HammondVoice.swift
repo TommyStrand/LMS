@@ -91,7 +91,7 @@ final class HammondVoice: AnyVoice {
         if clickLeft > 0 {
             noiseState = noiseState &* 1664525 &+ 1013904223
             let n = Double(Int32(bitPattern: noiseState)) / Double(Int32.max)
-            click = n * (Double(clickLeft) / (sampleRate * 0.012)) * 0.035
+            click = n * (Double(clickLeft) / (sampleRate * 0.012)) * 0.016
             clickLeft -= 1
         }
         // One-pole LPF on the click only (≈2.5 kHz)

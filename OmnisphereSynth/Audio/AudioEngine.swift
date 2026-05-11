@@ -42,19 +42,20 @@ final class AudioEngine: ObservableObject {
         [voiceMixer, reverb, delay,
          shimmerReverb, timePitch, shimmerMixer].forEach { engine.attach($0) }
 
-        // Main path (no more AVAudioUnitDistortion — tube saturation done per-voice)
-        engine.connect(reverb, to: delay,                format: nil)
-        engine.connect(delay,  to: engine.mainMixerNode, format: nil)
+        // Main path: delay first, then reverb — echoes are placed inside the room,
+        // and the reverb's diffuse tail is never itself fed back into the delay.
+        engine.connect(delay,  to: reverb,                format: nil)
+        engine.connect(reverb, to: engine.mainMixerNode,  format: nil)
 
         // Shimmer path
         engine.connect(shimmerReverb, to: timePitch,            format: nil)
         engine.connect(timePitch,     to: shimmerMixer,         format: nil)
         engine.connect(shimmerMixer,  to: engine.mainMixerNode, format: nil)
 
-        // Fan-out voiceMixer → reverb + shimmerReverb (multi-destination)
+        // Fan-out voiceMixer → delay + shimmerReverb (multi-destination)
         let stereo = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
         engine.connect(voiceMixer, to: [
-            AVAudioConnectionPoint(node: reverb,        bus: 0),
+            AVAudioConnectionPoint(node: delay,        bus: 0),
             AVAudioConnectionPoint(node: shimmerReverb, bus: 0)
         ], fromBus: 0, format: stereo)
 
@@ -79,9 +80,12 @@ final class AudioEngine: ObservableObject {
         reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
         reverb.wetDryMix = preset.reverbMix * 100
 
-        delay.wetDryMix = preset.delayMix * 100
-        delay.delayTime = Double(preset.delayTime)
-        delay.feedback  = 28
+        delay.wetDryMix     = preset.delayMix * 100
+        delay.delayTime     = Double(preset.delayTime)
+        delay.feedback      = 28
+        // Roll off high frequencies in echoes — keeps repeats warm and masks
+        // any transient content (key clicks, attack edges) from clicking.
+        delay.lowPassCutoff = 4000
 
         shimmerReverb.loadFactoryPreset(.plate)
         shimmerReverb.wetDryMix = 80
