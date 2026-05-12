@@ -77,11 +77,14 @@ final class SamplerEngine {
                 let name = "\(root)_\(layer.midiValue)"
                 guard let url  = wavMap[name],
                       let file = try? AVAudioFile(forReading: url),
-                      let buf  = AVAudioPCMBuffer(
+                      let mono = AVAudioPCMBuffer(
                           pcmFormat: file.processingFormat,
                           frameCapacity: AVAudioFrameCount(file.length)
                       ),
-                      (try? file.read(into: buf)) != nil
+                      (try? file.read(into: mono)) != nil,
+                      // Player nodes are connected with stereo format; scheduleBuffer
+                      // requires the buffer channel count to match exactly.
+                      let buf  = makeStereo(mono)
                 else { continue }
                 buffers[root, default: [:]][layer.midiValue] = buf
                 loaded += 1
@@ -119,6 +122,32 @@ final class SamplerEngine {
         let slot = pool[poolCursor % poolSize]
         poolCursor += 1
         return slot
+    }
+
+    /// Duplicates a mono buffer into a non-interleaved stereo buffer.
+    /// AVAudioPlayerNode requires buffer.format.channelCount == node output channelCount,
+    /// so we must promote our synthesised mono WAVs to stereo before scheduling.
+    /// Done manually to avoid the AVAudioConverter mono→stereo failure mode noted in DrumEngine.
+    private func makeStereo(_ src: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard src.format.channelCount == 1,
+              let srcData = src.floatChannelData?[0]
+        else { return src }  // already stereo or non-float — return as-is
+
+        guard let stereoFmt = AVAudioFormat(
+            commonFormat:  .pcmFormatFloat32,
+            sampleRate:    src.format.sampleRate,
+            channels:      2,
+            interleaved:   false
+        ),
+              let dst = AVAudioPCMBuffer(pcmFormat: stereoFmt,
+                                         frameCapacity: src.frameLength)
+        else { return nil }
+
+        dst.frameLength = src.frameLength
+        let n = Int(src.frameLength)
+        dst.floatChannelData![0].update(from: srcData, count: n)  // L = source
+        dst.floatChannelData![1].update(from: srcData, count: n)  // R = source
+        return dst
     }
 
     private func findBuffer(midi: Int, vel: Int) -> (rootNote: Int, buf: AVAudioPCMBuffer)? {
