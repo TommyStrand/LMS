@@ -273,7 +273,7 @@ final class AudioEngine: ObservableObject {
             for presetIdx in prev {
                 let cid = touchID * 1000 + presetIdx
                 let p   = SynthPreset.presets[presetIdx]
-                if case .sampler(let inst) = p.voiceMode {
+                if case .sampler = p.voiceMode {
                     if let info = samplerTouches[cid] {
                         samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
                     }
@@ -317,6 +317,8 @@ final class AudioEngine: ObservableObject {
             voice = RhodesVoice(note: note, velocity: velocity, sampleRate: sampleRate)
         case .synth:
             voice = SynthVoice(note: note, velocity: velocity, preset: preset, sampleRate: sampleRate)
+        case .sampler:
+            return  // sampler voices are handled before spawnVoice is reached
         }
 
         voice.filterCutoffMod = x
@@ -415,7 +417,7 @@ final class AudioEngine: ObservableObject {
             for presetIdx in layerIndices {
                 let cid    = touchID * 1000 + presetIdx
                 let preset = SynthPreset.presets[presetIdx]
-                if case .sampler(let inst) = preset.voiceMode {
+                if case .sampler = preset.voiceMode {
                     if let info = samplerTouches[cid] {
                         samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
                     }
@@ -425,7 +427,7 @@ final class AudioEngine: ObservableObject {
                 }
             }
             noteOnLayerIndices.removeValue(forKey: touchID)
-        } else if case .sampler(let inst) = currentPreset.voiceMode {
+        } else if case .sampler = currentPreset.voiceMode {
             if let info = samplerTouches[touchID] {
                 samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
             }
@@ -443,6 +445,7 @@ final class AudioEngine: ObservableObject {
         case .organChurch: tail = 0.15
         case .rhodes:      tail = 3.0
         case .synth:       tail = Double(preset.release) + 0.1
+        case .sampler:     tail = 0.5  // unreachable; sampler noteOff is handled separately
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
             guard let self else { return }

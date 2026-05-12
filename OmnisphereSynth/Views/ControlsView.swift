@@ -40,6 +40,8 @@ struct ControlsView: View {
                     RhodesControlsRow(engine: engine, color: color)
                 case .synth:
                     EnvelopeRow(engine: engine, color: color, theme: theme)
+                case .sampler:
+                    EnvelopeRow(engine: engine, color: color, theme: theme)
                 }
 
                 // Row 3 – Modulation (synth only)
