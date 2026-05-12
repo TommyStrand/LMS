@@ -35,6 +35,7 @@
 		A100001A /* GrooveImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* GrooveImporter.swift */; };
 		A100001B /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* FavoritesStore.swift */; };
 		A100001C /* DrumSamples in Resources */       = {isa = PBXBuildFile; fileRef = A2000025 /* DrumSamples */; };
+		A100001D /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* NowPlayingManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -69,6 +70,7 @@
 		A2000023 /* GrooveImporter.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrooveImporter.swift;   sourceTree = "<group>"; };
 		A2000024 /* FavoritesStore.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift;   sourceTree = "<group>"; };
 		A2000025 /* DrumSamples */            = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/DrumSamples;   sourceTree = "<group>"; };
+		A2000026 /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -123,6 +125,7 @@
 				A2000021 /* AudioRecorder.swift */,
 				A2000022 /* MidiParser.swift */,
 				A2000023 /* GrooveImporter.swift */,
+				A2000026 /* NowPlayingManager.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -263,6 +266,7 @@
 				A1000019 /* MidiParser.swift in Sources */,
 				A100001A /* GrooveImporter.swift in Sources */,
 				A100001B /* FavoritesStore.swift in Sources */,
+				A100001D /* NowPlayingManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
