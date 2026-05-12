@@ -295,8 +295,199 @@ extension SynthPreset {
             attack: 0.002, decay: 1.6, sustain: 0.20, release: 1.2,
             lfoRate: 6.0, lfoDepth: 0.40, lfoTarget: .amplitude,
             reverbMix: 0.62, delayMix: 0.10,
-            tremulantDepth: 0.55,                          // motor-driven trem
+            tremulantDepth: 0.55,
             iconStyle: .solarRadial
+        ),
+
+        // ── String ensembles ──────────────────────────────────────────────
+
+        SynthPreset(
+            name: "Solina Strings",
+            color: "#C8A44A",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
+            osc2Detune: 0.08, oscMix: 0.5,          // ~8 cents sharp → ensemble beat
+            filterCutoff: 3500, filterResonance: 0.05, filterEnvAmount: 0.0,
+            attack: 0.55, decay: 0.3, sustain: 0.9, release: 1.8,
+            lfoRate: 5.0, lfoDepth: 0.08, lfoTarget: .amplitude,
+            reverbMix: 0.55, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.7,
+            shimmerAmount: 0.2,
+            iconStyle: .solarRadial
+        ),
+
+        SynthPreset(
+            name: "Mellotron Flutes",
+            color: "#7BA7BC",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .triangle,
+            osc2Detune: 12, oscMix: 0.35,            // octave blend for flute body
+            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.4, decay: 0.2, sustain: 0.9, release: 1.2,
+            lfoRate: 0.2, lfoDepth: 0.05, lfoTarget: .amplitude,
+            reverbMix: 0.65, delayMix: 0.06, delayTime: 0.5, chorusMix: 0.15,
+            brokenTape: 0.08,
+            iconStyle: .celestialDots
+        ),
+
+        SynthPreset(
+            name: "Tape Strings",
+            color: "#8B6347",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .triangle,
+            osc2Detune: 0.5, oscMix: 0.4,
+            filterCutoff: 2200, filterResonance: 0.15, filterEnvAmount: 0.1,
+            attack: 0.6, decay: 0.4, sustain: 0.85, release: 2.0,
+            lfoRate: 0.4, lfoDepth: 0.06, lfoTarget: .amplitude,
+            reverbMix: 0.65, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.35,
+            spaceEchoAmount: 0.15, brokenTape: 0.22, bloomAmount: 0.2,
+            iconStyle: .mysticWave
+        ),
+
+        SynthPreset(
+            name: "Bowed Psaltery",
+            color: "#D4A843",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .sine,
+            osc2Detune: 7, oscMix: 0.3,              // fifth above adds overtone layer
+            filterCutoff: 2800, filterResonance: 0.2, filterEnvAmount: 0.1,
+            attack: 0.7, decay: 0.4, sustain: 0.8, release: 2.2,
+            lfoRate: 5.5, lfoDepth: 0.1, lfoTarget: .amplitude,
+            reverbMix: 0.6, delayMix: 0.1, delayTime: 0.4, chorusMix: 0.25,
+            shimmerAmount: 0.25, bloomAmount: 0.2,
+            iconStyle: .solarRadial
+        ),
+
+        // ── Resonant / glass ──────────────────────────────────────────────
+
+        SynthPreset(
+            name: "Glass Harmonica",
+            color: "#A8D8EA",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .sine,
+            osc2Detune: 12, oscMix: 0.4,             // octave sine for glassy shimmer
+            filterCutoff: 4000, filterResonance: 0.3, filterEnvAmount: 0.1,
+            attack: 1.8, decay: 0.5, sustain: 0.8, release: 3.0,
+            lfoRate: 3.5, lfoDepth: 0.12, lfoTarget: .amplitude,
+            reverbMix: 0.85, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.3,
+            shimmerAmount: 0.45, bloomAmount: 0.35,
+            iconStyle: .celestialDots
+        ),
+
+        SynthPreset(
+            name: "Cristal Baschet",
+            color: "#6BBFD4",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .triangle,
+            osc2Detune: 7, oscMix: 0.35,
+            filterCutoff: 6000, filterResonance: 0.25, filterEnvAmount: 0.0,
+            attack: 1.2, decay: 0.6, sustain: 0.7, release: 2.5,
+            lfoRate: 4.0, lfoDepth: 0.15, lfoTarget: .amplitude,
+            reverbMix: 0.78, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.2,
+            shimmerAmount: 0.35, bloomAmount: 0.3,
+            iconStyle: .celestialDots
+        ),
+
+        SynthPreset(
+            name: "Waterphone",
+            color: "#4A6070",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .noise,
+            osc2Detune: 0, oscMix: 0.25,             // noise adds metallic overtones
+            filterCutoff: 2000, filterResonance: 0.45, filterEnvAmount: 0.3,
+            attack: 2.0, decay: 1.0, sustain: 0.6, release: 4.0,
+            lfoRate: 0.5, lfoDepth: 0.2, lfoTarget: .pitch,
+            reverbMix: 0.9, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.3,
+            shimmerAmount: 0.5, bloomAmount: 0.4, phaserAmount: 0.35,
+            iconStyle: .voidHole
+        ),
+
+        // ── Reeds / winds ────────────────────────────────────────────────
+
+        SynthPreset(
+            name: "Harmonium",
+            color: "#8B3A3A",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .square,
+            osc2Detune: 0.06, oscMix: 0.45,          // ~6 cents → reed-row beating
+            filterCutoff: 2500, filterResonance: 0.25, filterEnvAmount: 0.1,
+            attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.4,
+            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
+            reverbMix: 0.35, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.15,
+            tremulantDepth: 0.35, gritAmount: 0.12,
+            iconStyle: .churchPipes
+        ),
+
+        SynthPreset(
+            name: "Musette Accordion",
+            color: "#CC4444",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
+            osc2Detune: 0.14, oscMix: 0.5,           // ~14 cents → classic musette beating
+            filterCutoff: 3000, filterResonance: 0.1, filterEnvAmount: 0.0,
+            attack: 0.03, decay: 0.1, sustain: 0.95, release: 0.3,
+            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
+            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25, chorusMix: 0.55,
+            iconStyle: .pulseBolt
+        ),
+
+        SynthPreset(
+            name: "Hurdy-Gurdy",
+            color: "#7B5C3A",
+            voiceMode: .synth,
+            osc1Waveform: .sawtooth, osc2Waveform: .square,
+            osc2Detune: 7, oscMix: 0.35,             // fifth drone buzz
+            filterCutoff: 1800, filterResonance: 0.35, filterEnvAmount: 0.2,
+            attack: 0.04, decay: 0.2, sustain: 0.9, release: 0.5,
+            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
+            reverbMix: 0.3, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.2,
+            tremulantDepth: 0.3, gritAmount: 0.25,
+            iconStyle: .hammondTonewheel
+        ),
+
+        // ── Choir / vocal ────────────────────────────────────────────────
+
+        SynthPreset(
+            name: "Choir Ahs",
+            color: "#9B7FD4",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .triangle,
+            osc2Detune: 7, oscMix: 0.45,
+            filterCutoff: 1800, filterResonance: 0.15, filterEnvAmount: 0.2,
+            attack: 1.4, decay: 0.5, sustain: 0.85, release: 2.5,
+            lfoRate: 0.8, lfoDepth: 0.12, lfoTarget: .amplitude,
+            reverbMix: 0.8, delayMix: 0.1, delayTime: 0.666, chorusMix: 0.55,
+            shimmerAmount: 0.3, bloomAmount: 0.35,
+            iconStyle: .mysticWave
+        ),
+
+        SynthPreset(
+            name: "Vox Humana",
+            color: "#E8A060",
+            voiceMode: .synth,
+            osc1Waveform: .square, osc2Waveform: .triangle,
+            osc2Detune: 3, oscMix: 0.4,
+            filterCutoff: 1200, filterResonance: 0.4, filterEnvAmount: 0.3,
+            attack: 0.2, decay: 0.3, sustain: 0.8, release: 1.0,
+            lfoRate: 5.0, lfoDepth: 0.08, lfoTarget: .amplitude,
+            reverbMix: 0.5, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.4,
+            tremulantDepth: 0.25,
+            iconStyle: .churchPipes
+        ),
+
+        // ── Electronic / unique ──────────────────────────────────────────
+
+        SynthPreset(
+            name: "Ondes Martenot",
+            color: "#2D9E8F",
+            voiceMode: .synth,
+            osc1Waveform: .sine, osc2Waveform: .sine,
+            osc2Detune: 0, oscMix: 0.0,              // pure single-oscillator sine
+            filterCutoff: 8000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.08, decay: 0.1, sustain: 1.0, release: 0.8,
+            lfoRate: 5.5, lfoDepth: 0.18, lfoTarget: .amplitude,
+            reverbMix: 0.45, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.0,
+            tremulantDepth: 0.55,
+            iconStyle: .voidHole
         ),
     ]
 }
