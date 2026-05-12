@@ -1,146 +1,135 @@
 import AVFoundation
 
-/// Wraps one AVAudioUnitSampler loaded from synthesised WAV samples.
-/// Pitch-shifting between root notes is handled by the sampler itself.
+/// Plays back synthesised WAV samples with per-note pitch shifting.
+///
+/// Architecture mirrors DrumEngine: samples are loaded as AVAudioPCMBuffers by
+/// scanning the app bundle, then played via a round-robin pool of
+/// AVAudioPlayerNode → AVAudioUnitVarispeed pairs.  Varispeed shifts pitch by
+/// changing playback rate (2^(semitones/12)), exactly as a hardware sampler does.
+///
+/// Connect outputNode to the audio graph; call attach(to:) before load().
 final class SamplerEngine {
 
-    let samplerNode = AVAudioUnitSampler()
+    // MARK: - Graph
+
+    /// Connect this node to the rest of the audio graph (e.g. voiceMixer).
+    let outputNode = AVAudioMixerNode()
+
+    // MARK: - Private state
+
     private let instrument: SamplerInstrument
+
+    private struct VoiceSlot {
+        let player:    AVAudioPlayerNode
+        let varispeed: AVAudioUnitVarispeed
+    }
+    private var pool: [VoiceSlot] = []
+    private var poolCursor = 0
+    private let poolSize   = 12
+
+    // rootNote → velocityMidiValue → buffer
+    private var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
+
+    // MARK: - Init
 
     init(instrument: SamplerInstrument) {
         self.instrument = instrument
     }
 
-    // MARK: - Load
+    // MARK: - Setup
 
+    /// Attach all nodes to `engine` and wire them into outputNode.
+    /// Call before engine.start() so connections are stable at launch.
+    func attach(to engine: AVAudioEngine) {
+        engine.attach(outputNode)
+        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+        for _ in 0..<poolSize {
+            let player    = AVAudioPlayerNode()
+            let varispeed = AVAudioUnitVarispeed()
+            engine.attach(player)
+            engine.attach(varispeed)
+            engine.connect(player,    to: varispeed,  format: fmt)
+            engine.connect(varispeed, to: outputNode, format: fmt)
+            pool.append(VoiceSlot(player: player, varispeed: varispeed))
+        }
+    }
+
+    // MARK: - Sample loading
+
+    /// Scans the bundle tree for WAV files and loads matching samples into memory.
+    /// Uses FileManager enumeration (same technique as DrumEngine) which works
+    /// reliably with Xcode folder references, unlike Bundle.url(forResource:subdirectory:).
     func load() {
-        guard let presetURL = buildPreset() else {
-            print("SamplerEngine[\(instrument.id)]: no samples found in bundle")
-            return
+        var wavMap: [String: URL] = [:]
+        if let en = FileManager.default.enumerator(
+            at: Bundle.main.bundleURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let url as URL in en where url.pathExtension.lowercased() == "wav" {
+                wavMap[url.deletingPathExtension().lastPathComponent] = url
+            }
         }
-        do {
-            try samplerNode.loadInstrument(at: presetURL)
-        } catch {
-            print("SamplerEngine[\(instrument.id)]: loadInstrument failed – \(error)")
+
+        var loaded = 0
+        for layer in instrument.velocityLayers {
+            for root in instrument.rootNotes {
+                let name = "\(root)_\(layer.midiValue)"
+                guard let url  = wavMap[name],
+                      let file = try? AVAudioFile(forReading: url),
+                      let buf  = AVAudioPCMBuffer(
+                          pcmFormat: file.processingFormat,
+                          frameCapacity: AVAudioFrameCount(file.length)
+                      ),
+                      (try? file.read(into: buf)) != nil
+                else { continue }
+                buffers[root, default: [:]][layer.midiValue] = buf
+                loaded += 1
+            }
         }
+        let expected = instrument.rootNotes.count * instrument.velocityLayers.count
+        print("SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded")
     }
 
     // MARK: - Playback
 
     func noteOn(_ note: UInt8, velocity: UInt8) {
-        samplerNode.startNote(note, withVelocity: velocity, onChannel: 0)
+        let midi = Int(note)
+        let vel  = Int(velocity)
+        guard let (root, buf) = findBuffer(midi: midi, vel: vel) else { return }
+
+        let slot = nextSlot()
+        if slot.player.isPlaying { slot.player.stop() }
+
+        // Rate = 2^(semitones/12), clamped to AVAudioUnitVarispeed valid range [0.25, 4.0].
+        let rate = Float(pow(2.0, Double(midi - root) / 12.0))
+        slot.varispeed.rate = max(0.25, min(4.0, rate))
+        slot.player.volume  = max(0.3, Float(vel) / 127.0)
+        slot.player.scheduleBuffer(buf, at: nil, options: [])
+        slot.player.play()
     }
 
     func noteOff(_ note: UInt8) {
-        samplerNode.stopNote(note, onChannel: 0)
+        // Samples carry their own decay/release tail — let them play to completion.
     }
 
-    // MARK: - AUPreset generation
+    // MARK: - Helpers
 
-    private func buildPreset() -> URL? {
-        let rootNotes = instrument.rootNotes
-        guard !rootNotes.isEmpty else { return nil }
-
-        var zones: [String] = []
-        var zoneID = 0
-
-        for layer in instrument.velocityLayers {
-            for (i, root) in rootNotes.enumerated() {
-                // Each root note covers from the midpoint with the previous root
-                // down to the midpoint with the next root.
-                let lo = i == 0 ? 0 : (root + rootNotes[i - 1] + 1) / 2
-                let hi = i == rootNotes.count - 1 ? 127 : (root + rootNotes[i + 1]) / 2
-
-                let filename = "\(root)_\(layer.midiValue)"
-                guard let url = Bundle.main.url(
-                    forResource: filename, withExtension: "wav",
-                    subdirectory: "Samples/\(instrument.id)"
-                ) else { continue }
-
-                zones.append(zone(
-                    id: zoneID, fileURL: url,
-                    root: root, lo: lo, hi: hi,
-                    loVel: layer.loVel, hiVel: layer.hiVel
-                ))
-                zoneID += 1
-            }
-        }
-
-        guard !zones.isEmpty else { return nil }
-
-        let xml = auPresetXML(name: instrument.displayName, zones: zones)
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(instrument.id).aupreset")
-        do {
-            try xml.write(to: tempURL, atomically: true, encoding: .utf8)
-            return tempURL
-        } catch {
-            print("SamplerEngine: failed to write preset – \(error)")
-            return nil
-        }
+    private func nextSlot() -> VoiceSlot {
+        let slot = pool[poolCursor % poolSize]
+        poolCursor += 1
+        return slot
     }
 
-    private func zone(id: Int, fileURL: URL,
-                      root: Int, lo: Int, hi: Int,
-                      loVel: Int, hiVel: Int) -> String {
-        """
-                    <dict>
-                        <key>ID</key><integer>\(id)</integer>
-                        <key>Wave File URL</key><string>\(fileURL.absoluteString)</string>
-                        <key>Root Note</key><integer>\(root)</integer>
-                        <key>Lo Note</key><integer>\(lo)</integer>
-                        <key>Hi Note</key><integer>\(hi)</integer>
-                        <key>Lo Velocity</key><integer>\(loVel)</integer>
-                        <key>Hi Velocity</key><integer>\(hiVel)</integer>
-                        <key>enabled</key><true/>
-                        <key>Loop Enabled</key><false/>
-                        <key>Pitch Tracking</key><true/>
-                    </dict>
-        """
-    }
+    private func findBuffer(midi: Int, vel: Int) -> (rootNote: Int, buf: AVAudioPCMBuffer)? {
+        let layer = instrument.velocityLayers.first { vel >= $0.loVel && vel <= $0.hiVel }
+            ?? instrument.velocityLayers.last
+        guard let velMidi = layer?.midiValue else { return nil }
 
-    private func auPresetXML(name: String, zones: [String]) -> String {
-        let zonesJoined = zones.joined(separator: "\n")
-        return """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
-        "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>AU version</key>
-            <real>1</real>
-            <key>Instrument</key>
-            <dict>
-                <key>Layers</key>
-                <array>
-                    <dict>
-                        <key>Amplifier</key>
-                        <dict>
-                            <key>ID</key><integer>0</integer>
-                            <key>enabled</key><true/>
-                        </dict>
-                        <key>Connections</key><array/>
-                        <key>Envelopes</key><array/>
-                        <key>Events</key><array/>
-                        <key>Filters</key><array/>
-                        <key>ID</key><integer>0</integer>
-                        <key>LFOs</key><array/>
-                        <key>Modulators</key><array/>
-                        <key>Zones</key>
-                        <array>
-        \(zonesJoined)
-                        </array>
-                    </dict>
-                </array>
-                <key>name</key><string>\(name)</string>
-            </dict>
-            <key>name</key><string>\(name)</string>
-            <key>subtype</key><integer>1935764848</integer>
-            <key>manufacturer</key><integer>1634758764</integer>
-            <key>type</key><integer>1635085685</integer>
-            <key>version</key><integer>0</integer>
-        </dict>
-        </plist>
-        """
+        let roots = buffers.keys.filter { buffers[$0]?[velMidi] != nil }
+        guard !roots.isEmpty else { return nil }
+
+        let root = roots.min(by: { abs($0 - midi) < abs($1 - midi) })!
+        return (root, buffers[root]![velMidi]!)
     }
 }

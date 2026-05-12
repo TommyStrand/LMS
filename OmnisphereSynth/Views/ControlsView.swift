@@ -1,200 +1,68 @@
 import SwiftUI
 
+// MARK: - ControlsView
+
 struct ControlsView: View {
     @ObservedObject var engine: AudioEngine
     @EnvironmentObject var themeManager: ThemeManager
     @Environment(\.horizontalSizeClass) var sizeClass
+
+    private var isPad: Bool { sizeClass != .compact }
+
+    // Adaptive grid fills the full panel width; 60 pt min keeps iPhone at ~4 cols,
+    // iPad panels at ~5 cols — eliminating the blank flanking space.
+    private var grid: [GridItem] { [GridItem(.adaptive(minimum: 60, maximum: 90))] }
 
     var body: some View {
         let preset = engine.currentPreset
         let color  = Color(hex: preset.color)
         let theme  = themeManager.current
 
-        // On compact (iPhone) screens the panel is height-limited so it scrolls;
-        // on regular (iPad) screens it expands naturally in the side column.
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 12) {
-                // Row 1 – FILTER/RESON only for synth
-                HStack(spacing: 16) {
-                    KnobView(label: "REVERB", value: preset.reverbMix, color: color) { v in
-                        engine.setReverb(v)
+            if isPad {
+                // iPad: voice + pre-FX on the left, post-FX on the right
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 10) {
+                        if preset.voiceMode == .synth {
+                            voicePanel(preset: preset, color: color, theme: theme)
+                        }
+                        preFXPanel(preset: preset, color: color, theme: theme)
                     }
-                    KnobView(label: "DELAY", value: preset.delayMix, color: color) { v in
-                        engine.setDelay(v)
-                    }
+                    .frame(maxWidth: .infinity)
+
+                    postFXPanel(preset: preset, color: color, theme: theme)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            } else {
+                // iPhone: single column, vertical scroll
+                VStack(spacing: 10) {
                     if preset.voiceMode == .synth {
-                        KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
-                            engine.currentPreset.filterCutoff = v * 20000
-                        }
-                        KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
-                            engine.currentPreset.filterResonance = v
-                        }
+                        voicePanel(preset: preset, color: color, theme: theme)
                     }
+                    preFXPanel(preset: preset, color: color, theme: theme)
+                    postFXPanel(preset: preset, color: color, theme: theme)
                 }
-
-                // Row 2 – voice-specific controls
-                switch preset.voiceMode {
-                case .organChurch, .hammondB3:
-                    OrganControlsRow(engine: engine, color: color)
-                case .rhodes:
-                    RhodesControlsRow(engine: engine, color: color)
-                case .synth:
-                    EnvelopeRow(engine: engine, color: color, theme: theme)
-                case .sampler:
-                    EnvelopeRow(engine: engine, color: color, theme: theme)
-                }
-
-                // Row 3 – Modulation (synth only)
-                if preset.voiceMode == .synth {
-                    ModulationRow(engine: engine, color: color, theme: theme)
-                }
-
-                // Row 4 – Texture (always visible)
-                TextureRow(engine: engine, color: color, theme: theme)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
-        }
-        // Limit height on iPhone so controls don't push the play surface out of view
-        .frame(maxHeight: sizeClass == .compact ? 300 : .infinity)
-    }
-}
-
-// MARK: - Modulation row (universal, all voice modes)
-
-struct ModulationRow: View {
-    @ObservedObject var engine: AudioEngine
-    let color: Color
-    let theme: AppTheme
-
-    var body: some View {
-        let preset = engine.currentPreset
-        VStack(spacing: 4) {
-            Text("MODULATION")
-                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
-                .foregroundColor(color.opacity(0.6))
-                .kerning(2)
-
-            HStack(spacing: 24) {
-                KnobView(label: "TREM",  value: preset.tremulantDepth, color: color) { v in
-                    engine.setTremolo(v)
-                }
-                KnobView(label: "CHORUS", value: preset.chorusMix,     color: color) { v in
-                    engine.setChorus(v)
-                }
-                KnobView(label: "DRIVE",  value: preset.distortionAmount, color: color) { v in
-                    engine.setDistortion(v)
-                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
+        .frame(maxHeight: isPad ? .infinity : 330)
     }
-}
 
-// MARK: - Organ FX row
+    // MARK: - Panel builders
 
-struct OrganControlsRow: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
-    let color: Color
-
-    var body: some View {
-        let preset = engine.currentPreset
-        let theme  = themeManager.current
-        HStack(spacing: 0) {
-            VStack(spacing: 4) {
-                Text("DISTORTION")
-                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
-                    .foregroundColor(color.opacity(0.7))
-                    .kerning(1.5)
-                KnobView(label: "DRIVE", value: preset.distortionAmount, color: color) { v in
-                    engine.setDistortion(v)
+    @ViewBuilder
+    private func voicePanel(preset: SynthPreset, color: Color, theme: AppTheme) -> some View {
+        FXPanel(label: "VOICE", color: color, theme: theme) {
+            LazyVGrid(columns: grid, spacing: 8) {
+                KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
+                    engine.currentPreset.filterCutoff = v * 20000
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(theme.panelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
-                .strokeBorder(theme.panelBorder, lineWidth: 1))
-
-            Spacer(minLength: 12)
-
-            VStack(spacing: 4) {
-                Text("SHIMMER")
-                    .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
-                    .foregroundColor(color.opacity(0.7))
-                    .kerning(1.5)
-                HStack(spacing: 16) {
-                    KnobView(label: "AMOUNT", value: preset.shimmerAmount, color: color) { v in
-                        engine.setShimmer(v)
-                    }
-                    KnobView(label: "TREMUL", value: preset.tremulantDepth, color: color) { v in
-                        engine.currentPreset.tremulantDepth = v
-                    }
-                    KnobView(label: "CHORUS", value: preset.chorusMix, color: color) { v in
-                        engine.setChorus(v)
-                    }
+                KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
+                    engine.currentPreset.filterResonance = v
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(theme.panelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
-                .strokeBorder(theme.panelBorder, lineWidth: 1))
-        }
-    }
-}
-
-// MARK: - Rhodes controls row
-
-struct RhodesControlsRow: View {
-    @ObservedObject var engine: AudioEngine
-    let color: Color
-
-    var body: some View {
-        let preset = engine.currentPreset
-        HStack(spacing: 16) {
-            KnobView(label: "TREMOLO", value: preset.tremulantDepth, color: color) { v in
-                engine.currentPreset.tremulantDepth = v
-            }
-            KnobView(label: "CHORUS", value: preset.chorusMix, color: color) { v in
-                engine.currentPreset.chorusMix = v
-            }
-            KnobView(label: "SHIMMER", value: preset.shimmerAmount, color: color) { v in
-                engine.setShimmer(v)
-            }
-            KnobView(label: "DRIVE", value: preset.distortionAmount, color: color) { v in
-                engine.setDistortion(v)
-            }
-        }
-    }
-}
-
-// MARK: - Envelope row (Attack / Decay / Sustain / Release)
-// Uses the same KnobView as every other row — compact, consistent, and scrolls
-// with the rest of the controls panel on small screens.
-
-struct EnvelopeRow: View {
-    @ObservedObject var engine: AudioEngine
-    let color: Color
-    let theme: AppTheme
-
-    var body: some View {
-        let preset = engine.currentPreset
-        VStack(spacing: 4) {
-            Text("ENVELOPE")
-                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
-                .foregroundColor(color.opacity(0.6))
-                .kerning(2)
-
-            HStack(spacing: 16) {
                 KnobView(label: "ATTK", value: preset.attack / 3.0, color: color) { v in
                     engine.currentPreset.attack = v * 3.0
                 }
@@ -209,65 +77,72 @@ struct EnvelopeRow: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func preFXPanel(preset: SynthPreset, color: Color, theme: AppTheme) -> some View {
+        FXPanel(label: "PRE-FX", color: color, theme: theme) {
+            LazyVGrid(columns: grid, spacing: 8) {
+                KnobView(label: "TREM",   value: preset.tremulantDepth,   color: color) { v in engine.setTremolo(v) }
+                KnobView(label: "CHORUS", value: preset.chorusMix,        color: color) { v in engine.setChorus(v) }
+                KnobView(label: "DRIVE",  value: preset.distortionAmount, color: color) { v in engine.setDistortion(v) }
+                KnobView(label: "PHASER", value: preset.phaserAmount,     color: color) { v in engine.setPhaser(v) }
+                KnobView(label: "A.WAH",  value: preset.autoWahAmount,    color: color) { v in engine.setAutoWah(v) }
+                KnobView(label: "LO-FI",  value: preset.lofiAmount,       color: color) { v in engine.setLofi(v) }
+                KnobView(label: "GRIT",   value: preset.gritAmount,       color: color) { v in engine.setGrit(v) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func postFXPanel(preset: SynthPreset, color: Color, theme: AppTheme) -> some View {
+        FXPanel(label: "POST-FX", color: color, theme: theme) {
+            LazyVGrid(columns: grid, spacing: 8) {
+                KnobView(label: "REVERB",  value: preset.reverbMix,       color: color) { v in engine.setReverb(v) }
+                KnobView(label: "DELAY",   value: preset.delayMix,        color: color) { v in engine.setDelay(v) }
+                KnobView(label: "SHIMMER", value: preset.shimmerAmount,   color: color) { v in engine.setShimmer(v) }
+                KnobView(label: "S.ECHO",  value: preset.spaceEchoAmount, color: color) { v in engine.setSpaceEcho(v) }
+                KnobView(label: "B.TAPE",  value: preset.brokenTape,      color: color) { v in engine.setBrokenTape(v) }
+                KnobView(label: "BLOOM",   value: preset.bloomAmount,     color: color) { v in engine.setBloom(v) }
+                KnobView(label: "WAVER",   value: preset.modDelayAmount,  color: color) { v in engine.setModDelay(v) }
+            }
+        }
     }
 }
 
-// MARK: - Texture row
+// MARK: - FXPanel (reusable labelled panel)
 
-struct TextureRow: View {
-    @ObservedObject var engine: AudioEngine
-    let color: Color
-    let theme: AppTheme
+struct FXPanel<Content: View>: View {
+    let label:   String
+    let color:   Color
+    let theme:   AppTheme
+    let content: Content
+
+    init(label: String, color: Color, theme: AppTheme, @ViewBuilder content: () -> Content) {
+        self.label   = label
+        self.color   = color
+        self.theme   = theme
+        self.content = content()
+    }
 
     var body: some View {
-        let preset = engine.currentPreset
-        VStack(spacing: 4) {
-            Text("TEXTURE")
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
                 .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
                 .foregroundColor(color.opacity(0.6))
                 .kerning(2)
-
-            HStack(spacing: 12) {
-                KnobView(label: "LO-FI", value: preset.lofiAmount, color: color) { v in
-                    engine.setLofi(v)
-                }
-                KnobView(label: "S.ECHO", value: preset.spaceEchoAmount, color: color) { v in
-                    engine.setSpaceEcho(v)
-                }
-                KnobView(label: "B.TAPE", value: preset.brokenTape, color: color) { v in
-                    engine.setBrokenTape(v)
-                }
-                KnobView(label: "GRIT", value: preset.gritAmount, color: color) { v in
-                    engine.setGrit(v)
-                }
-            }
-            HStack(spacing: 12) {
-                KnobView(label: "BLOOM", value: preset.bloomAmount, color: color) { v in
-                    engine.setBloom(v)
-                }
-                KnobView(label: "PHASER", value: preset.phaserAmount, color: color) { v in
-                    engine.setPhaser(v)
-                }
-                KnobView(label: "A.WAH", value: preset.autoWahAmount, color: color) { v in
-                    engine.setAutoWah(v)
-                }
-                KnobView(label: "WAVER", value: preset.modDelayAmount, color: color) { v in
-                    engine.setModDelay(v)
-                }
-            }
+                .padding(.leading, 2)
+            content
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
         .background(theme.panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .strokeBorder(theme.panelBorder, lineWidth: 1)
+        )
     }
 }
 

@@ -345,8 +345,8 @@ final class AudioEngine: ObservableObject {
     private func samplerEngine(for instrument: SamplerInstrument) -> SamplerEngine {
         if let existing = samplerEngines[instrument.id] { return existing }
         let se = SamplerEngine(instrument: instrument)
-        engine.attach(se.samplerNode)
-        engine.connect(se.samplerNode, to: voiceMixer, format: nil)
+        se.attach(to: engine)
+        engine.connect(se.outputNode, to: voiceMixer, format: nil)
         samplerEngines[instrument.id] = se
         se.load()
         return se
