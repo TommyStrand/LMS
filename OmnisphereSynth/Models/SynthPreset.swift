@@ -199,10 +199,10 @@ extension SynthPreset {
             voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .square,
             osc2Detune: 0, oscMix: 0.5,
-            filterCutoff: 1200, filterResonance: 0.8, filterEnvAmount: 0.9,
-            attack: 0.01, decay: 0.3, sustain: 0.6, release: 0.4,
+            filterCutoff: 1200, filterResonance: 0.55, filterEnvAmount: 0.9,
+            attack: 0.02, decay: 0.3, sustain: 0.6, release: 0.4,
             lfoRate: 4.0, lfoDepth: 0.4, lfoTarget: .filter,
-            reverbMix: 0.3, delayMix: 0.5, delayTime: 0.25, chorusMix: 0.1,
+            reverbMix: 0.3, delayMix: 0.38, delayTime: 0.25, chorusMix: 0.1,
             iconStyle: .pulseBolt
         ),
         SynthPreset(
