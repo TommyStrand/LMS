@@ -105,9 +105,18 @@ final class AudioEngine: ObservableObject {
     }
 
     private func restartEngineIfNeeded() {
-        try? AVAudioSession.sharedInstance().setActive(true)
-        guard !engine.isRunning else { return }
+        // Re-apply session settings — category/rate can drift after an AirPlay handoff.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? session.setPreferredSampleRate(sampleRate)
+        try? session.setPreferredIOBufferDuration(0.01)
+        try? session.setActive(true)
+        // Reset clears stale delay/reverb buffers accumulated during AirPlay;
+        // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
+        if engine.isRunning { engine.stop() }
+        engine.reset()
         try? engine.start()
+        applyPreset(currentPreset)
     }
 
     // MARK: - Preset

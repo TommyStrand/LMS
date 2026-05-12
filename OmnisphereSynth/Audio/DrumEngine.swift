@@ -295,6 +295,49 @@ final class DrumEngine: ObservableObject {
 
         do { try audioEngine.start() }
         catch { print("DrumEngine: engine start failed – \(error)") }
+
+        observeAudioSession()
+    }
+
+    // MARK: - Route / interruption recovery
+
+    private func observeAudioSession() {
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine, queue: .main
+        ) { [weak self] _ in self?.restartEngineIfNeeded() }
+
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] n in
+            guard
+                let v = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: v) == .ended
+            else { return }
+            self?.restartEngineIfNeeded()
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.audioEngine.isRunning else { return }
+            self.restartEngineIfNeeded()
+        }
+    }
+
+    private func restartEngineIfNeeded() {
+        if audioEngine.isRunning { audioEngine.stop() }
+        audioEngine.reset()
+        do { try audioEngine.start() }
+        catch { print("DrumEngine: restart failed – \(error)"); return }
+        // Restore effect parameters cleared by reset()
+        delayNode.delayTime     = 60.0 / renderBpm * 0.75
+        delayNode.feedback      = 28
+        delayNode.lowPassCutoff = 5500
+        delayNode.wetDryMix     = delayMix * 100
+        reverbNode.wetDryMix    = shimmer * 100
     }
 
     private func updateDelayTime() {
