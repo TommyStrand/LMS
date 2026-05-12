@@ -1,5 +1,10 @@
 import AVFoundation
 
+// Per-layer gain — written from main thread, read from render thread.
+// A class so the render closure can hold a strong reference that stays valid
+// even after the layer is removed from the active set.
+private final class GainBox { var value: Float = 1.0 }
+
 final class AudioEngine: ObservableObject {
 
     // MARK: - Nodes
@@ -23,6 +28,16 @@ final class AudioEngine: ObservableObject {
 
     @Published var waveformSamples: [Float] = Array(repeating: 0, count: 128)
     @Published var currentPreset: SynthPreset = SynthPreset.presets[0]
+
+    // MARK: - Layer mode
+    @Published var isLayeringMode    = false
+    @Published var activeLayerIndices: [Int] = []   // preset indices that are ON
+    @Published var primaryLayerIndex: Int?          // controls panel follows this one
+
+    // Gain boxes keyed by preset index; captured strongly by layer render closures.
+    private var layerGainBoxes:     [Int: GainBox] = [:]
+    // Tracks which preset indices were layered at each noteOn, for correct noteOff cleanup.
+    private var noteOnLayerIndices: [Int: [Int]]   = [:]
 
     private let sampleRate: Double = 44100
     private var analysisBuffer: [Float] = Array(repeating: 0, count: 128)
@@ -119,6 +134,53 @@ final class AudioEngine: ObservableObject {
         applyPreset(currentPreset)
     }
 
+    // MARK: - Layer management
+
+    func enterLayerMode(startingWith presetIndex: Int) {
+        isLayeringMode    = true
+        activeLayerIndices = [presetIndex]
+        primaryLayerIndex  = presetIndex
+        ensureGainBox(presetIndex)
+    }
+
+    func exitLayerMode() {
+        isLayeringMode    = false
+        activeLayerIndices = []
+        primaryLayerIndex  = nil
+    }
+
+    func toggleLayer(presetIndex: Int) {
+        if let pos = activeLayerIndices.firstIndex(of: presetIndex) {
+            activeLayerIndices.remove(at: pos)
+            if primaryLayerIndex == presetIndex {
+                primaryLayerIndex = activeLayerIndices.last
+            }
+            if activeLayerIndices.isEmpty { exitLayerMode() }
+        } else {
+            ensureGainBox(presetIndex)
+            activeLayerIndices.append(presetIndex)
+            primaryLayerIndex = presetIndex
+        }
+        objectWillChange.send()
+    }
+
+    func layerGain(for presetIndex: Int) -> Float {
+        layerGainBoxes[presetIndex]?.value ?? 1.0
+    }
+
+    func setLayerGain(_ gain: Float, for presetIndex: Int) {
+        layerGainBoxes[presetIndex]?.value = max(0.05, min(1, gain))
+        objectWillChange.send()
+    }
+
+    @discardableResult
+    private func ensureGainBox(_ presetIndex: Int) -> GainBox {
+        if let box = layerGainBoxes[presetIndex] { return box }
+        let box = GainBox()
+        layerGainBoxes[presetIndex] = box
+        return box
+    }
+
     // MARK: - Preset
 
     func applyPreset(_ preset: SynthPreset) {
@@ -159,16 +221,50 @@ final class AudioEngine: ObservableObject {
     // MARK: - Touch Events
 
     func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
-        // Tear down any existing voice for this ID — handles touch-ID reuse (iOS
-        // recycles UITouch memory addresses) and rapid re-taps during the tail window.
+        if isLayeringMode && !activeLayerIndices.isEmpty {
+            noteOnLayer(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
+        } else {
+            noteOnSingle(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
+        }
+    }
+
+    private func noteOnSingle(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
         if let existing = voiceNodes[touchID] {
             engine.detach(existing)
             voiceNodes.removeValue(forKey: touchID)
             voices.removeValue(forKey: touchID)
             voiceMods.removeValue(forKey: touchID)
         }
-        let preset = currentPreset
+        spawnVoice(id: touchID, preset: currentPreset, note: note, velocity: velocity,
+                   x: x, y: y, gainBox: nil)
+    }
 
+    private func noteOnLayer(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
+        // Tear down any layer voices from a previous tap on this touch ID.
+        if let prev = noteOnLayerIndices[touchID] {
+            for presetIdx in prev {
+                let cid = touchID * 1000 + presetIdx
+                if let n = voiceNodes[cid] { engine.detach(n) }
+                voiceNodes.removeValue(forKey: cid)
+                voices.removeValue(forKey: cid)
+                voiceMods.removeValue(forKey: cid)
+            }
+        }
+
+        for presetIdx in activeLayerIndices {
+            let preset    = SynthPreset.presets[presetIdx]
+            let gainBox   = ensureGainBox(presetIdx)
+            let cid       = touchID * 1000 + presetIdx
+            spawnVoice(id: cid, preset: preset, note: note, velocity: velocity,
+                       x: x, y: y, gainBox: gainBox)
+        }
+        noteOnLayerIndices[touchID] = activeLayerIndices
+    }
+
+    // Shared voice-creation core. `gainBox` nil → single mode (gain = 1.0 always).
+    // `gainBox` non-nil → layer mode (gain read live from box each audio buffer).
+    private func spawnVoice(id: Int, preset: SynthPreset, note: Int, velocity: Float,
+                            x: Float, y: Float, gainBox: GainBox?) {
         let voice: any AnyVoice
         switch preset.voiceMode {
         case .organChurch:
@@ -183,16 +279,15 @@ final class AudioEngine: ObservableObject {
 
         voice.filterCutoffMod = x
         voice.lfoDepthMod     = y
-        voices[touchID] = voice
+        voices[id] = voice
 
         let mod = ModulationProcessor(sampleRate: sampleRate)
-        voiceMods[touchID] = mod
+        voiceMods[id] = mod
 
         let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+        let sr     = sampleRate
 
-        // Fresh effect instances per voice — every render block gets its own state,
-        // preventing data races when multiple voices play concurrently.
-        let sr           = sampleRate
+        // Fresh effect instances per voice — state is per-voice, not shared.
         let lofiRef      = (LofiProcessor(), LofiProcessor())
         let spaceEchoRef = (SpaceEchoProcessor(sampleRate: sr), SpaceEchoProcessor(sampleRate: sr))
         let gritRef      = GritProcessor()
@@ -204,70 +299,64 @@ final class AudioEngine: ObservableObject {
         let modDelayRef  = (ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.33),
                             ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.37))
 
-        // mod is captured strongly so tremolo/chorus persist through the full note tail.
+        // For single mode: read self.currentPreset each callback (live knob updates).
+        // For layer mode:  read capturedPreset (snapshot) + gainBox (live gain).
+        let capturedPreset = preset
+        let isLayer        = gainBox != nil
+
         let node = AVAudioSourceNode(format: format) { [weak self, weak voice] _, _, frameCount, audioBufferList in
             guard let self, let voice else { return noErr }
-            let preset = self.currentPreset
+            let p = isLayer ? capturedPreset : self.currentPreset
 
-            // Sync live-knob param that OrganVoice captures at init time
-            if let ov = voice as? OrganVoice { ov.tremulantDepth = preset.tremulantDepth }
+            if let ov = voice as? OrganVoice { ov.tremulantDepth = p.tremulantDepth }
 
             let abl   = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let left  = abl[0].mData!.assumingMemoryBound(to: Float.self)
             let right = abl[1].mData!.assumingMemoryBound(to: Float.self)
+            let gain  = gainBox?.value ?? 1.0   // read once per buffer for smooth fades
 
             for i in 0..<Int(frameCount) {
                 var (l, r) = voice.nextStereoSample()
 
-                // Auto-Wah (before grit: envelope filter shapes voice before distortion)
-                l = autoWahRef.0.process(l, amount: preset.autoWahAmount)
-                r = autoWahRef.1.process(r, amount: preset.autoWahAmount)
+                l = autoWahRef.0.process(l, amount: p.autoWahAmount)
+                r = autoWahRef.1.process(r, amount: p.autoWahAmount)
 
-                // Grit
-                l = gritRef.process(l, amount: preset.gritAmount)
-                r = gritRef.process(r, amount: preset.gritAmount)
+                l = gritRef.process(l, amount: p.gritAmount)
+                r = gritRef.process(r, amount: p.gritAmount)
 
-                // Lo-Fi
-                l = lofiRef.0.process(l, amount: preset.lofiAmount)
-                r = lofiRef.1.process(r, amount: preset.lofiAmount)
+                l = lofiRef.0.process(l, amount: p.lofiAmount)
+                r = lofiRef.1.process(r, amount: p.lofiAmount)
 
-                // Space Echo (independent L/R instances for natural stereo spread)
-                l = spaceEchoRef.0.process(l, amount: preset.spaceEchoAmount)
-                r = spaceEchoRef.1.process(r, amount: preset.spaceEchoAmount)
+                l = spaceEchoRef.0.process(l, amount: p.spaceEchoAmount)
+                r = spaceEchoRef.1.process(r, amount: p.spaceEchoAmount)
 
-                // Broken tape delay
-                let btAmt = preset.brokenTape
+                let btAmt = p.brokenTape
                 l = tapeRef.0.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
                 r = tapeRef.1.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
 
-                // Bloom Reverb — parallel swell preserves prior-stage stereo width
-                let blAmt = preset.bloomAmount
+                let blAmt = p.bloomAmount
                 if blAmt > 0.005 {
                     let (bl, br) = bloomRef.process((l + r) * 0.5, amount: blAmt)
                     l = l * (1.0 - blAmt * 0.3) + bl
                     r = r * (1.0 - blAmt * 0.3) + br
                 }
 
-                // Universal modulation: tremolo + chorus
                 let (ml, mr) = mod.process(l: l, r: r,
-                                           tremDepth: preset.tremulantDepth,
-                                           chorusMix: preset.chorusMix)
+                                           tremDepth: p.tremulantDepth,
+                                           chorusMix: p.chorusMix)
                 l = ml; r = mr
 
-                // Warm tube overdrive
-                l = tubeSaturate(l, drive: preset.distortionAmount)
-                r = tubeSaturate(r, drive: preset.distortionAmount)
+                l = tubeSaturate(l, drive: p.distortionAmount)
+                r = tubeSaturate(r, drive: p.distortionAmount)
 
-                // Phaser (after saturation: sweeps the harmonically-rich tone)
-                l = phaserRef.0.process(l, amount: preset.phaserAmount)
-                r = phaserRef.1.process(r, amount: preset.phaserAmount)
+                l = phaserRef.0.process(l, amount: p.phaserAmount)
+                r = phaserRef.1.process(r, amount: p.phaserAmount)
 
-                // Modulating Delay (last in chain: warps the full processed signal)
-                l = modDelayRef.0.process(l, amount: preset.modDelayAmount)
-                r = modDelayRef.1.process(r, amount: preset.modDelayAmount)
+                l = modDelayRef.0.process(l, amount: p.modDelayAmount)
+                r = modDelayRef.1.process(r, amount: p.modDelayAmount)
 
-                left[i]  = l
-                right[i] = r
+                left[i]  = l * gain
+                right[i] = r * gain
                 self.feedAnalysis((l + r) * 0.5)
             }
             return noErr
@@ -275,39 +364,67 @@ final class AudioEngine: ObservableObject {
 
         engine.attach(node)
         engine.connect(node, to: voiceMixer, format: format)
-        voiceNodes[touchID] = node
+        voiceNodes[id] = node
         voice.start()
     }
 
     func noteOff(touchID: Int) {
-        voices[touchID]?.release()
+        if isLayeringMode, let layerIndices = noteOnLayerIndices[touchID] {
+            for presetIdx in layerIndices {
+                let cid    = touchID * 1000 + presetIdx
+                let preset = SynthPreset.presets[presetIdx]
+                releaseVoice(id: cid, preset: preset)
+            }
+            noteOnLayerIndices.removeValue(forKey: touchID)
+        } else {
+            releaseVoice(id: touchID, preset: currentPreset)
+        }
+    }
+
+    private func releaseVoice(id: Int, preset: SynthPreset) {
+        voices[id]?.release()
         let tail: Double
-        switch currentPreset.voiceMode {
+        switch preset.voiceMode {
         case .hammondB3:   tail = 0.1
         case .organChurch: tail = 0.15
         case .rhodes:      tail = 3.0
-        case .synth:       tail = Double(currentPreset.release) + 0.1
+        case .synth:       tail = Double(preset.release) + 0.1
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
             guard let self else { return }
-            if let node = self.voiceNodes[touchID] {
+            if let node = self.voiceNodes[id] {
                 self.engine.detach(node)
-                self.voiceNodes.removeValue(forKey: touchID)
-                self.voices.removeValue(forKey: touchID)
-                self.voiceMods.removeValue(forKey: touchID)
+                self.voiceNodes.removeValue(forKey: id)
+                self.voices.removeValue(forKey: id)
+                self.voiceMods.removeValue(forKey: id)
             }
         }
     }
 
     func updateTouch(touchID: Int, x: Float, y: Float) {
-        voices[touchID]?.filterCutoffMod = x
-        voices[touchID]?.lfoDepthMod     = y
+        if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
+            for presetIdx in indices {
+                let v = voices[touchID * 1000 + presetIdx]
+                v?.filterCutoffMod = x; v?.lfoDepthMod = y
+            }
+        } else {
+            voices[touchID]?.filterCutoffMod = x
+            voices[touchID]?.lfoDepthMod     = y
+        }
     }
 
     func updateGlissando(touchID: Int, semitones: Float, x: Float, y: Float) {
-        voices[touchID]?.pitchBendSemitones = semitones
-        voices[touchID]?.filterCutoffMod    = x
-        voices[touchID]?.lfoDepthMod        = y
+        if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
+            for presetIdx in indices {
+                let v = voices[touchID * 1000 + presetIdx]
+                v?.pitchBendSemitones = semitones
+                v?.filterCutoffMod    = x; v?.lfoDepthMod = y
+            }
+        } else {
+            voices[touchID]?.pitchBendSemitones = semitones
+            voices[touchID]?.filterCutoffMod    = x
+            voices[touchID]?.lfoDepthMod        = y
+        }
     }
 
     // MARK: - Waveform Analysis

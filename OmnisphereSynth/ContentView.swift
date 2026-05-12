@@ -132,7 +132,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header(theme: theme)
 
-            PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
+            PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                 engine.applyPreset(preset)
             }
             .padding(.top, 8)
@@ -161,7 +161,7 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 0) {
                 // Left panel: presets + controls
                 VStack(spacing: 10) {
-                    PresetSelectorView(selectedIndex: $selectedPresetIndex) { preset in
+                    PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                         engine.applyPreset(preset)
                     }
 

@@ -2,25 +2,43 @@ import SwiftUI
 
 struct PresetSelectorView: View {
     @Binding var selectedIndex: Int
+    @ObservedObject var engine: AudioEngine
     @EnvironmentObject var themeManager: ThemeManager
     let onSelect: (SynthPreset) -> Void
 
     var body: some View {
         let theme = themeManager.current
+        VStack(spacing: 0) {
+            chipRow(theme: theme)
+            if engine.isLayeringMode && !engine.activeLayerIndices.isEmpty {
+                layerGainRow(theme: theme)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+    }
+
+    // MARK: - Chip row
+
+    private func chipRow(theme: AppTheme) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
+                if engine.isLayeringMode {
+                    exitLayerButton(theme: theme)
+                }
                 ForEach(Array(SynthPreset.presets.enumerated()), id: \.offset) { idx, preset in
                     PresetChip(
                         preset: preset,
                         isSelected: idx == selectedIndex,
+                        isLayeringMode: engine.isLayeringMode,
+                        isActiveLayer: engine.activeLayerIndices.contains(idx),
+                        isPrimaryLayer: engine.primaryLayerIndex == idx,
                         theme: theme
                     )
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            selectedIndex = idx
-                        }
-                        onSelect(preset)
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        handleTap(idx: idx, preset: preset)
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        handleLongPress(idx: idx, preset: preset)
                     }
                 }
             }
@@ -28,40 +46,198 @@ struct PresetSelectorView: View {
             .padding(.vertical, 6)
         }
     }
+
+    // MARK: - Exit button
+
+    private func exitLayerButton(theme: AppTheme) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            withAnimation(.spring(response: 0.3)) { engine.exitLayerMode() }
+        } label: {
+            VStack(spacing: 5) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                        .fill(theme.panelBackground)
+                        .frame(width: 52, height: 64)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                                .strokeBorder(theme.panelBorder, lineWidth: 1)
+                        )
+                    VStack(spacing: 4) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(theme.secondaryText)
+                        Text("LAYER")
+                            .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                            .foregroundColor(theme.secondaryText)
+                            .kerning(1)
+                    }
+                }
+                Color.clear.frame(width: 52, height: 14) // align with chip labels
+            }
+        }
+    }
+
+    // MARK: - Gain knob row
+
+    private func layerGainRow(theme: AppTheme) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 20) {
+                ForEach(engine.activeLayerIndices, id: \.self) { idx in
+                    let preset = SynthPreset.presets[idx]
+                    let accent = theme.accent(for: Color(hex: preset.color))
+                    VStack(spacing: 3) {
+                        Text(preset.name)
+                            .font(.system(size: 8, weight: .semibold, design: theme.fontDesign))
+                            .foregroundColor(accent)
+                            .lineLimit(1)
+                            .frame(width: 64)
+                        KnobView(
+                            label: "VOL",
+                            value: engine.layerGain(for: idx),
+                            color: accent
+                        ) { engine.setLayerGain($0, for: idx) }
+                        .frame(width: 56, height: 56)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
+        }
+    }
+
+    // MARK: - Gesture handlers
+
+    private func handleTap(idx: Int, preset: SynthPreset) {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if engine.isLayeringMode {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                engine.toggleLayer(presetIndex: idx)
+            }
+            // Controls follow whichever preset is now primary
+            if let primary = engine.primaryLayerIndex {
+                selectedIndex = primary
+                onSelect(SynthPreset.presets[primary])
+            }
+        } else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                selectedIndex = idx
+            }
+            onSelect(preset)
+        }
+    }
+
+    private func handleLongPress(idx: Int, preset: SynthPreset) {
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        if engine.isLayeringMode {
+            withAnimation(.spring(response: 0.3)) { engine.exitLayerMode() }
+        } else {
+            withAnimation(.spring(response: 0.3)) {
+                engine.enterLayerMode(startingWith: idx)
+                selectedIndex = idx
+            }
+            onSelect(preset)
+        }
+    }
 }
+
+// MARK: - Preset chip
 
 struct PresetChip: View {
     let preset: SynthPreset
     let isSelected: Bool
+    let isLayeringMode: Bool
+    let isActiveLayer: Bool
+    let isPrimaryLayer: Bool
     let theme: AppTheme
 
     private var accentColor: Color { theme.accent(for: Color(hex: preset.color)) }
 
     var body: some View {
         VStack(spacing: 5) {
-            ZStack {
-                RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
-                    .fill(isSelected ? accentColor.opacity(0.85) : theme.panelBackground)
-                    .frame(width: 64, height: 64)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
-                            .strokeBorder(accentColor.opacity(isSelected ? 1 : 0.4),
-                                          lineWidth: isSelected ? 2 : 1)
-                    )
-                    .shadow(color: isSelected ? accentColor.opacity(0.5) : .clear, radius: 10)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                        .fill(fillColor)
+                        .frame(width: 64, height: 64)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: theme.cornerRadius * 0.8)
+                                .strokeBorder(borderColor, lineWidth: borderWidth)
+                        )
+                        .shadow(color: shadowColor, radius: 10)
 
-                PresetIcon(iconStyle: preset.iconStyle,
-                           color: isSelected ? theme.primaryText : accentColor)
-                    .frame(width: 38, height: 38)
+                    PresetIcon(iconStyle: preset.iconStyle,
+                               color: iconColor)
+                        .frame(width: 38, height: 38)
+                }
+
+                // Active-layer badge (dot in top-right corner)
+                if isLayeringMode && isActiveLayer {
+                    Circle()
+                        .fill(isPrimaryLayer ? accentColor : accentColor.opacity(0.7))
+                        .frame(width: 9, height: 9)
+                        .overlay(
+                            Circle().strokeBorder(theme.panelBackground, lineWidth: 1.5)
+                        )
+                        .offset(x: 3, y: -3)
+                }
             }
+            .frame(width: 64, height: 64)
 
             Text(preset.name)
                 .font(.system(size: 9, weight: .medium, design: theme.fontDesign))
-                .foregroundColor(isSelected ? accentColor : theme.secondaryText)
+                .foregroundColor(labelColor)
                 .lineLimit(1)
                 .frame(width: 72)
         }
-        .scaleEffect(isSelected ? 1.05 : 1.0)
+        .scaleEffect(scaleAmount)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPrimaryLayer)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isActiveLayer)
+    }
+
+    private var fillColor: Color {
+        if isPrimaryLayer { return accentColor.opacity(0.85) }
+        if isActiveLayer  { return accentColor.opacity(0.22) }
+        if !isLayeringMode && isSelected { return accentColor.opacity(0.85) }
+        return theme.panelBackground
+    }
+
+    private var borderColor: Color {
+        if isPrimaryLayer || (!isLayeringMode && isSelected) { return accentColor }
+        if isActiveLayer { return accentColor.opacity(0.65) }
+        return accentColor.opacity(isLayeringMode ? 0.2 : 0.4)
+    }
+
+    private var borderWidth: CGFloat {
+        if isPrimaryLayer || (!isLayeringMode && isSelected) { return 2 }
+        if isActiveLayer { return 1.5 }
+        return 1
+    }
+
+    private var shadowColor: Color {
+        if isPrimaryLayer || (!isLayeringMode && isSelected) { return accentColor.opacity(0.5) }
+        if isActiveLayer { return accentColor.opacity(0.2) }
+        return .clear
+    }
+
+    private var iconColor: Color {
+        if isPrimaryLayer || (!isLayeringMode && isSelected) { return theme.primaryText }
+        if isActiveLayer { return accentColor }
+        return accentColor.opacity(isLayeringMode ? 0.4 : 1.0)
+    }
+
+    private var labelColor: Color {
+        if isPrimaryLayer || (!isLayeringMode && isSelected) { return accentColor }
+        if isActiveLayer { return accentColor.opacity(0.85) }
+        return isLayeringMode ? theme.secondaryText.opacity(0.5) : theme.secondaryText
+    }
+
+    private var scaleAmount: CGFloat {
+        if isPrimaryLayer { return 1.05 }
+        if isActiveLayer  { return 1.02 }
+        if !isLayeringMode && isSelected { return 1.05 }
+        return isLayeringMode ? 0.95 : 1.0
     }
 }
 
@@ -170,7 +346,6 @@ struct PresetIcon: View {
             )
             ctx.fill(pipe, with: .color(color.opacity(0.8)))
 
-            // Pipe mouth opening (small rectangle near top)
             let mouthW = pipeW * 0.55
             let mouthH: CGFloat = pipeW * 0.22
             var mouth = Path()
@@ -248,7 +423,7 @@ struct PresetIcon: View {
         let mid = h * 0.5
         let top = h * 0.08
         let bot = h * 0.92
-        let pw  = w * 0.24   // pulse width
+        let pw  = w * 0.24
 
         var wave = Path()
         wave.move(to:    CGPoint(x: 0,          y: mid))
@@ -262,7 +437,6 @@ struct PresetIcon: View {
         ctx.stroke(wave, with: .color(color),
                    style: StrokeStyle(lineWidth: 1.7, lineCap: .square, lineJoin: .miter))
 
-        // Voltage-spike tick
         var tick = Path()
         tick.move(to:    CGPoint(x: w*0.14, y: top - 2))
         tick.addLine(to: CGPoint(x: w*0.14, y: top + 5))
