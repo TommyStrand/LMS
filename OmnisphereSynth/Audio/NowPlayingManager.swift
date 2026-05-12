@@ -27,14 +27,12 @@ final class NowPlayingManager {
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = 0
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        MPNowPlayingInfoCenter.default().playbackState  = isPlaying ? .playing : .paused
     }
 
     func setPlaybackState(_ isPlaying: Bool) {
         guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        MPNowPlayingInfoCenter.default().playbackState  = isPlaying ? .playing : .paused
     }
 
     // MARK: - Remote commands
