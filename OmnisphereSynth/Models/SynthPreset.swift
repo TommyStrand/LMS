@@ -1,7 +1,7 @@
 import Foundation
 
 struct SynthPreset: Identifiable, Equatable {
-    let id = UUID()
+    let id: String   // = name; stable across instantiations so == works after re-creation
     let name: String
     let color: String
 
@@ -108,7 +108,7 @@ struct SynthPreset: Identifiable, Equatable {
         modDelayAmount: Float = 0,
         iconStyle: IconStyle = .mysticWave
     ) {
-        self.name = name; self.color = color
+        self.id = name; self.name = name; self.color = color
         self.voiceMode = voiceMode
         self.osc1Waveform = osc1Waveform; self.osc2Waveform = osc2Waveform
         self.osc2Detune = osc2Detune; self.oscMix = oscMix

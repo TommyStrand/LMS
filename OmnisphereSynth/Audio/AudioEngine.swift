@@ -453,7 +453,8 @@ final class AudioEngine: ObservableObject {
         case .synth:
             voice = SynthVoice(note: note, velocity: velocity, preset: preset, sampleRate: sampleRate)
         case .sampler:
-            return  // sampler voices are handled before spawnVoice is reached
+            assertionFailure("spawnVoice reached .sampler — caller must handle sampler notes before this point")
+            return
         }
 
         voice.filterCutoffMod = x

@@ -44,8 +44,8 @@ final class DrumEngine: ObservableObject {
             let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
             _pattern         = DrumPattern.all[idx]
             tickPosition     = 0
-            customHits       = nil
-            renderCustomHits = nil
+            customHits = nil
+            customHitsLock.lock(); renderCustomHits = nil; customHitsLock.unlock()
         }
     }
     @Published var delayMix: Float = 0.22 {
@@ -89,6 +89,7 @@ final class DrumEngine: ObservableObject {
     private var renderGrit:      Float  = 0
     private var _pattern:        DrumPattern = DrumPattern.all[0]
     private var renderCustomHits: [DrumHit]?
+    private let customHitsLock = NSLock()
     private var renderIsPlaying:    Bool   = false
     private var renderMasterVolume: Float  = 0.8
     private var beatCounter:        Int    = 0
@@ -150,13 +151,13 @@ final class DrumEngine: ObservableObject {
             hits.append(DrumHit(tick: tick, voice: voice, velocity: 0.85))
             hits.sort { $0.tick < $1.tick }
         }
-        customHits       = hits
-        renderCustomHits = hits
+        customHits = hits
+        customHitsLock.lock(); renderCustomHits = hits; customHitsLock.unlock()
     }
 
     func resetPattern() {
-        customHits       = nil
-        renderCustomHits = nil
+        customHits = nil
+        customHitsLock.lock(); renderCustomHits = nil; customHitsLock.unlock()
     }
 
     func activeSteps(for voice: DrumVoiceID) -> Set<Int> {
@@ -362,6 +363,9 @@ final class DrumEngine: ObservableObject {
         let tpb            = Double(_pattern.ticksPerBeat)
         let ticksPerSample = (renderBpm / 60.0) * tpb / 44100.0
         let grit           = renderGrit
+        customHitsLock.lock()
+        let hitsThisBuffer = renderCustomHits
+        customHitsLock.unlock()
 
         for frame in 0 ..< frameCount {
             let prev = tickPosition
@@ -370,7 +374,7 @@ final class DrumEngine: ObservableObject {
             let prevMod = prev.truncatingRemainder(dividingBy: loopTicks)
             let currMod = tickPosition.truncatingRemainder(dividingBy: loopTicks)
 
-            for hit in renderCustomHits ?? _pattern.hits {
+            for hit in hitsThisBuffer ?? _pattern.hits {
                 let ht    = Double(hit.tick)
                 let fired = currMod > prevMod
                     ? (ht >= prevMod && ht < currMod)
