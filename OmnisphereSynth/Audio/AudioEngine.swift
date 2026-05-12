@@ -19,12 +19,35 @@ final class AudioEngine: ObservableObject {
     private let timePitch     = AVAudioUnitTimePitch()
     private let shimmerMixer  = AVAudioMixerNode()
 
-    // Effects are created fresh per-voice in noteOn — no shared instances.
+    // Single master source node — all synth voices summed here, effects applied once.
+    private var masterNode: AVAudioSourceNode?
+
+    // MARK: - Master effect chain (single shared set, not per-voice)
+    // Initialised lazily so sampleRate is available; first accessed in setupMasterNode()
+    // which always runs before the audio thread starts.
+    private lazy var masterMod        = ModulationProcessor(sampleRate: sampleRate)
+    private lazy var masterLofiL      = LofiProcessor()
+    private lazy var masterLofiR      = LofiProcessor()
+    private lazy var masterSpaceEchoL = SpaceEchoProcessor(sampleRate: sampleRate)
+    private lazy var masterSpaceEchoR = SpaceEchoProcessor(sampleRate: sampleRate)
+    private lazy var masterGrit       = GritProcessor()
+    private lazy var masterTapeL      = BrokenTapeDelay(sampleRate: sampleRate)
+    private lazy var masterTapeR      = BrokenTapeDelay(sampleRate: sampleRate)
+    private lazy var masterBloom      = BloomReverbProcessor(sampleRate: sampleRate)
+    private lazy var masterPhaserL    = PhaserProcessor(sampleRate: sampleRate)
+    private lazy var masterPhaserR    = PhaserProcessor(sampleRate: sampleRate, lfoPhaseOffset: 0.5)
+    private lazy var masterAutoWahL   = AutoWahProcessor(sampleRate: sampleRate)
+    private lazy var masterAutoWahR   = AutoWahProcessor(sampleRate: sampleRate)
+    private lazy var masterModDelayL  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.33)
+    private lazy var masterModDelayR  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.37)
 
     // MARK: - State
     private(set) var voices: [Int: any AnyVoice] = [:]
-    private var voiceNodes:    [Int: AVAudioSourceNode] = [:]
-    private var voiceMods:     [Int: ModulationProcessor] = [:]
+    // Protects `voices` and `voiceGainBoxes` between main thread and audio render thread.
+    private let voicesLock = NSLock()
+
+    // Non-nil only for layer-mode voices; single-mode voices use implicit gain 1.0.
+    private var voiceGainBoxes: [Int: GainBox] = [:]
 
     // Sampler nodes (one per instrument, lazily created)
     private var samplerEngines: [String: SamplerEngine] = [:]
@@ -36,10 +59,10 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Layer mode
     @Published var isLayeringMode    = false
-    @Published var activeLayerIndices: [Int] = []   // preset indices that are ON
-    @Published var primaryLayerIndex: Int?          // controls panel follows this one
+    @Published var activeLayerIndices: [Int] = []
+    @Published var primaryLayerIndex: Int?
 
-    // Gain boxes keyed by preset index; captured strongly by layer render closures.
+    // Gain boxes keyed by preset index; shared with voiceGainBoxes entries for render.
     private var layerGainBoxes:     [Int: GainBox] = [:]
     // Tracks which preset indices were layered at each noteOn, for correct noteOff cleanup.
     private var noteOnLayerIndices: [Int: [Int]]   = [:]
@@ -75,7 +98,7 @@ final class AudioEngine: ObservableObject {
         // Fan-out voiceMixer → delay + shimmerReverb (multi-destination)
         let stereo = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
         engine.connect(voiceMixer, to: [
-            AVAudioConnectionPoint(node: delay,        bus: 0),
+            AVAudioConnectionPoint(node: delay,         bus: 0),
             AVAudioConnectionPoint(node: shimmerReverb, bus: 0)
         ], fromBus: 0, format: stereo)
 
@@ -83,14 +106,104 @@ final class AudioEngine: ObservableObject {
         timePitch.rate   = 1.0
         shimmerMixer.outputVolume = 0
 
-        // Headroom: each voice peaks near 1.0, so several stacked voices can
-        // clip the bus. Attenuating here prevents the clipping transients
-        // that the delay/reverb tail would otherwise expose as clicks.
+        // Headroom for sampler nodes; synth voices are summed before voiceMixer so they
+        // arrive as one stream regardless of layer count.
         voiceMixer.outputVolume = 0.55
+
+        setupMasterNode()
 
         applyPreset(currentPreset)
         try? engine.start()
         observeAudioSession()
+    }
+
+    private func setupMasterNode() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
+
+        // Touch all lazy effect processors to initialise them on the main thread before
+        // the audio thread starts reading them.
+        _ = masterMod; _ = masterLofiL; _ = masterLofiR
+        _ = masterSpaceEchoL; _ = masterSpaceEchoR; _ = masterGrit
+        _ = masterTapeL; _ = masterTapeR; _ = masterBloom
+        _ = masterPhaserL; _ = masterPhaserR
+        _ = masterAutoWahL; _ = masterAutoWahR
+        _ = masterModDelayL; _ = masterModDelayR
+
+        let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList in
+            guard let self else { return noErr }
+
+            // Snapshot active voices under lock — keeps main-thread add/remove race-free.
+            self.voicesLock.lock()
+            let voiceSnapshot = self.voices
+            let gainSnapshot  = self.voiceGainBoxes
+            self.voicesLock.unlock()
+
+            let p     = self.currentPreset
+            let abl   = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            let left  = abl[0].mData!.assumingMemoryBound(to: Float.self)
+            let right = abl[1].mData!.assumingMemoryBound(to: Float.self)
+
+            for i in 0..<Int(frameCount) {
+                var l: Float = 0.0
+                var r: Float = 0.0
+
+                // Sum all active voices before any effects processing.
+                for (id, voice) in voiceSnapshot {
+                    if let ov = voice as? OrganVoice { ov.tremulantDepth = p.tremulantDepth }
+                    let (vl, vr) = voice.nextStereoSample()
+                    let gain = gainSnapshot[id]?.value ?? 1.0
+                    l += vl * gain
+                    r += vr * gain
+                }
+
+                // Effects chain applied ONCE on the summed signal.
+                l = self.masterAutoWahL.process(l, amount: p.autoWahAmount)
+                r = self.masterAutoWahR.process(r, amount: p.autoWahAmount)
+
+                l = self.masterGrit.process(l, amount: p.gritAmount)
+                r = self.masterGrit.process(r, amount: p.gritAmount)
+
+                l = self.masterLofiL.process(l, amount: p.lofiAmount)
+                r = self.masterLofiR.process(r, amount: p.lofiAmount)
+
+                l = self.masterSpaceEchoL.process(l, amount: p.spaceEchoAmount)
+                r = self.masterSpaceEchoR.process(r, amount: p.spaceEchoAmount)
+
+                let btAmt = p.brokenTape
+                l = self.masterTapeL.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
+                r = self.masterTapeR.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
+
+                let blAmt = p.bloomAmount
+                if blAmt > 0.005 {
+                    let (bl, br) = self.masterBloom.process((l + r) * 0.5, amount: blAmt)
+                    l = l * (1.0 - blAmt * 0.3) + bl
+                    r = r * (1.0 - blAmt * 0.3) + br
+                }
+
+                let (ml, mr) = self.masterMod.process(l: l, r: r,
+                                                       tremDepth: p.tremulantDepth,
+                                                       chorusMix: p.chorusMix)
+                l = ml; r = mr
+
+                l = tubeSaturate(l, drive: p.distortionAmount)
+                r = tubeSaturate(r, drive: p.distortionAmount)
+
+                l = self.masterPhaserL.process(l, amount: p.phaserAmount)
+                r = self.masterPhaserR.process(r, amount: p.phaserAmount)
+
+                l = self.masterModDelayL.process(l, amount: p.modDelayAmount)
+                r = self.masterModDelayR.process(r, amount: p.modDelayAmount)
+
+                left[i]  = l
+                right[i] = r
+                self.feedAnalysis((l + r) * 0.5)
+            }
+            return noErr
+        }
+
+        engine.attach(node)
+        engine.connect(node, to: voiceMixer, format: format)
+        masterNode = node
     }
 
     // MARK: - Route / interruption recovery
@@ -131,10 +244,13 @@ final class AudioEngine: ObservableObject {
         try? session.setPreferredSampleRate(sampleRate)
         try? session.setPreferredIOBufferDuration(0.01)
         try? session.setActive(true)
+        if engine.isRunning { engine.stop() }
+        // Detach old master node before reset so stale render callbacks are not called.
+        if let old = masterNode { engine.detach(old); masterNode = nil }
         // Reset clears stale delay/reverb buffers accumulated during AirPlay;
         // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
-        if engine.isRunning { engine.stop() }
         engine.reset()
+        setupMasterNode()
         try? engine.start()
         applyPreset(currentPreset)
     }
@@ -142,14 +258,14 @@ final class AudioEngine: ObservableObject {
     // MARK: - Layer management
 
     func enterLayerMode(startingWith presetIndex: Int) {
-        isLayeringMode    = true
+        isLayeringMode     = true
         activeLayerIndices = [presetIndex]
         primaryLayerIndex  = presetIndex
         ensureGainBox(presetIndex)
     }
 
     func exitLayerMode() {
-        isLayeringMode    = false
+        isLayeringMode     = false
         activeLayerIndices = []
         primaryLayerIndex  = nil
     }
@@ -248,7 +364,6 @@ final class AudioEngine: ObservableObject {
 
     private func noteOnSingle(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
         if case .sampler(let instrument) = currentPreset.voiceMode {
-            // Release any previous note on this touch
             if let prev = samplerTouches[touchID] {
                 samplerEngines[prev.instrumentID]?.noteOff(UInt8(prev.note))
             }
@@ -257,12 +372,12 @@ final class AudioEngine: ObservableObject {
             samplerTouches[touchID] = (instrument.id, note)
             return
         }
-        if let existing = voiceNodes[touchID] {
-            engine.detach(existing)
-            voiceNodes.removeValue(forKey: touchID)
-            voices.removeValue(forKey: touchID)
-            voiceMods.removeValue(forKey: touchID)
-        }
+        // Remove any existing voice on this touch before spawning a fresh one.
+        voicesLock.lock()
+        voices.removeValue(forKey: touchID)
+        voiceGainBoxes.removeValue(forKey: touchID)
+        voicesLock.unlock()
+
         spawnVoice(id: touchID, preset: currentPreset, note: note, velocity: velocity,
                    x: x, y: y, gainBox: nil)
     }
@@ -279,10 +394,10 @@ final class AudioEngine: ObservableObject {
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
-                    if let n = voiceNodes[cid] { engine.detach(n) }
-                    voiceNodes.removeValue(forKey: cid)
+                    voicesLock.lock()
                     voices.removeValue(forKey: cid)
-                    voiceMods.removeValue(forKey: cid)
+                    voiceGainBoxes.removeValue(forKey: cid)
+                    voicesLock.unlock()
                 }
             }
         }
@@ -323,92 +438,12 @@ final class AudioEngine: ObservableObject {
 
         voice.filterCutoffMod = x
         voice.lfoDepthMod     = y
+
+        voicesLock.lock()
         voices[id] = voice
+        if let gb = gainBox { voiceGainBoxes[id] = gb }
+        voicesLock.unlock()
 
-        let mod = ModulationProcessor(sampleRate: sampleRate)
-        voiceMods[id] = mod
-
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)!
-        let sr     = sampleRate
-
-        // Fresh effect instances per voice — state is per-voice, not shared.
-        let lofiRef      = (LofiProcessor(), LofiProcessor())
-        let spaceEchoRef = (SpaceEchoProcessor(sampleRate: sr), SpaceEchoProcessor(sampleRate: sr))
-        let gritRef      = GritProcessor()
-        let tapeRef      = (BrokenTapeDelay(sampleRate: sr), BrokenTapeDelay(sampleRate: sr))
-        let bloomRef     = BloomReverbProcessor(sampleRate: sr)
-        let phaserRef    = (PhaserProcessor(sampleRate: sr),
-                            PhaserProcessor(sampleRate: sr, lfoPhaseOffset: 0.5))
-        let autoWahRef   = (AutoWahProcessor(sampleRate: sr), AutoWahProcessor(sampleRate: sr))
-        let modDelayRef  = (ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.33),
-                            ModulatingDelayProcessor(sampleRate: sr, lfoRate: 0.37))
-
-        // For single mode: read self.currentPreset each callback (live knob updates).
-        // For layer mode:  read capturedPreset (snapshot) + gainBox (live gain).
-        let capturedPreset = preset
-        let isLayer        = gainBox != nil
-
-        let node = AVAudioSourceNode(format: format) { [weak self, weak voice] _, _, frameCount, audioBufferList in
-            guard let self, let voice else { return noErr }
-            let p = isLayer ? capturedPreset : self.currentPreset
-
-            if let ov = voice as? OrganVoice { ov.tremulantDepth = p.tremulantDepth }
-
-            let abl   = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let left  = abl[0].mData!.assumingMemoryBound(to: Float.self)
-            let right = abl[1].mData!.assumingMemoryBound(to: Float.self)
-            let gain  = gainBox?.value ?? 1.0   // read once per buffer for smooth fades
-
-            for i in 0..<Int(frameCount) {
-                var (l, r) = voice.nextStereoSample()
-
-                l = autoWahRef.0.process(l, amount: p.autoWahAmount)
-                r = autoWahRef.1.process(r, amount: p.autoWahAmount)
-
-                l = gritRef.process(l, amount: p.gritAmount)
-                r = gritRef.process(r, amount: p.gritAmount)
-
-                l = lofiRef.0.process(l, amount: p.lofiAmount)
-                r = lofiRef.1.process(r, amount: p.lofiAmount)
-
-                l = spaceEchoRef.0.process(l, amount: p.spaceEchoAmount)
-                r = spaceEchoRef.1.process(r, amount: p.spaceEchoAmount)
-
-                let btAmt = p.brokenTape
-                l = tapeRef.0.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
-                r = tapeRef.1.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
-
-                let blAmt = p.bloomAmount
-                if blAmt > 0.005 {
-                    let (bl, br) = bloomRef.process((l + r) * 0.5, amount: blAmt)
-                    l = l * (1.0 - blAmt * 0.3) + bl
-                    r = r * (1.0 - blAmt * 0.3) + br
-                }
-
-                let (ml, mr) = mod.process(l: l, r: r,
-                                           tremDepth: p.tremulantDepth,
-                                           chorusMix: p.chorusMix)
-                l = ml; r = mr
-
-                l = tubeSaturate(l, drive: p.distortionAmount)
-                r = tubeSaturate(r, drive: p.distortionAmount)
-
-                l = phaserRef.0.process(l, amount: p.phaserAmount)
-                r = phaserRef.1.process(r, amount: p.phaserAmount)
-
-                l = modDelayRef.0.process(l, amount: p.modDelayAmount)
-                r = modDelayRef.1.process(r, amount: p.modDelayAmount)
-
-                left[i]  = l * gain
-                right[i] = r * gain
-                self.feedAnalysis((l + r) * 0.5)
-            }
-            return noErr
-        }
-
-        engine.attach(node)
-        engine.connect(node, to: voiceMixer, format: format)
-        voiceNodes[id] = node
         voice.start()
     }
 
@@ -438,7 +473,12 @@ final class AudioEngine: ObservableObject {
     }
 
     private func releaseVoice(id: Int, preset: SynthPreset) {
-        voices[id]?.release()
+        voicesLock.lock()
+        let voice = voices[id]
+        voicesLock.unlock()
+
+        voice?.release()
+
         let tail: Double
         switch preset.voiceMode {
         case .hammondB3:   tail = 0.1
@@ -449,12 +489,10 @@ final class AudioEngine: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
             guard let self else { return }
-            if let node = self.voiceNodes[id] {
-                self.engine.detach(node)
-                self.voiceNodes.removeValue(forKey: id)
-                self.voices.removeValue(forKey: id)
-                self.voiceMods.removeValue(forKey: id)
-            }
+            self.voicesLock.lock()
+            self.voices.removeValue(forKey: id)
+            self.voiceGainBoxes.removeValue(forKey: id)
+            self.voicesLock.unlock()
         }
     }
 
