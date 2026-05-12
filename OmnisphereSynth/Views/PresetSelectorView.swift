@@ -259,6 +259,9 @@ struct PresetIcon: View {
             case .pulseBolt:        Self.drawPulseBolt(ctx, size, color)
             case .voidHole:         Self.drawVoidHole(ctx, size, color)
             case .solarRadial:      Self.drawSolarRadial(ctx, size, color)
+            case .pianoKeys:        Self.drawPianoKeys(ctx, size, color)
+            case .stringBow:        Self.drawStringBow(ctx, size, color)
+            case .fluteShape:       Self.drawFluteShape(ctx, size, color)
             }
         }
     }
@@ -489,5 +492,104 @@ struct PresetIcon: View {
         var core = Path()
         core.addEllipse(in: CGRect(x: cx-coreR, y: cy-coreR, width: coreR*2, height: coreR*2))
         ctx.fill(core, with: .color(color))
+    }
+
+    // MARK: Piano Keys – 4 white keys + 3 black keys
+
+    private static func drawPianoKeys(_ ctx: GraphicsContext, _ size: CGSize, _ color: Color) {
+        let w = size.width, h = size.height
+        let keyW: CGFloat = w * 0.20
+        let keyH: CGFloat = h * 0.80
+        let gap:  CGFloat = 1.5
+        let startX = (w - keyW * 4 - gap * 3) / 2
+        let keyY   = (h - keyH) / 2
+
+        for i in 0..<4 {
+            let x = startX + CGFloat(i) * (keyW + gap)
+            var key = Path()
+            key.addRoundedRect(in: CGRect(x: x, y: keyY, width: keyW, height: keyH),
+                               cornerSize: CGSize(width: 2, height: 2))
+            ctx.stroke(key, with: .color(color), lineWidth: 1.4)
+        }
+        // Black keys over gaps 0-1, 1-2, 2-3
+        let bkW = keyW * 0.6
+        let bkH = keyH * 0.55
+        let bkXs: [CGFloat] = [
+            startX + keyW + gap - bkW / 2,
+            startX + (keyW + gap) * 2 - bkW / 2,
+            startX + (keyW + gap) * 3 - bkW / 2,
+        ]
+        for bx in bkXs {
+            var bk = Path()
+            bk.addRoundedRect(in: CGRect(x: bx, y: keyY, width: bkW, height: bkH),
+                              cornerSize: CGSize(width: 2, height: 2))
+            ctx.fill(bk, with: .color(color.opacity(0.9)))
+        }
+    }
+
+    // MARK: String Bow – two curved string arcs + bow stick
+
+    private static func drawStringBow(_ ctx: GraphicsContext, _ size: CGSize, _ color: Color) {
+        let w = size.width, h = size.height
+        let mid = h / 2
+
+        // Two string arcs (slightly offset vertically)
+        for dy in [-h * 0.12, h * 0.12] as [CGFloat] {
+            var path = Path()
+            path.move(to: CGPoint(x: w * 0.08, y: mid + dy))
+            path.addCurve(
+                to:         CGPoint(x: w * 0.92, y: mid + dy),
+                control1:   CGPoint(x: w * 0.3,  y: mid + dy - h * 0.2),
+                control2:   CGPoint(x: w * 0.7,  y: mid + dy + h * 0.2)
+            )
+            ctx.stroke(path, with: .color(color.opacity(0.75)),
+                       style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+        }
+        // Bow stick (diagonal line)
+        var bow = Path()
+        bow.move(to:    CGPoint(x: w * 0.15, y: h * 0.25))
+        bow.addLine(to: CGPoint(x: w * 0.85, y: h * 0.75))
+        ctx.stroke(bow, with: .color(color),
+                   style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+        // Hair (parallel to stick, offset)
+        var hair = Path()
+        hair.move(to:    CGPoint(x: w * 0.22, y: h * 0.18))
+        hair.addLine(to: CGPoint(x: w * 0.92, y: h * 0.68))
+        ctx.stroke(hair, with: .color(color.opacity(0.4)),
+                   style: StrokeStyle(lineWidth: 0.8, lineCap: .round))
+    }
+
+    // MARK: Flute Shape – horizontal tube + tone holes
+
+    private static func drawFluteShape(_ ctx: GraphicsContext, _ size: CGSize, _ color: Color) {
+        let w = size.width, h = size.height
+        let tubeY  = h * 0.38
+        let tubeH: CGFloat = h * 0.24
+        let tubeX: CGFloat = w * 0.08
+        let tubeW  = w * 0.84
+        // Tube body
+        var tube = Path()
+        tube.addRoundedRect(in: CGRect(x: tubeX, y: tubeY, width: tubeW, height: tubeH),
+                            cornerSize: CGSize(width: tubeH / 2, height: tubeH / 2))
+        ctx.stroke(tube, with: .color(color), lineWidth: 1.6)
+        // Embouchure hole (slightly larger oval at left)
+        let emX = tubeX + tubeW * 0.12
+        let emR: CGFloat = tubeH * 0.5
+        var emb = Path()
+        emb.addEllipse(in: CGRect(x: emX - emR * 1.3, y: tubeY + tubeH * 0.5 - emR * 0.9,
+                                  width: emR * 2.6, height: emR * 1.8))
+        ctx.fill(emb, with: .color(color.opacity(0.7)))
+        // Tone holes (five small circles)
+        let holeXs: [CGFloat] = [0.35, 0.47, 0.57, 0.66, 0.75]
+        let holeR: CGFloat = tubeH * 0.26
+        for hx in holeXs {
+            var hole = Path()
+            hole.addEllipse(in: CGRect(
+                x: tubeX + tubeW * hx - holeR,
+                y: tubeY + tubeH * 0.5 - holeR,
+                width: holeR * 2, height: holeR * 2
+            ))
+            ctx.fill(hole, with: .color(color.opacity(0.5)))
+        }
     }
 }

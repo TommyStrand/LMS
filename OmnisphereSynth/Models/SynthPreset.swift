@@ -54,9 +54,14 @@ struct SynthPreset: Identifiable, Equatable {
     // Preset chip icon style
     var iconStyle: IconStyle
 
-    var isOrgan: Bool { voiceMode == .organChurch || voiceMode == .hammondB3 }
+    enum VoiceMode: Equatable {
+        case synth, organChurch, hammondB3, rhodes
+        case sampler(SamplerInstrument)
+    }
 
-    enum VoiceMode { case synth, organChurch, hammondB3, rhodes }
+    var isOrgan: Bool {
+        voiceMode == .organChurch || voiceMode == .hammondB3
+    }
 
     enum Waveform: Int, CaseIterable {
         case sine, triangle, sawtooth, square, noise
@@ -76,6 +81,9 @@ struct SynthPreset: Identifiable, Equatable {
         case pulseBolt
         case voidHole
         case solarRadial
+        case pianoKeys
+        case stringBow
+        case fluteShape
     }
 
     init(
@@ -125,6 +133,46 @@ struct SynthPreset: Identifiable, Equatable {
     }
 
     static func == (lhs: SynthPreset, rhs: SynthPreset) -> Bool { lhs.id == rhs.id }
+}
+
+// MARK: - Sampler instrument descriptor
+
+struct SamplerInstrument: Equatable, Hashable {
+    let id:          String   // folder name under Resources/Samples/
+    let displayName: String
+    let rootNotes:   [Int]    // MIDI note numbers of recorded root samples
+    let velocityLayers: [VelocityLayer]
+
+    struct VelocityLayer: Equatable, Hashable {
+        let midiValue: Int   // velocity used when generating the sample (file suffix)
+        let loVel:     Int   // lowest MIDI velocity mapped to this zone
+        let hiVel:     Int   // highest MIDI velocity mapped to this zone
+    }
+
+    static let grandPiano = SamplerInstrument(
+        id: "grand_piano", displayName: "Grand Piano",
+        rootNotes: Array(stride(from: 24, through: 96, by: 3)),
+        velocityLayers: [
+            VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
+            VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
+        ]
+    )
+    static let stringEnsemble = SamplerInstrument(
+        id: "string_ensemble", displayName: "String Ensemble",
+        rootNotes: Array(stride(from: 36, through: 84, by: 3)),
+        velocityLayers: [
+            VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
+            VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
+        ]
+    )
+    static let concertFlute = SamplerInstrument(
+        id: "concert_flute", displayName: "Concert Flute",
+        rootNotes: Array(stride(from: 60, through: 96, by: 3)),
+        velocityLayers: [
+            VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
+            VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
+        ]
+    )
 }
 
 extension SynthPreset {
@@ -488,6 +536,33 @@ extension SynthPreset {
             reverbMix: 0.45, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.0,
             tremulantDepth: 0.55,
             iconStyle: .voidHole
+        ),
+
+        // MARK: – Sample-based instruments
+
+        SynthPreset(
+            name: "Grand Piano",
+            color: "#E8DCC8",
+            voiceMode: .sampler(.grandPiano),
+            attack: 0.002, decay: 0.5, sustain: 0.7, release: 0.8,
+            reverbMix: 0.18, delayMix: 0.04, delayTime: 0.375,
+            iconStyle: .pianoKeys
+        ),
+        SynthPreset(
+            name: "Str. Ensemble",
+            color: "#7B3B1A",
+            voiceMode: .sampler(.stringEnsemble),
+            attack: 0.12, decay: 0.3, sustain: 0.9, release: 1.2,
+            reverbMix: 0.45, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.15,
+            iconStyle: .stringBow
+        ),
+        SynthPreset(
+            name: "Concert Flute",
+            color: "#8FB8C8",
+            voiceMode: .sampler(.concertFlute),
+            attack: 0.03, decay: 0.2, sustain: 0.85, release: 0.4,
+            reverbMix: 0.32, delayMix: 0.08, delayTime: 0.375,
+            iconStyle: .fluteShape
         ),
     ]
 }

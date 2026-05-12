@@ -26,6 +26,11 @@ final class AudioEngine: ObservableObject {
     private var voiceNodes:    [Int: AVAudioSourceNode] = [:]
     private var voiceMods:     [Int: ModulationProcessor] = [:]
 
+    // Sampler nodes (one per instrument, lazily created)
+    private var samplerEngines: [String: SamplerEngine] = [:]
+    // touchID → (instrumentID, midiNote) for single mode; compound ID for layer mode
+    private var samplerTouches: [Int: (instrumentID: String, note: Int)] = [:]
+
     @Published var waveformSamples: [Float] = Array(repeating: 0, count: 128)
     @Published var currentPreset: SynthPreset = SynthPreset.presets[0]
 
@@ -218,6 +223,19 @@ final class AudioEngine: ObservableObject {
     func setAutoWah(_ v: Float)    { currentPreset.autoWahAmount = v }
     func setModDelay(_ v: Float)   { currentPreset.modDelayAmount = v }
 
+    // MARK: - Sampler helpers
+
+    @discardableResult
+    private func samplerEngine(for instrument: SamplerInstrument) -> SamplerEngine {
+        if let existing = samplerEngines[instrument.id] { return existing }
+        let se = SamplerEngine(instrument: instrument)
+        engine.attach(se.samplerNode)
+        engine.connect(se.samplerNode, to: voiceMixer, format: nil)
+        samplerEngines[instrument.id] = se
+        se.load()
+        return se
+    }
+
     // MARK: - Touch Events
 
     func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
@@ -229,6 +247,16 @@ final class AudioEngine: ObservableObject {
     }
 
     private func noteOnSingle(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
+        if case .sampler(let instrument) = currentPreset.voiceMode {
+            // Release any previous note on this touch
+            if let prev = samplerTouches[touchID] {
+                samplerEngines[prev.instrumentID]?.noteOff(UInt8(prev.note))
+            }
+            let se = samplerEngine(for: instrument)
+            se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
+            samplerTouches[touchID] = (instrument.id, note)
+            return
+        }
         if let existing = voiceNodes[touchID] {
             engine.detach(existing)
             voiceNodes.removeValue(forKey: touchID)
@@ -244,19 +272,33 @@ final class AudioEngine: ObservableObject {
         if let prev = noteOnLayerIndices[touchID] {
             for presetIdx in prev {
                 let cid = touchID * 1000 + presetIdx
-                if let n = voiceNodes[cid] { engine.detach(n) }
-                voiceNodes.removeValue(forKey: cid)
-                voices.removeValue(forKey: cid)
-                voiceMods.removeValue(forKey: cid)
+                let p   = SynthPreset.presets[presetIdx]
+                if case .sampler(let inst) = p.voiceMode {
+                    if let info = samplerTouches[cid] {
+                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                    }
+                    samplerTouches.removeValue(forKey: cid)
+                } else {
+                    if let n = voiceNodes[cid] { engine.detach(n) }
+                    voiceNodes.removeValue(forKey: cid)
+                    voices.removeValue(forKey: cid)
+                    voiceMods.removeValue(forKey: cid)
+                }
             }
         }
 
         for presetIdx in activeLayerIndices {
-            let preset    = SynthPreset.presets[presetIdx]
-            let gainBox   = ensureGainBox(presetIdx)
-            let cid       = touchID * 1000 + presetIdx
-            spawnVoice(id: cid, preset: preset, note: note, velocity: velocity,
-                       x: x, y: y, gainBox: gainBox)
+            let preset = SynthPreset.presets[presetIdx]
+            let cid    = touchID * 1000 + presetIdx
+            if case .sampler(let instrument) = preset.voiceMode {
+                let se = samplerEngine(for: instrument)
+                se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
+                samplerTouches[cid] = (instrument.id, note)
+            } else {
+                let gainBox = ensureGainBox(presetIdx)
+                spawnVoice(id: cid, preset: preset, note: note, velocity: velocity,
+                           x: x, y: y, gainBox: gainBox)
+            }
         }
         noteOnLayerIndices[touchID] = activeLayerIndices
     }
@@ -373,9 +415,21 @@ final class AudioEngine: ObservableObject {
             for presetIdx in layerIndices {
                 let cid    = touchID * 1000 + presetIdx
                 let preset = SynthPreset.presets[presetIdx]
-                releaseVoice(id: cid, preset: preset)
+                if case .sampler(let inst) = preset.voiceMode {
+                    if let info = samplerTouches[cid] {
+                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                    }
+                    samplerTouches.removeValue(forKey: cid)
+                } else {
+                    releaseVoice(id: cid, preset: preset)
+                }
             }
             noteOnLayerIndices.removeValue(forKey: touchID)
+        } else if case .sampler(let inst) = currentPreset.voiceMode {
+            if let info = samplerTouches[touchID] {
+                samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+            }
+            samplerTouches.removeValue(forKey: touchID)
         } else {
             releaseVoice(id: touchID, preset: currentPreset)
         }

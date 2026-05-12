@@ -36,6 +36,8 @@
 		A100001B /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000024 /* FavoritesStore.swift */; };
 		A100001C /* DrumSamples in Resources */       = {isa = PBXBuildFile; fileRef = A2000025 /* DrumSamples */; };
 		A100001D /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* NowPlayingManager.swift */; };
+		A100001E /* SamplerEngine.swift in Sources */    = {isa = PBXBuildFile; fileRef = A2000027 /* SamplerEngine.swift */; };
+		A100001F /* Samples in Resources */              = {isa = PBXBuildFile; fileRef = A2000028 /* Samples */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -71,6 +73,8 @@
 		A2000024 /* FavoritesStore.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift;   sourceTree = "<group>"; };
 		A2000025 /* DrumSamples */            = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/DrumSamples;   sourceTree = "<group>"; };
 		A2000026 /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
+		A2000027 /* SamplerEngine.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SamplerEngine.swift; sourceTree = "<group>"; };
+		A2000028 /* Samples */                = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/Samples;   sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -104,6 +108,7 @@
 				A4000004 /* Models */,
 				A2000014 /* Assets.xcassets */,
 				A2000025 /* DrumSamples */,
+				A2000028 /* Samples */,
 				A200000B /* Info.plist */,
 				A2000016 /* SuperNovaPad.entitlements */,
 			);
@@ -126,6 +131,7 @@
 				A2000022 /* MidiParser.swift */,
 				A2000023 /* GrooveImporter.swift */,
 				A2000026 /* NowPlayingManager.swift */,
+				A2000027 /* SamplerEngine.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -231,6 +237,7 @@
 			files = (
 				A1000012 /* Assets.xcassets in Resources */,
 				A100001C /* DrumSamples in Resources */,
+				A100001F /* Samples in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -267,6 +274,7 @@
 				A100001A /* GrooveImporter.swift in Sources */,
 				A100001B /* FavoritesStore.swift in Sources */,
 				A100001D /* NowPlayingManager.swift in Sources */,
+				A100001E /* SamplerEngine.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
