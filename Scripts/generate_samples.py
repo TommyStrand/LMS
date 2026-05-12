@@ -84,7 +84,8 @@ def piano_sample(midi_note, velocity):
         (8, 0.025 * vel, 0.32),
     ]
     # noise burst length proportional to velocity (louder hit → longer noise)
-    noise_n = int((0.003 + vel * 0.006) * sr)
+    noise_n   = int((0.003 + vel * 0.006) * sr)
+    fade_start = n - int(0.05 * sr)   # 50 ms end-of-sample fade prevents click
     _seed(midi_note * 137)
     samples = []
     for i in range(n):
@@ -96,35 +97,41 @@ def piano_sample(midi_note, velocity):
         if i < noise_n:
             env = math.exp(-i / (noise_n / 4.0))
             s  += _lcg() * env * vel * 0.5
+        if i >= fade_start:
+            s *= (n - i) / (n - fade_start)
         samples.append(s * vel)
     return samples
 
 # ---------------------------------------------------------------------------
 # String Ensemble  –  6 detuned bowed voices, independent vibrato per voice
 # ---------------------------------------------------------------------------
-# Fix for v1: all voices shared the same vibrato phase, causing a 5 Hz tremolo
-# throb instead of an ensemble sound.  Each voice now has its own LFO phase
-# offset and slightly different rate.  Phase is accumulated per-sample
-# (phase += 2π·f/sr) rather than computed as sin(2π·f·t), which eliminated
-# drift artifacts that grew louder over the 4-second sample duration.
+# v3 changes vs v2:
+#   • Harmonic ratios rebalanced to emphasise odd harmonics (3, 5, 7, 9).
+#     This creates the characteristic "hollow" bowed-string timbre and
+#     separates the ensemble clearly from piano's even-heavy spectrum.
+#   • Voice detunes spread wider (up to ±12 cents) for a lush section sound.
+#   • Vibrato depth doubled to ≈ ±10 cents — closer to real ensemble vibrato.
+#   • Slower bow-grab attack (180 ms vs 120 ms) — bowing is slower than a hammer.
+#   • Sustained rosin noise added at ~1 % of signal — gives continuous "bow on
+#     string" texture throughout the note without being audible as digital hiss.
 # ---------------------------------------------------------------------------
 STRING_DURATION = 4.0
 
-_STRING_DETUNES    = [0.0000,  0.0010, -0.0010,  0.0025, -0.0025,  0.0040]
-_STRING_AMPS       = [1.00,    0.70,    0.70,     0.40,    0.40,    0.20  ]
-_STRING_HARM       = [(1, 1.00), (2, 0.60), (3, 0.38), (4, 0.22), (5, 0.10)]
-# Each voice has its own LFO rate (4.8–5.4 Hz) and start phase so their
-# individual tremolos cancel each other out rather than adding together.
+_STRING_DETUNES    = [0.0000,  0.0018, -0.0018,  0.0042, -0.0042,  0.0072]
+_STRING_AMPS       = [1.00,    0.75,    0.75,     0.45,    0.45,    0.22  ]
+# Odd harmonics (3, 5, 7, 9) boosted relative to even ones — bowed-string body resonance.
+_STRING_HARM       = [(1, 1.00), (2, 0.42), (3, 0.58), (4, 0.10),
+                      (5, 0.32), (6, 0.06), (7, 0.18), (8, 0.03), (9, 0.10)]
 _STRING_VIB_RATES  = [5.0,  4.8,  5.2,  5.0,  4.9,  5.4]
 _STRING_VIB_PHASES = [0.00, 0.37, 0.71, 1.23, 1.85, 2.54]
-_VIB_DEPTH = 0.0028      # ≈ ±5 cents
+_VIB_DEPTH = 0.0058      # ≈ ±10 cents (was 0.0028 / ±5 cents)
 
 def strings_sample(midi_note, velocity):
     freq       = midi_to_hz(midi_note)
     vel        = velocity / 127.0
     n          = int(STRING_DURATION * SAMPLE_RATE)
     sr         = float(SAMPLE_RATE)
-    attack_tau = 0.12
+    attack_tau = 0.18   # slower bow grab vs piano hammer
     vib_onset  = 0.50
     vib_ramp   = 0.30
     n_voices   = len(_STRING_DETUNES)
@@ -151,23 +158,24 @@ def strings_sample(midi_note, velocity):
                 2.0 * math.pi * vib_rate * t + vib_phase) * vib_env
             f_base = freq * (1.0 + det) * vib
             for hi, (h, ha) in enumerate(_STRING_HARM):
-                # Accumulate phase: integrates the instantaneous frequency exactly.
                 phases[vi][hi] += 2.0 * math.pi * f_base * h / sr
                 s += str_amp * ha * math.sin(phases[vi][hi])
 
-        # Brief bow-noise burst on the attack, mimics the initial bow scrape.
-        bow = _lcg() * 0.18 * math.exp(-t * 10.0)
-        samples.append((s + bow) * atk * rel * vel * 0.12)
+        bow_grab    = _lcg() * 0.20 * math.exp(-t * 8.0)  # initial bow scrape
+        bow_sustain = _lcg() * 0.025                        # continuous rosin roughness (~1 % of signal)
+        samples.append((s + bow_grab + bow_sustain) * atk * rel * vel * 0.12)
     return samples
 
 # ---------------------------------------------------------------------------
 # Concert Flute  –  breath attack + vibrato tone
 # ---------------------------------------------------------------------------
-# Fix for v1: a constant `_lcg() * 0.02 * vel` term added white noise through
-# the entire sample (~36 dB below signal), clearly audible as digital hiss.
-# Removed; only attack breath remains (fast decay, gone by ~200 ms).
-# Proper pitch vibrato added via phase accumulation, replacing amplitude-only
-# tremolo which made the tone sound like a buzzing sine wave.
+# v3 changes vs v2:
+#   • Subtle envelope-gated sustained breathiness added back at 0.008 amplitude
+#     (~0.6 % of signal at full volume).  This is far below the v1 hiss level
+#     (0.02 * vel, constant) and follows the amplitude envelope so the noise
+#     fades with the note — no noise tail, no static floor.
+#   • Vibrato depth increased to ≈ ±9 cents (was ±5 cents); ramps in 0.1 s
+#     sooner for a more expressive, natural-feeling tone.
 # ---------------------------------------------------------------------------
 FLUTE_DURATION = 3.0
 
@@ -178,7 +186,7 @@ def flute_sample(midi_note, velocity):
     sr         = float(SAMPLE_RATE)
     atk        = 0.035
     trem_depth = 0.016   # amplitude tremolo (slight, ramps in after 0.3 s)
-    vib_depth  = 0.0030  # pitch vibrato depth (≈ ±5 cents, ramps in after 0.4 s)
+    vib_depth  = 0.0050  # pitch vibrato depth (≈ ±9 cents; was ±5 cents)
     vib_rate   = 5.2
 
     _seed(midi_note * 97)
@@ -191,8 +199,8 @@ def flute_sample(midi_note, velocity):
         t   = i / sr
         env = min(t / atk, 1.0) * max(0.0, min(1.0, (FLUTE_DURATION - t) / 0.25))
 
-        # Pitch vibrato: ramps in at 0.4 s — gives pure-tone character before it kicks in.
-        vib_env = max(0.0, min(1.0, (t - 0.40) / 0.40))
+        # Pitch vibrato ramps in at 0.3 s (was 0.4 s) for a more expressive line.
+        vib_env = max(0.0, min(1.0, (t - 0.30) / 0.35))
         vib     = 1.0 + vib_depth * math.sin(2.0 * math.pi * vib_rate * t) * vib_env
 
         # Amplitude tremolo lags slightly behind vibrato (natural flute performance).
@@ -210,10 +218,13 @@ def flute_sample(midi_note, velocity):
 
         tone = math.sin(ph[0]) + h2 * math.sin(ph[1]) + h3 * math.sin(ph[2])
 
-        # Attack breath only — no sustained noise.
-        breath = _lcg() * (0.05 + vel * 0.04) * math.exp(-t * 8.0)
+        # Attack breath (fast decay, gone by ~200 ms).
+        breath_atk = _lcg() * (0.05 + vel * 0.04) * math.exp(-t * 8.0)
+        # Sustained breathiness: envelope-gated so it fades with the note.
+        # ~0.6 % of full-amplitude signal — adds organic air without hiss.
+        breath_sus = _lcg() * 0.008
 
-        samples.append((tone + breath) * env * trem * vel)
+        samples.append((tone + breath_atk + breath_sus) * env * trem * vel)
     return samples
 
 # ---------------------------------------------------------------------------
