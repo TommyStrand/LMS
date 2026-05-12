@@ -119,6 +119,9 @@ final class SamplerEngine {
     // MARK: - Helpers
 
     private func nextSlot() -> VoiceSlot {
+        // Prefer an idle slot to avoid cutting release tails on busy pools.
+        if let idle = pool.first(where: { !$0.player.isPlaying }) { return idle }
+        // All slots busy — steal round-robin.
         let slot = pool[poolCursor % poolSize]
         poolCursor += 1
         return slot

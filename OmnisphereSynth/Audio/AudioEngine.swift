@@ -138,10 +138,12 @@ final class AudioEngine: ObservableObject {
             let gainSnapshot  = self.voiceGainBoxes
             self.voicesLock.unlock()
 
-            let p     = self.currentPreset
-            let abl   = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let left  = abl[0].mData!.assumingMemoryBound(to: Float.self)
-            let right = abl[1].mData!.assumingMemoryBound(to: Float.self)
+            let p   = self.currentPreset
+            let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            guard abl.count >= 2,
+                  let ld = abl[0].mData, let rd = abl[1].mData else { return noErr }
+            let left  = ld.assumingMemoryBound(to: Float.self)
+            let right = rd.assumingMemoryBound(to: Float.self)
 
             for i in 0..<Int(frameCount) {
                 var l: Float = 0.0
@@ -265,6 +267,24 @@ final class AudioEngine: ObservableObject {
     }
 
     func exitLayerMode() {
+        // Release any voices that were left active from layer-mode note-ons whose
+        // noteOff never fired (e.g. sustain held when mode is toggled off).
+        for (touchID, layerIndices) in noteOnLayerIndices {
+            for presetIdx in layerIndices {
+                let cid    = touchID * 1000 + presetIdx
+                let preset = SynthPreset.presets[presetIdx]
+                if case .sampler = preset.voiceMode {
+                    if let info = samplerTouches[cid] {
+                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                    }
+                    samplerTouches.removeValue(forKey: cid)
+                } else {
+                    releaseVoice(id: cid, preset: preset)
+                }
+            }
+        }
+        noteOnLayerIndices.removeAll()
+
         isLayeringMode     = false
         activeLayerIndices = []
         primaryLayerIndex  = nil
@@ -438,13 +458,14 @@ final class AudioEngine: ObservableObject {
 
         voice.filterCutoffMod = x
         voice.lfoDepthMod     = y
+        // Start before inserting into the shared dict so the render thread never
+        // sees a voice that hasn't begun generating samples yet.
+        voice.start()
 
         voicesLock.lock()
         voices[id] = voice
         if let gb = gainBox { voiceGainBoxes[id] = gb }
         voicesLock.unlock()
-
-        voice.start()
     }
 
     func noteOff(touchID: Int) {
