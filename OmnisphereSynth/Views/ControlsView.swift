@@ -3,50 +3,58 @@ import SwiftUI
 struct ControlsView: View {
     @ObservedObject var engine: AudioEngine
     @EnvironmentObject var themeManager: ThemeManager
+    @Environment(\.horizontalSizeClass) var sizeClass
 
     var body: some View {
         let preset = engine.currentPreset
         let color  = Color(hex: preset.color)
         let theme  = themeManager.current
 
-        VStack(spacing: 12) {
-            // Row 1 – FILTER/RESON only for synth (organ/rhodes voices don't use the filter)
-            HStack(spacing: 16) {
-                KnobView(label: "REVERB", value: preset.reverbMix, color: color) { v in
-                    engine.setReverb(v)
+        // On compact (iPhone) screens the panel is height-limited so it scrolls;
+        // on regular (iPad) screens it expands naturally in the side column.
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 12) {
+                // Row 1 – FILTER/RESON only for synth
+                HStack(spacing: 16) {
+                    KnobView(label: "REVERB", value: preset.reverbMix, color: color) { v in
+                        engine.setReverb(v)
+                    }
+                    KnobView(label: "DELAY", value: preset.delayMix, color: color) { v in
+                        engine.setDelay(v)
+                    }
+                    if preset.voiceMode == .synth {
+                        KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
+                            engine.currentPreset.filterCutoff = v * 20000
+                        }
+                        KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
+                            engine.currentPreset.filterResonance = v
+                        }
+                    }
                 }
-                KnobView(label: "DELAY", value: preset.delayMix, color: color) { v in
-                    engine.setDelay(v)
+
+                // Row 2 – voice-specific controls
+                switch preset.voiceMode {
+                case .organChurch, .hammondB3:
+                    OrganControlsRow(engine: engine, color: color)
+                case .rhodes:
+                    RhodesControlsRow(engine: engine, color: color)
+                case .synth:
+                    EnvelopeRow(engine: engine, color: color, theme: theme)
                 }
+
+                // Row 3 – Modulation (synth only)
                 if preset.voiceMode == .synth {
-                    KnobView(label: "FILTER", value: preset.filterCutoff / 20000, color: color) { v in
-                        engine.currentPreset.filterCutoff = v * 20000
-                    }
-                    KnobView(label: "RESON", value: preset.filterResonance, color: color) { v in
-                        engine.currentPreset.filterResonance = v
-                    }
+                    ModulationRow(engine: engine, color: color, theme: theme)
                 }
-            }
 
-            // Row 2 – voice-specific controls
-            switch preset.voiceMode {
-            case .organChurch, .hammondB3:
-                OrganControlsRow(engine: engine, color: color)
-            case .rhodes:
-                RhodesControlsRow(engine: engine, color: color)
-            case .synth:
-                ADSRRow(engine: engine, color: color)
+                // Row 4 – Texture (always visible)
+                TextureRow(engine: engine, color: color, theme: theme)
             }
-
-            // Row 3 – Modulation (synth only — organ/rhodes rows already include these controls)
-            if preset.voiceMode == .synth {
-                ModulationRow(engine: engine, color: color, theme: theme)
-            }
-
-            // Row 4 – Texture (always visible)
-            TextureRow(engine: engine, color: color, theme: theme)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 20)
+        // Limit height on iPhone so controls don't push the play surface out of view
+        .frame(maxHeight: sizeClass == .compact ? 300 : .infinity)
     }
 }
 
@@ -167,28 +175,44 @@ struct RhodesControlsRow: View {
     }
 }
 
-// MARK: - Synth ADSR row
+// MARK: - Envelope row (Attack / Decay / Sustain / Release)
+// Uses the same KnobView as every other row — compact, consistent, and scrolls
+// with the rest of the controls panel on small screens.
 
-struct ADSRRow: View {
+struct EnvelopeRow: View {
     @ObservedObject var engine: AudioEngine
     let color: Color
+    let theme: AppTheme
 
     var body: some View {
         let preset = engine.currentPreset
-        HStack(spacing: 16) {
-            ADSRView(label: "A", value: preset.attack / 3.0, color: color) { v in
-                engine.currentPreset.attack = v * 3.0
-            }
-            ADSRView(label: "D", value: preset.decay / 2.0, color: color) { v in
-                engine.currentPreset.decay = v * 2.0
-            }
-            ADSRView(label: "S", value: preset.sustain, color: color) { v in
-                engine.currentPreset.sustain = v
-            }
-            ADSRView(label: "R", value: preset.release / 4.0, color: color) { v in
-                engine.currentPreset.release = v * 4.0
+        VStack(spacing: 4) {
+            Text("ENVELOPE")
+                .font(.system(size: 7, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(color.opacity(0.6))
+                .kerning(2)
+
+            HStack(spacing: 16) {
+                KnobView(label: "ATTK", value: preset.attack / 3.0, color: color) { v in
+                    engine.currentPreset.attack = v * 3.0
+                }
+                KnobView(label: "DECAY", value: preset.decay / 2.0, color: color) { v in
+                    engine.currentPreset.decay = v * 2.0
+                }
+                KnobView(label: "SUST", value: preset.sustain, color: color) { v in
+                    engine.currentPreset.sustain = v
+                }
+                KnobView(label: "REL", value: preset.release / 4.0, color: color) { v in
+                    engine.currentPreset.release = v * 4.0
+                }
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
     }
 }
 
@@ -462,56 +486,3 @@ struct KnobView: View {
     }
 }
 
-// MARK: - ADSR Slider (always fader-style, independent of ControlStyle)
-
-struct ADSRView: View {
-    let label: String
-    let value: Float
-    let color: Color
-    let onChange: (Float) -> Void
-
-    @EnvironmentObject var themeManager: ThemeManager
-    @Environment(\.horizontalSizeClass) var sizeClass
-    @State private var lastDragY: CGFloat = 0
-    @State private var isDragging = false
-
-    private var isPad: Bool      { sizeClass == .regular }
-    private var sliderW: CGFloat  { isPad ? 48 : 36 }
-    private var sliderH: CGFloat  { isPad ? 88 : 64 }
-    private var fillW: CGFloat    { isPad ? 38 : 28 }
-    private var labelSize: CGFloat { isPad ? 11 : 9 }
-
-    var body: some View {
-        let theme  = themeManager.current
-        let accent = theme.accent(for: color)
-
-        VStack(spacing: isPad ? 6 : 4) {
-            ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(theme.knobTrackBg)
-                    .frame(width: sliderW, height: sliderH)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(LinearGradient(
-                        colors: [accent, accent.opacity(0.35)],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: fillW, height: max(4, CGFloat(value) * (sliderH - 8)))
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { v in
-                        if !isDragging { isDragging = true; lastDragY = v.location.y }
-                        let delta = Float(lastDragY - v.location.y) * (isPad ? 0.005 : 0.007)
-                        lastDragY = v.location.y
-                        onChange(max(0.001, min(1, value + delta)))
-                    }
-                    .onEnded { _ in isDragging = false }
-            )
-
-            Text(label)
-                .font(.system(size: labelSize, weight: .semibold, design: theme.fontDesign))
-                .foregroundColor(theme.secondaryText)
-                .kerning(1.5)
-        }
-    }
-}

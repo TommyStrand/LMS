@@ -17,9 +17,11 @@ final class SynthVoice: AnyVoice {
     // Smooth filter cutoff — prevents biquad instability from rapid LFO jumps
     private var smoothCutoff: Double = 0
 
-    // Oscillator state
-    private var phase1: Double = 0
-    private var phase2: Double = 0
+    // Oscillator state — random start phase prevents polyphonic voices from
+    // firing at the same phase simultaneously, which would create a loud
+    // constructive-interference spike that feeds into the delay line.
+    private var phase1: Double = .random(in: 0..<1)
+    private var phase2: Double = .random(in: 0..<1)
     private var lfoPhase: Double = 0
     private var noiseState: UInt32 = 1
 

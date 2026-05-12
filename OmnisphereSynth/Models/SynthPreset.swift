@@ -175,10 +175,10 @@ extension SynthPreset {
             voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .sawtooth,
             osc2Detune: -5, oscMix: 0.4,
-            filterCutoff: 400, filterResonance: 0.6, filterEnvAmount: 0.7,
-            attack: 0.05, decay: 0.8, sustain: 0.5, release: 1.5,
+            filterCutoff: 400, filterResonance: 0.35, filterEnvAmount: 0.7,
+            attack: 0.08, decay: 0.8, sustain: 0.5, release: 1.5,
             lfoRate: 0.8, lfoDepth: 0.2, lfoTarget: .pitch,
-            reverbMix: 0.5, delayMix: 0.4, delayTime: 0.5, chorusMix: 0.2,
+            reverbMix: 0.5, delayMix: 0.3, delayTime: 0.5, chorusMix: 0.2,
             iconStyle: .darkVortex
         ),
         SynthPreset(
