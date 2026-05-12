@@ -70,6 +70,44 @@ final class AudioEngine: ObservableObject {
 
         applyPreset(currentPreset)
         try? engine.start()
+        observeAudioSession()
+    }
+
+    // MARK: - Route / interruption recovery
+
+    private func observeAudioSession() {
+        // AVAudioEngine stops automatically when the hardware route changes (AirPlay
+        // connect/disconnect, headphone insert/remove). We must restart it ourselves.
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine, queue: .main
+        ) { [weak self] _ in self?.restartEngineIfNeeded() }
+
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] n in
+            guard
+                let v = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: v) == .ended
+            else { return }
+            self?.restartEngineIfNeeded()
+        }
+
+        // Belt-and-suspenders: if a route change silently stopped the engine, recover.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.engine.isRunning else { return }
+            self.restartEngineIfNeeded()
+        }
+    }
+
+    private func restartEngineIfNeeded() {
+        try? AVAudioSession.sharedInstance().setActive(true)
+        guard !engine.isRunning else { return }
+        try? engine.start()
     }
 
     // MARK: - Preset
