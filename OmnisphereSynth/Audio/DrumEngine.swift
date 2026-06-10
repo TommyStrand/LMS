@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 
 // MARK: - Sample voice (value type, pool-allocated, no ARC in hot path)

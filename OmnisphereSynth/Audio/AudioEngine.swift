@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 
 // Per-layer gain — written from main thread, read from render thread.
 // A class so the render closure can hold a strong reference that stays valid
