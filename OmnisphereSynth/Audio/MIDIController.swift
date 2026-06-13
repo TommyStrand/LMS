@@ -92,36 +92,39 @@ final class MIDIController: ObservableObject {
     }
 
     private func handleEventPacket(_ ptr: UnsafePointer<MIDIEventPacket>) {
-        let pkt = ptr.pointee
-        let count = Int(pkt.wordCount)
+        let count = Int(ptr.pointee.wordCount)
         guard count > 0 else { return }
-        withUnsafeBytes(of: pkt.words) { buf in
-            let words = buf.bindMemory(to: UInt32.self)
-            var i = 0
-            while i < count {
-                let word = words[i]
-                let mt = (word >> 28) & 0xF
-                switch mt {
-                case 0, 1:
-                    i += 1
-                case 2:
-                    // MIDI 1.0 Channel Voice (1 word)
-                    let status = UInt8((word >> 16) & 0xFF)
-                    let d1     = UInt8((word >>  8) & 0xFF)
-                    let d2     = UInt8( word        & 0xFF)
-                    handleMIDI1(status: status, d1: d1, d2: d2)
-                    i += 1
-                case 3, 5:
-                    i += 2
-                case 4:
-                    // MIDI 2.0 CV (2 words) — translate the parts we care about
-                    if i + 1 < count {
-                        handleMIDI2(word0: word, word1: words[i + 1])
-                    }
-                    i += 2
-                default:
-                    i += 1
+        // MIDIEventPacket is variable-length: the real word array extends past the
+        // fixed 64-word `words` tuple in the struct declaration. Read directly from
+        // the packet's memory (valid for `wordCount` words) rather than from a value
+        // copy of `pkt`, whose tuple only covers the first 64 words.
+        let wordsOffset = MemoryLayout<MIDIEventPacket>.offset(of: \.words) ?? 12
+        let words = UnsafeRawPointer(ptr).advanced(by: wordsOffset)
+            .assumingMemoryBound(to: UInt32.self)
+        var i = 0
+        while i < count {
+            let word = words[i]
+            let mt = (word >> 28) & 0xF
+            switch mt {
+            case 0, 1:
+                i += 1
+            case 2:
+                // MIDI 1.0 Channel Voice (1 word)
+                let status = UInt8((word >> 16) & 0xFF)
+                let d1     = UInt8((word >>  8) & 0xFF)
+                let d2     = UInt8( word        & 0xFF)
+                handleMIDI1(status: status, d1: d1, d2: d2)
+                i += 1
+            case 3, 5:
+                i += 2
+            case 4:
+                // MIDI 2.0 CV (2 words) — translate the parts we care about
+                if i + 1 < count {
+                    handleMIDI2(word0: word, word1: words[i + 1])
                 }
+                i += 2
+            default:
+                i += 1
             }
         }
     }

@@ -99,6 +99,7 @@ final class BloomReverbProcessor {
     func process(_ input: Float, amount: Float) -> (Float, Float) {
         guard amount > 0.005 else { return (0, 0) }
         lfoPhase += 0.19 / sampleRate
+        if lfoPhase >= 1 { lfoPhase -= 1 }   // wrap to keep float precision over long sessions
         let lfoMod = Float(sin(lfoPhase * 2 * .pi)) * amount * 4
 
         var outL: Float = 0, outR: Float = 0

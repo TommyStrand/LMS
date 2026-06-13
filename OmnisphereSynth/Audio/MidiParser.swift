@@ -84,7 +84,10 @@ enum MidiParser {
                 var status = data[pos]
 
                 if status < 0x80 {
-                    // Running status: data[pos] is the first data byte — do not advance
+                    // Running status: data[pos] is the first data byte — do not advance.
+                    // If no status byte was ever seen, the track is malformed; stop here
+                    // rather than desyncing the parser for the rest of the track.
+                    guard running >= 0x80 else { break }
                     status = running
                 } else {
                     running = status

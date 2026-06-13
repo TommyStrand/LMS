@@ -43,6 +43,10 @@ final class DrumEngine: ObservableObject {
     @Published var patternIndex: Int = 0 {
         didSet {
             let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
+            // Keep the stored value in range too, so views that read patternIndex
+            // directly (e.g. DrumPattern.all[patternIndex]) can't index out of bounds.
+            // Self-assignment inside didSet does not re-trigger the observer.
+            if patternIndex != idx { patternIndex = idx }
             _pattern         = DrumPattern.all[idx]
             tickPosition     = 0
             customHits = nil
