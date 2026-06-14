@@ -1,5 +1,8 @@
 import Foundation
 import Darwin
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Lightweight runtime diagnostics: a rolling event log plus periodic CPU and
 /// memory sampling. Used by `DiagnosticsView` to help troubleshoot audio issues
@@ -24,6 +27,7 @@ final class Diagnostics: ObservableObject {
 
     private let maxEntries = 200
     private var timer: DispatchSourceTimer?
+    private var cpuHigh = false   // hysteresis state for edge-triggered CPU warnings
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
@@ -32,6 +36,14 @@ final class Diagnostics: ObservableObject {
 
     private init() {
         log("Diagnostics started")
+        #if canImport(UIKit)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.log("⚠︎ System memory warning")
+        }
+        #endif
     }
 
     // MARK: - Logging
@@ -68,6 +80,16 @@ final class Diagnostics: ObservableObject {
             DispatchQueue.main.async {
                 self.cpuPercent = cpu
                 self.memoryMB   = mem
+                // Edge-triggered CPU warnings (with hysteresis) so the log records
+                // when load actually spiked — the timeline you cross-reference when
+                // you hear a glitch — without flooding it every sample.
+                if cpu >= 85, !self.cpuHigh {
+                    self.cpuHigh = true
+                    self.log(String(format: "⚠︎ CPU high: %.0f%%", cpu))
+                } else if cpu < 65, self.cpuHigh {
+                    self.cpuHigh = false
+                    self.log(String(format: "CPU back to normal: %.0f%%", cpu))
+                }
             }
         }
         t.resume()

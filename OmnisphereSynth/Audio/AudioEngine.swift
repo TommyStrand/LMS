@@ -50,6 +50,17 @@ final class AudioEngine: ObservableObject {
     // Non-nil only for layer-mode voices; single-mode voices use implicit gain 1.0.
     private var voiceGainBoxes: [Int: GainBox] = [:]
 
+    // voices / voiceGainBoxes are keyed by a unique, monotonically increasing
+    // voiceID — NOT the touchID. UIKit recycles UITouch objects, so a rapid re-tap
+    // of the same key reuses its touchID; keying voices by touchID meant a re-tap
+    // hard-removed the still-sounding previous voice (a one-sample amplitude drop =
+    // click, fed straight into the delay), and a stale removal timer could then kill
+    // the new voice. A unique id lets the old voice ring out its release tail next to
+    // the new one. controlToVoiceID maps a control id (touchID, or touchID*1000+
+    // presetIdx in layer mode) to its current live voiceID. Main-thread only.
+    private var nextVoiceID = 1
+    private var controlToVoiceID: [Int: Int] = [:]
+
     // Sampler nodes (one per instrument, lazily created)
     private var samplerEngines: [String: SamplerEngine] = [:]
     // touchID → (instrumentID, midiNote) for single mode; compound ID for layer mode
@@ -263,26 +274,54 @@ final class AudioEngine: ObservableObject {
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine, queue: .main
-        ) { [weak self] _ in self?.restartEngineIfNeeded() }
+        ) { [weak self] _ in
+            Diagnostics.shared.log("Audio config changed (hardware/route)")
+            self?.restartEngineIfNeeded()
+        }
 
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil, queue: .main
         ) { [weak self] n in
-            guard
-                let v = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                AVAudioSession.InterruptionType(rawValue: v) == .ended
+            guard let v = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: v)
             else { return }
-            self?.restartEngineIfNeeded()
+            // Interruptions (calls, Siri, other audio) stop the engine and are a
+            // common cause of "audio just died" — record both edges.
+            if type == .began {
+                Diagnostics.shared.log("⚠︎ Audio interrupted (call/Siri/other app)")
+            } else {
+                Diagnostics.shared.log("Audio interruption ended — restarting engine")
+                self?.restartEngineIfNeeded()
+            }
         }
 
         // Belt-and-suspenders: if a route change silently stopped the engine, recover.
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self, !self.engine.isRunning else { return }
+        ) { [weak self] n in
+            guard let self else { return }
+            if let raw = n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+               let reason = AVAudioSession.RouteChangeReason(rawValue: raw) {
+                Diagnostics.shared.log("Output route changed (\(self.routeReasonName(reason)))")
+            }
+            guard !self.engine.isRunning else { return }
             self.restartEngineIfNeeded()
+        }
+    }
+
+    private func routeReasonName(_ r: AVAudioSession.RouteChangeReason) -> String {
+        switch r {
+        case .newDeviceAvailable:       return "device connected"
+        case .oldDeviceUnavailable:     return "device removed"
+        case .categoryChange:           return "category change"
+        case .override:                 return "override"
+        case .wakeFromSleep:            return "wake"
+        case .noSuitableRouteForCategory: return "no route"
+        case .routeConfigurationChange: return "config change"
+        case .unknown:                  return "unknown"
+        @unknown default:               return "other"
         }
     }
 
@@ -331,7 +370,7 @@ final class AudioEngine: ObservableObject {
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
-                    releaseVoice(id: cid, preset: preset)
+                    retireVoice(controlID: cid, preset: preset)
                 }
             }
         }
@@ -456,18 +495,17 @@ final class AudioEngine: ObservableObject {
             samplerTouches[touchID] = (instrument.id, note)
             return
         }
-        // Remove any existing voice on this touch before spawning a fresh one.
-        voicesLock.lock()
-        voices.removeValue(forKey: touchID)
-        voiceGainBoxes.removeValue(forKey: touchID)
-        voicesLock.unlock()
-
-        spawnVoice(id: touchID, preset: currentPreset, note: note, velocity: velocity,
+        // Retire any voice still sounding on this touch (e.g. a rapid re-tap that
+        // reuses a recycled UITouch id) by RELEASING it — letting its envelope fade
+        // out — never by hard-removing it, which would click.
+        retireVoice(controlID: touchID, preset: currentPreset)
+        spawnVoice(controlID: touchID, preset: currentPreset, note: note, velocity: velocity,
                    x: x, y: y, gainBox: nil)
     }
 
     private func noteOnLayer(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
-        // Tear down any layer voices from a previous tap on this touch ID.
+        // Retire any layer voices from a previous tap on this touch ID (release, not
+        // hard-remove — same anti-click reasoning as noteOnSingle).
         if let prev = noteOnLayerIndices[touchID] {
             for presetIdx in prev {
                 let cid = touchID * 1000 + presetIdx
@@ -478,10 +516,7 @@ final class AudioEngine: ObservableObject {
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
-                    voicesLock.lock()
-                    voices.removeValue(forKey: cid)
-                    voiceGainBoxes.removeValue(forKey: cid)
-                    voicesLock.unlock()
+                    retireVoice(controlID: cid, preset: p)
                 }
             }
         }
@@ -495,7 +530,7 @@ final class AudioEngine: ObservableObject {
                 samplerTouches[cid] = (instrument.id, note)
             } else {
                 let gainBox = ensureGainBox(presetIdx)
-                spawnVoice(id: cid, preset: preset, note: note, velocity: velocity,
+                spawnVoice(controlID: cid, preset: preset, note: note, velocity: velocity,
                            x: x, y: y, gainBox: gainBox)
             }
         }
@@ -504,7 +539,9 @@ final class AudioEngine: ObservableObject {
 
     // Shared voice-creation core. `gainBox` nil → single mode (gain = 1.0 always).
     // `gainBox` non-nil → layer mode (gain read live from box each audio buffer).
-    private func spawnVoice(id: Int, preset: SynthPreset, note: Int, velocity: Float,
+    // `controlID` is the touch/layer key the caller uses; the voice itself is stored
+    // under a fresh unique voiceID so retriggers never collide.
+    private func spawnVoice(controlID: Int, preset: SynthPreset, note: Int, velocity: Float,
                             x: Float, y: Float, gainBox: GainBox?) {
         let voice: any AnyVoice
         switch preset.voiceMode {
@@ -527,10 +564,13 @@ final class AudioEngine: ObservableObject {
         // sees a voice that hasn't begun generating samples yet.
         voice.start()
 
+        let voiceID = nextVoiceID
+        nextVoiceID += 1
         voicesLock.lock()
-        voices[id] = voice
-        if let gb = gainBox { voiceGainBoxes[id] = gb }
+        voices[voiceID] = voice
+        if let gb = gainBox { voiceGainBoxes[voiceID] = gb }
         voicesLock.unlock()
+        controlToVoiceID[controlID] = voiceID
     }
 
     func noteOff(touchID: Int) {
@@ -544,7 +584,7 @@ final class AudioEngine: ObservableObject {
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
-                    releaseVoice(id: cid, preset: preset)
+                    retireVoice(controlID: cid, preset: preset)
                 }
             }
             noteOnLayerIndices.removeValue(forKey: touchID)
@@ -554,15 +594,19 @@ final class AudioEngine: ObservableObject {
             }
             samplerTouches.removeValue(forKey: touchID)
         } else {
-            releaseVoice(id: touchID, preset: currentPreset)
+            retireVoice(controlID: touchID, preset: currentPreset)
         }
     }
 
-    private func releaseVoice(id: Int, preset: SynthPreset) {
-        voicesLock.lock()
-        let voice = voices[id]
-        voicesLock.unlock()
+    /// Releases the voice currently bound to `controlID` (if any) and schedules its
+    /// removal. Clears the control→voice mapping so the control id is free to bind a
+    /// fresh voice immediately. No-op when nothing is bound (e.g. first tap).
+    private func retireVoice(controlID: Int, preset: SynthPreset) {
+        guard let voiceID = controlToVoiceID.removeValue(forKey: controlID) else { return }
 
+        voicesLock.lock()
+        let voice = voices[voiceID]
+        voicesLock.unlock()
         voice?.release()
 
         let tail: Double
@@ -576,8 +620,8 @@ final class AudioEngine: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
             guard let self else { return }
             self.voicesLock.lock()
-            self.voices.removeValue(forKey: id)
-            self.voiceGainBoxes.removeValue(forKey: id)
+            self.voices.removeValue(forKey: voiceID)
+            self.voiceGainBoxes.removeValue(forKey: voiceID)
             self.voicesLock.unlock()
         }
     }
@@ -585,27 +629,35 @@ final class AudioEngine: ObservableObject {
     func updateTouch(touchID: Int, x: Float, y: Float) {
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
-                let v = voices[touchID * 1000 + presetIdx]
+                let v = liveVoice(controlID: touchID * 1000 + presetIdx)
                 v?.filterCutoffMod = x; v?.lfoDepthMod = y
             }
         } else {
-            voices[touchID]?.filterCutoffMod = x
-            voices[touchID]?.lfoDepthMod     = y
+            let v = liveVoice(controlID: touchID)
+            v?.filterCutoffMod = x
+            v?.lfoDepthMod     = y
         }
     }
 
     func updateGlissando(touchID: Int, semitones: Float, x: Float, y: Float) {
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
-                let v = voices[touchID * 1000 + presetIdx]
+                let v = liveVoice(controlID: touchID * 1000 + presetIdx)
                 v?.pitchBendSemitones = semitones
                 v?.filterCutoffMod    = x; v?.lfoDepthMod = y
             }
         } else {
-            voices[touchID]?.pitchBendSemitones = semitones
-            voices[touchID]?.filterCutoffMod    = x
-            voices[touchID]?.lfoDepthMod        = y
+            let v = liveVoice(controlID: touchID)
+            v?.pitchBendSemitones = semitones
+            v?.filterCutoffMod    = x
+            v?.lfoDepthMod        = y
         }
+    }
+
+    /// The currently-bound (non-retired) voice for a control id, or nil.
+    private func liveVoice(controlID: Int) -> (any AnyVoice)? {
+        guard let voiceID = controlToVoiceID[controlID] else { return nil }
+        return voices[voiceID]
     }
 
     // MARK: - Waveform Analysis

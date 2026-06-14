@@ -26,6 +26,7 @@ final class SamplerEngine {
     private var pool: [VoiceSlot] = []
     private var poolCursor = 0
     private let poolSize   = 12
+    private var lastStealLog: TimeInterval = 0   // throttles voice-steal logging
 
     // rootNote → velocityMidiValue → buffer
     private var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
@@ -168,7 +169,14 @@ final class SamplerEngine {
     private func nextSlot() -> VoiceSlot {
         // Prefer an idle slot to avoid cutting release tails on busy pools.
         if let idle = pool.first(where: { !$0.player.isPlaying }) { return idle }
-        // All slots busy — steal round-robin.
+        // All slots busy — steal round-robin. Stealing truncates a still-ringing
+        // note and can click, so surface it (throttled) as a likely culprit when
+        // troubleshooting audio artefacts during dense playing.
+        let now = Date().timeIntervalSinceReferenceDate
+        if now - lastStealLog > 0.5 {
+            lastStealLog = now
+            Diagnostics.shared.log("Sampler[\(instrument.id)] stealing voices — pool full (\(poolSize))")
+        }
         let slot = pool[poolCursor % poolSize]
         poolCursor += 1
         return slot
