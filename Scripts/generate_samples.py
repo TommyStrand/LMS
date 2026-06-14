@@ -62,44 +62,90 @@ def write_wav(path, samples_f):
         w.writeframes(pcm)
 
 # ---------------------------------------------------------------------------
-# Grand Piano  –  multi-partial exponential decay with slight inharmonicity
+# Grand Piano  –  detuned unison strings, stretched (inharmonic) partials,
+#                 two-stage prompt + aftersound decay
 # ---------------------------------------------------------------------------
-PIANO_DURATION = 3.0    # seconds; most of the sustain captured
+# A single decaying oscillator stack sounds like an organ/electric piano, not a
+# real grand. The three things that make a piano read as a piano:
+#   1. UNISON DETUNING — each note has 1-3 strings tuned a fraction of a cent
+#      apart; their slow beating gives the tone its shimmer and "alive" sustain.
+#   2. INHARMONICITY — stiff strings stretch the partials slightly sharp, more so
+#      toward the treble. This is the single biggest cue separating piano from a
+#      harmonic oscillator bank.
+#   3. TWO-STAGE DECAY — a fast "prompt" decay right after the strike sitting on
+#      top of a slower "aftersound", i.e. the thump-then-ring shape.
+# ---------------------------------------------------------------------------
+PIANO_DURATION = 3.5    # seconds; most of the sustain captured
 
 def piano_sample(midi_note, velocity):
-    freq    = midi_to_hz(midi_note)
-    vel     = velocity / 127.0
-    sr      = SAMPLE_RATE
-    n       = int(PIANO_DURATION * sr)
-    B       = 3e-4          # inharmonicity coefficient (typical piano string)
-    # (partial, relative_amplitude, decay_tau_seconds)
-    partials = [
-        (1, 1.000, 3.5 - vel * 1.0),
-        (2, 0.550, 2.2 - vel * 0.5),
-        (3, 0.350, 1.4),
-        (4, 0.200, 1.0),
-        (5, 0.140, 0.7),
-        (6, 0.075, 0.55),
-        (7, 0.045, 0.42),
-        (8, 0.025 * vel, 0.32),
-    ]
-    # noise burst length proportional to velocity (louder hit → longer noise)
-    noise_n   = int((0.003 + vel * 0.006) * sr)
-    fade_start = n - int(0.05 * sr)   # 50 ms end-of-sample fade prevents click
+    freq = midi_to_hz(midi_note)
+    vel  = velocity / 127.0
+    sr   = float(SAMPLE_RATE)
+    n    = int(PIANO_DURATION * sr)
+
+    # Inharmonicity coefficient: tiny in the bass (long wound strings), rising
+    # toward the treble (short, stiff strings).
+    B = min(1.2e-3, 8e-5 * (2.0 ** ((midi_note - 21) / 24.0)))
+
+    # Unison strings per note: 1 in the deep bass, 2 low-mid, 3 elsewhere — with a
+    # sub-cent pitch spread that a single oscillator can't reproduce.
+    if   midi_note < 31: detunes_cents = [0.0]
+    elif midi_note < 41: detunes_cents = [0.0, 0.8]
+    else:                detunes_cents = [0.0, 0.8, -0.7]
+    n_strings      = len(detunes_cents)
+    detune_factors = [2.0 ** (c / 1200.0) for c in detunes_cents]
+
+    n_partials = 10
+    # Harder strikes excite more upper partials (brighter); roll < 1 so higher
+    # partials are progressively quieter, with less attenuation at high velocity.
+    roll = 0.62 + 0.30 * vel
+    partials = []   # (amp, tau_slow)
+    for k in range(1, n_partials + 1):
+        amp = (roll ** (k - 1)) / (k ** 0.4)
+        # Low partials ring longest; bass notes sustain longer than treble.
+        tau = (3.0 / (k ** 0.5)) * (1.0 + 0.6 * max(0.0, (64 - midi_note) / 64.0))
+        partials.append((amp, tau))
+
+    # Precompute the constant per-sample phase increment for every string/partial
+    # (frequency and inharmonic stretch don't change within a note).
+    incs = [[0.0] * n_partials for _ in range(n_strings)]
+    for si in range(n_strings):
+        df = detune_factors[si]
+        for pi in range(n_partials):
+            k  = pi + 1
+            fk = freq * k * math.sqrt(1.0 + B * k * k) * df
+            incs[si][pi] = 2.0 * math.pi * fk / sr
+
+    noise_n    = int((0.004 + vel * 0.010) * sr)   # hammer transient
+    fade_start = n - int(0.05 * sr)                # 50 ms end fade, anti-click
     _seed(midi_note * 137)
+
+    phases = [[0.0] * n_partials for _ in range(n_strings)]
+
     samples = []
     for i in range(n):
-        t   = i / sr
-        s   = 0.0
-        for k, amp, tau in partials:
-            fk = freq * k * math.sqrt(1.0 + B * k * k)
-            s += amp * math.exp(-t / tau) * math.sin(2.0 * math.pi * fk * t)
+        t = i / sr
+        # Per-partial two-stage decay (independent of which string), computed once.
+        envs = [0.55 * math.exp(-t / (tau * 0.22)) + 0.45 * math.exp(-t / tau)
+                for (_, tau) in partials]
+
+        s = 0.0
+        for si in range(n_strings):
+            ph  = phases[si]
+            inc = incs[si]
+            for pi, (amp, _) in enumerate(partials):
+                ph[pi] += inc[pi]
+                s += amp * envs[pi] * math.sin(ph[pi])
+        s /= n_strings
+
+        # Hammer-strike transient (decaying noise), louder with velocity.
         if i < noise_n:
-            env = math.exp(-i / (noise_n / 4.0))
-            s  += _lcg() * env * vel * 0.5
+            ne = math.exp(-i / (noise_n / 5.0))
+            s += _lcg() * ne * (0.25 + vel * 0.45)
+
         if i >= fade_start:
             s *= (n - i) / (n - fade_start)
-        samples.append(s * vel)
+        samples.append(s)
     return samples
 
 # ---------------------------------------------------------------------------
