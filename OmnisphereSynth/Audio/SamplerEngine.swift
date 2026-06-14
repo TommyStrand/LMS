@@ -96,6 +96,12 @@ final class SamplerEngine {
                       // requires the buffer channel count to match exactly.
                       let buf  = makeStereo(mono)
                 else { continue }
+                // Identity guard: the resolved file MUST live in this instrument's
+                // folder. This is the invariant the old bare-filename lookup violated
+                // silently (loading flute samples for piano/strings). Cheap to check,
+                // and it turns that whole class of bug into an immediate debug crash.
+                assert(url.deletingLastPathComponent().lastPathComponent == instrument.id,
+                       "SamplerEngine[\(instrument.id)] resolved \(key) to \(url.path) — wrong folder")
                 applyEdgeFades(buf)   // declick: guarantee zero-crossing start/end
                 buffers[root, default: [:]][layer.midiValue] = buf
                 loaded += 1
@@ -105,6 +111,10 @@ final class SamplerEngine {
         let summary = "SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded"
         print(summary)
         Diagnostics.shared.log(summary)
+        // Catch missing/corrupt samples at launch in debug builds rather than as a
+        // silent gap heard later. Allows 0 (bundle not present in some test contexts).
+        assert(loaded == expected || loaded == 0,
+               "SamplerEngine[\(instrument.id)] loaded \(loaded)/\(expected) samples")
     }
 
     // MARK: - Playback
