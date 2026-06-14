@@ -72,17 +72,19 @@ final class AudioEngine: ObservableObject {
     private var analysisBuffer: [Float] = Array(repeating: 0, count: 128)
     private var analysisIndex = 0
 
+    // Serialises audio-session activation and engine start/restart off the main
+    // thread. AVAudioSession.setActive(_:) can block long enough to stall the UI,
+    // and a serial queue prevents overlapping route-change restarts from racing.
+    private let sessionQueue = DispatchQueue(label: "audio.session.control", qos: .userInitiated)
+
     init() { setupEngine() }
 
     // MARK: - Setup
 
     private func setupEngine() {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setPreferredSampleRate(sampleRate)
-        try? session.setPreferredIOBufferDuration(0.005)
-        try? session.setActive(true)
-
+        // Build the node graph first — attach/connect are object wiring with no
+        // blocking I/O, so they're fast and safe on the main thread. Session
+        // activation and engine start happen afterwards, off the main thread.
         [voiceMixer, reverb, delay,
          shimmerReverb, timePitch, shimmerMixer].forEach { engine.attach($0) }
 
@@ -114,8 +116,27 @@ final class AudioEngine: ObservableObject {
         setupMasterNode()
 
         applyPreset(currentPreset)
-        try? engine.start()
-        observeAudioSession()
+
+        // Activate the session and start the engine off the main thread, then
+        // register the route/interruption observers (after start, so the initial
+        // configuration-change notification can't trigger a redundant restart).
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.configureSession(bufferDuration: 0.005)
+            try? self.engine.start()
+            DispatchQueue.main.async { self.observeAudioSession() }
+        }
+    }
+
+    /// Applies category, preferred rate/buffer and activates the session. Must be
+    /// called off the main thread — `setActive(_:)` can block long enough to stall
+    /// the UI (and logs a main-thread warning).
+    private func configureSession(bufferDuration: Double) {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? session.setPreferredSampleRate(sampleRate)
+        try? session.setPreferredIOBufferDuration(bufferDuration)
+        try? session.setActive(true)
     }
 
     private func setupMasterNode() {
@@ -241,22 +262,26 @@ final class AudioEngine: ObservableObject {
     }
 
     private func restartEngineIfNeeded() {
-        // Re-apply session settings — category/rate can drift after an AirPlay handoff.
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try? session.setPreferredSampleRate(sampleRate)
-        try? session.setPreferredIOBufferDuration(0.01)
-        try? session.setActive(true)
-        if engine.isRunning { engine.stop() }
-        // Detach old master node before reset so stale render callbacks are not called.
-        if let old = masterNode { engine.detach(old); masterNode = nil }
-        // Reset clears stale delay/reverb buffers accumulated during AirPlay;
-        // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
-        engine.reset()
-        setupMasterNode()
-        try? engine.start()
-        applyPreset(currentPreset)
-        Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
+        // All session + graph work runs on the serial session queue: setActive(_:)
+        // must stay off the main thread, and serialising prevents overlapping
+        // route-change restarts from racing each other.
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            // Re-apply session settings — category/rate can drift after an AirPlay handoff.
+            self.configureSession(bufferDuration: 0.01)
+            if self.engine.isRunning { self.engine.stop() }
+            // Detach old master node before reset so stale render callbacks are not called.
+            if let old = self.masterNode { self.engine.detach(old); self.masterNode = nil }
+            // Reset clears stale delay/reverb buffers accumulated during AirPlay;
+            // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
+            self.engine.reset()
+            self.setupMasterNode()
+            try? self.engine.start()
+            // Re-apply node parameters only — do NOT touch the @Published currentPreset
+            // from a background thread.
+            self.applyPresetToNodes(self.currentPreset)
+            Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
+        }
     }
 
     // MARK: - Layer management
@@ -332,9 +357,15 @@ final class AudioEngine: ObservableObject {
     }
 
     func applyPreset(_ preset: SynthPreset) {
-        currentPreset = preset
+        currentPreset = preset   // @Published — callers must invoke this on main
         Diagnostics.shared.log("Preset → \(preset.name)")
+        applyPresetToNodes(preset)
+    }
 
+    /// Applies a preset's reverb/delay/shimmer settings to the audio-unit nodes.
+    /// Separate from `applyPreset` so it can run on the session queue during an
+    /// engine restart without mutating the `@Published` currentPreset off-main.
+    private func applyPresetToNodes(_ preset: SynthPreset) {
         reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
         reverb.wetDryMix = preset.reverbMix * 100
 
