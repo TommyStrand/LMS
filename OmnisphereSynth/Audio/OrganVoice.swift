@@ -22,6 +22,7 @@ final class OrganVoice: AnyVoice {
     private let velocity: Float
     private let sampleRate: Double
     private var briState: Double = 0   // brightness LPF state (pad Y)
+    private var vibPhase: Double = 0, vibRamp: Double = 0   // expression vibrato (pad Y)
 
     private var phases: [Double]
     private var tremPhase: Double = 0
@@ -80,12 +81,18 @@ final class OrganVoice: AnyVoice {
         smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendFactor = pow(2.0, smoothPitchBend / 12.0)
 
+        // Expression vibrato from pad Y (lfoDepthMod), independent of the tremulant.
+        vibPhase += (5.2 + Double(lfoDepthMod) * 1.4) * dt
+        if vibPhase >= 1 { vibPhase -= 1 }
+        vibRamp += (1.0 - vibRamp) * min(dt / 0.2, 1.0)
+        let vibFactor = pow(2.0, sin(vibPhase * 2 * .pi) * Double(lfoDepthMod) * 38.0 * vibRamp / 1200.0)
+
         // Sum drawbar partials
         var sum: Double = 0
         for i in 0..<Self.ratios.count {
             let detuneCents = Self.detuneOffsets[i]
             let detuneFactor = pow(2.0, detuneCents / 1200.0)
-            let f = freq * Self.ratios[i] * detuneFactor * bendFactor * (1.0 + tremVal * 0.3)
+            let f = freq * Self.ratios[i] * detuneFactor * bendFactor * vibFactor * (1.0 + tremVal * 0.3)
             phases[i] = (phases[i] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[i] * 2 * .pi) * Double(Self.churchLevels[i])
         }

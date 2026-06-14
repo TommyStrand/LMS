@@ -60,12 +60,13 @@ final class RhodesVoice: AnyVoice {
         // Kick voice to release when natural decay finishes
         if decayEnv < 0.0001 && envStage == .sustain { envStage = .release }
 
-        // Long-press vibrato (~5.5 Hz, ±18 cents, ramps in 0.4–0.8s)
+        // Expression vibrato from pad Y (lfoDepthMod): deeper/faster as you press up,
+        // with a quick onset so short notes don't warble.
         noteAge  += dt
-        vibPhase += 5.5 * dt
+        vibPhase += (5.0 + Double(lfoDepthMod) * 1.8) * dt
         if vibPhase > 1 { vibPhase -= 1 }
-        let vibRamp  = max(0.0, min(1.0, (noteAge - 0.4) / 0.4))
-        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 18.0
+        let vibRamp  = max(0.0, min(1.0, (noteAge - 0.05) / 0.2))
+        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * Double(lfoDepthMod) * 42.0
         let vibFreq  = freq * pow(2.0, vibCents / 1200.0)
 
         // Smooth pitch glide

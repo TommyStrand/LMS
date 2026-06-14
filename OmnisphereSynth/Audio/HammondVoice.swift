@@ -44,6 +44,7 @@ final class HammondVoice: AnyVoice {
     private var clickLpf:   Double = 0   // smooths the key-click noise
     private var smoothPitchBend: Double = 0
     private var briL: Double = 0, briR: Double = 0   // brightness LPF state (pad Y)
+    private var vibPhase: Double = 0, vibRamp: Double = 0   // expression vibrato (pad Y)
 
     init(note: Int, velocity: Float, sampleRate: Double) {
         self.freq       = 440.0 * pow(2.0, Double(note - 69) / 12.0)
@@ -71,18 +72,25 @@ final class HammondVoice: AnyVoice {
         smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
         let bendFactor = pow(2.0, smoothPitchBend / 12.0)
 
+        // Expression vibrato from pad Y (lfoDepthMod) — deeper/faster as you press up.
+        vibPhase += (5.2 + Double(lfoDepthMod) * 1.4) * dt
+        if vibPhase >= 1 { vibPhase -= 1 }
+        vibRamp += (1.0 - vibRamp) * min(dt / 0.18, 1.0)
+        let vibFactor = pow(2.0, sin(vibPhase * 2 * .pi) * Double(lfoDepthMod) * 40.0 * vibRamp / 1200.0)
+        let pitch = bendFactor * vibFactor
+
         // Additive synthesis
         var sum: Double = 0
         for k in 0..<Self.ratios.count {
             let df = pow(2.0, Self.detunes[k] / 1200.0)
-            let f  = freq * Self.ratios[k] * df * bendFactor
+            let f  = freq * Self.ratios[k] * df * pitch
             phases[k] = (phases[k] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[k] * 2 * .pi) * Double(Self.levels[k])
         }
         sum /= Self.totalLevel
 
         // Percussion (2nd harmonic)
-        percPhase = (percPhase + freq * 2.0 * bendFactor * dt).truncatingRemainder(dividingBy: 1.0)
+        percPhase = (percPhase + freq * 2.0 * pitch * dt).truncatingRemainder(dividingBy: 1.0)
         percEnv   = max(0, percEnv - dt / 0.04)
         sum      += sin(percPhase * 2 * .pi) * percEnv * 0.35
 

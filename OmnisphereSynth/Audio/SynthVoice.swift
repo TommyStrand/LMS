@@ -78,15 +78,16 @@ final class SynthVoice: AnyVoice {
         if lfoPhase > 1 { lfoPhase -= 1 }
         let lfoVal = sin(lfoPhase * 2 * .pi) * Double(preset.lfoDepth * lfoDepthMod * 2)
 
-        // Long-press vibrato — silent for the first 400 ms, then ramps in
-        // over another 400 ms. ~5.5 Hz, ±22 cents at full depth.
+        // Expression-wheel vibrato driven by the pad Y axis (lfoDepthMod): deeper and
+        // a little faster as you press up — like leaning into a mod/expression wheel.
+        // Quick onset so short taps don't warble.
         noteAge += dt
-        vibPhase += 5.5 * dt
+        vibPhase += (5.0 + Double(lfoDepthMod) * 1.8) * dt
         if vibPhase > 1 { vibPhase -= 1 }
-        let vibRamp = max(0.0, min(1.0, (noteAge - 0.4) / 0.4))
-        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 22.0
-        // Skip the pow() while vibrato is still silent (first 400 ms of every note).
-        let vibFactor = vibCents != 0 ? pow(2.0, vibCents / 1200.0) : 1.0
+        let vibRamp  = max(0.0, min(1.0, (noteAge - 0.05) / 0.2))
+        let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * Double(lfoDepthMod) * 45.0
+        // Skip the pow() while vibrato is effectively silent (Y near zero / pre-onset).
+        let vibFactor = abs(vibCents) > 0.01 ? pow(2.0, vibCents / 1200.0) : 1.0
 
         // Smooth pitch glide
         smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003

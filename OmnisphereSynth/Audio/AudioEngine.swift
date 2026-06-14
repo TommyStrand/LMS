@@ -133,7 +133,10 @@ final class AudioEngine: ObservableObject {
         // configuration-change notification can't trigger a redundant restart).
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.configureSession(bufferDuration: 0.005)
+            // 10 ms IO buffer: halves render-callback overhead vs 5 ms (fewer
+            // callbacks → less fixed per-buffer cost) while staying low-latency
+            // enough for a touch instrument.
+            self.configureSession(bufferDuration: 0.01)
             try? self.engine.start()
             DispatchQueue.main.async { self.observeAudioSession() }
         }
@@ -443,12 +446,21 @@ final class AudioEngine: ObservableObject {
         shimmerReverb.loadFactoryPreset(.plate)
         shimmerReverb.wetDryMix = 80
         shimmerMixer.outputVolume = preset.shimmerAmount * 0.45
+        setShimmerPathActive(preset.shimmerAmount > 0.001)
+    }
+
+    /// Bypass the shimmer reverb + pitch-shifter when shimmer is off. The
+    /// AVAudioUnitTimePitch runs a phase vocoder continuously otherwise — a real
+    /// idle-CPU cost for a path whose output is muted anyway on most presets.
+    private func setShimmerPathActive(_ active: Bool) {
+        timePitch.auAudioUnit.shouldBypassEffect     = !active
+        shimmerReverb.auAudioUnit.shouldBypassEffect = !active
     }
 
     // MARK: - Live knob updates
 
     func setDistortion(_ v: Float) { currentPreset.distortionAmount = v }
-    func setShimmer(_ v: Float)    { currentPreset.shimmerAmount = v; shimmerMixer.outputVolume = v * 0.45 }
+    func setShimmer(_ v: Float)    { currentPreset.shimmerAmount = v; shimmerMixer.outputVolume = v * 0.45; setShimmerPathActive(v > 0.001) }
     func setReverb(_ v: Float)     { currentPreset.reverbMix = v;     reverb.wetDryMix = v * 100 }
     func setDelay(_ v: Float)      { currentPreset.delayMix = v;      delay.wetDryMix = v * 100 }
     func setTremolo(_ v: Float)    { currentPreset.tremulantDepth = v }

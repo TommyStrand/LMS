@@ -502,11 +502,12 @@ struct HeaderMeter: View {
     var body: some View {
         let cpuWarn = diag.cpuPercent >= 85
         return HStack(spacing: 7) {
-            metric(icon: "cpu", value: String(format: "%.0f%%", diag.cpuPercent), warn: cpuWarn)
+            metric(icon: "cpu", value: String(format: "%.0f%%", diag.cpuPercent),
+                   valueWidth: 30, warn: cpuWarn)
             if !compact {
                 metric(icon: "memorychip",
                        value: String(format: "%.0f MB", diag.memoryMB),
-                       warn: diag.memoryMB > 300)
+                       valueWidth: 50, warn: diag.memoryMB > 300)
             }
         }
         .padding(.horizontal, 8)
@@ -517,10 +518,14 @@ struct HeaderMeter: View {
             .strokeBorder(cpuWarn ? Color.red.opacity(0.65) : theme.panelBorder, lineWidth: 1))
     }
 
-    private func metric(icon: String, value: String, warn: Bool) -> some View {
+    // Fixed-width, trailing-aligned monospaced value so the readout (and the whole
+    // header) doesn't shift when the number gains or loses a digit (e.g. 9% → 100%).
+    private func metric(icon: String, value: String, valueWidth: CGFloat, warn: Bool) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon).font(.system(size: 9))
-            Text(value).font(.system(size: 10, weight: .semibold, design: .monospaced))
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .frame(width: valueWidth, alignment: .trailing)
         }
         .foregroundColor(warn ? .red : theme.secondaryText)
     }
