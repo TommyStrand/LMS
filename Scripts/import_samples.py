@@ -13,6 +13,11 @@ Supported sources
   vsco2-flute     VSCO2 Community Edition flute (CC0)   → concert_flute
                   Files named like: Strings_arco_ff_C3_v1.wav
 
+  sfz             Any SFZ instrument (e.g. ChurchOrganEmulation) → pipe_organ.
+                  Parses the .sfz mapping (pitch_keycenter / key / lokey-hikey,
+                  lovel-hivel, sample=, default_path=). Pass the .sfz file OR a
+                  folder containing one as --input.
+
   generic         Any WAV folder where each file is a single pitch.
                   Reads MIDI note number from the filename (first integer found).
                   Set --soft-glob and --hard-glob to filter by dynamic marking.
@@ -34,10 +39,20 @@ Usage examples
       --input ~/Downloads/VSCO2-CE/Woodwinds/Flute
 
   python3 Scripts/import_samples.py \\
+      --source sfz \\
+      --input ~/Downloads/ChurchOrganEmulation
+
+  python3 Scripts/import_samples.py \\
       --source generic \\
       --input ~/Downloads/MyFluteSamples \\
       --output OmnisphereSynth/Resources/Samples/concert_flute \\
       --soft-glob pp --hard-glob ff
+
+By default the matching SamplerInstrument descriptor's `rootNotes` in
+OmnisphereSynth/Models/SynthPreset.swift is patched to match the files that
+were actually written — this keeps SamplerEngine.load()'s loaded==expected
+assertion satisfied even when a library's key coverage is irregular. Disable
+with --no-patch.
 
 After running, validate with:
   python3 Scripts/validate_samples.py
@@ -113,7 +128,7 @@ def _convert_scipy(src: Path) -> bytes:
     return pcm.tobytes()
 
 def _convert_stdlib(src: Path) -> bytes:
-    """No scipy: stereo→mono, but no resampling."""
+    """No scipy: stereo→mono, no resampling. Refuses to fake the sample rate."""
     with wave.open(str(src), "rb") as wf:
         nch = wf.getnchannels()
         sw  = wf.getsampwidth()
@@ -121,8 +136,11 @@ def _convert_stdlib(src: Path) -> bytes:
         raw = wf.readframes(wf.getnframes())
 
     if sr != TARGET_SR:
-        print(f"  [WARN] scipy missing — cannot resample {sr}→{TARGET_SR} Hz. "
-              f"Install: pip3 install scipy numpy", file=sys.stderr)
+        # Writing a TARGET_SR header over differently-rated samples would silently
+        # transpose the instrument. Don't — require scipy for real resampling.
+        raise ValueError(
+            f"source is {sr} Hz but target is {TARGET_SR} Hz and scipy is not "
+            f"installed to resample. Run: pip3 install scipy numpy")
 
     if sw == 2:
         n    = len(raw) // 2
@@ -166,6 +184,15 @@ _ROOTS = {
     "grand_piano":      list(range(24, 97, 3)),   # 25 roots
     "string_ensemble":  list(range(36, 85, 3)),   # 17 roots
     "concert_flute":    list(range(60, 97, 3)),   # 13 roots
+    "pipe_organ":       list(range(24, 97, 3)),   # 25 roots (wide; trimmed to source)
+}
+
+# Maps an instrument id → the Swift static-let descriptor name to patch.
+_DESCRIPTOR_NAMES = {
+    "grand_piano":     "grandPiano",
+    "string_ensemble": "stringEnsemble",
+    "concert_flute":   "concertFlute",
+    "pipe_organ":      "pipeOrgan",
 }
 
 # ── Source scanners ───────────────────────────────────────────────────────────
@@ -229,6 +256,128 @@ def scan_vsco2(src: Path) -> dict[int, dict]:
 def _pick_vsco2(vel_map: dict, want: str) -> Path | None:
     return vel_map.get(want) or vel_map.get("hard") or vel_map.get("soft")
 
+# ── SFZ ───────────────────────────────────────────────────────────────────────
+
+_SFZ_HEADER_RE  = re.compile(r"<(\w+)>")
+_SFZ_OPCODE_RE  = re.compile(r"(\w+)=([^=]+?)(?=\s+\w+=|$)")
+_SFZ_NOTE_RE    = re.compile(r"^([A-Ga-g])([#b]?)(-?\d+)$")
+
+def parse_sfz_note(token: str, octave_offset: int) -> int | None:
+    """SFZ key/pitch_keycenter: a number (MIDI) or a note name like c4 (c4=60)."""
+    token = token.strip()
+    if token.lstrip("-").isdigit():
+        return int(token)
+    m = _SFZ_NOTE_RE.match(token)
+    if not m:
+        return None
+    name = m.group(1).upper() + m.group(2).replace("B", "b")
+    if name not in _PITCH_CLASS:
+        return None
+    return note_to_midi(name, int(m.group(3))) + 12 * octave_offset
+
+def _resolve_sfz_path(sfz_dir: Path, default_path: str, sample: str) -> Path | None:
+    """Resolve a region's sample= against default_path and the .sfz directory.
+    SFZ uses backslash separators; normalise to the host OS."""
+    sample = sample.strip().replace("\\", "/")
+    base = sfz_dir
+    if default_path:
+        base = (sfz_dir / default_path.strip().replace("\\", "/"))
+    cand = (base / sample)
+    if cand.exists():
+        return cand
+    # Fall back to a recursive search by basename (handles odd default_path).
+    matches = list(sfz_dir.rglob(Path(sample).name))
+    return matches[0] if matches else None
+
+def _tokenize_sfz(text: str) -> list[tuple[str, dict]]:
+    """Split SFZ into (header, opcodes) blocks. Strips comments."""
+    # Remove // line comments and /* */ block comments.
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    text = re.sub(r"//[^\n]*", " ", text)
+    blocks: list[tuple[str, dict]] = []
+    pos = 0
+    for m in _SFZ_HEADER_RE.finditer(text):
+        if blocks:  # body of the previous header runs up to this one
+            body = text[pos:m.start()]
+            blocks[-1][1].update(dict(_SFZ_OPCODE_RE.findall(body)))
+        blocks.append((m.group(1).lower(), {}))
+        pos = m.end()
+    if blocks:
+        blocks[-1][1].update(dict(_SFZ_OPCODE_RE.findall(text[pos:])))
+    return blocks
+
+def scan_sfz(sfz_path: Path, octave_offset: int) -> dict[int, list]:
+    """
+    Parse an SFZ instrument. Returns dict[root_midi] -> list of
+    (lovel, hivel, Path). Honours <global>/<group> opcode inheritance and
+    default_path. Organs are usually one full-velocity region per key.
+    """
+    if sfz_path.is_dir():
+        sfzs = sorted(sfz_path.rglob("*.sfz"))
+        if not sfzs:
+            print(f"ERROR: no .sfz file found under {sfz_path}", file=sys.stderr)
+            sys.exit(1)
+        sfz_path = sfzs[0]
+        print(f"Using SFZ mapping: {sfz_path}")
+
+    sfz_dir = sfz_path.parent
+    text = sfz_path.read_text(errors="ignore")
+    blocks = _tokenize_sfz(text)
+
+    out: dict[int, list] = {}
+    inherited: dict[str, str] = {}   # from <global>/<master>/<group>
+    for header, op in blocks:
+        if header in ("global", "master", "group", "control"):
+            if header == "control" and "default_path" in op:
+                inherited["default_path"] = op["default_path"]
+            else:
+                inherited.update(op)
+            continue
+        if header != "region":
+            continue
+
+        merged = {**inherited, **op}
+        sample = merged.get("sample")
+        if not sample:
+            continue
+
+        # Root note: pitch_keycenter > key > centre of lokey..hikey
+        root = None
+        for k in ("pitch_keycenter", "key"):
+            if k in merged:
+                root = parse_sfz_note(merged[k], octave_offset)
+                if root is not None:
+                    break
+        if root is None and "lokey" in merged and "hikey" in merged:
+            lo = parse_sfz_note(merged["lokey"], octave_offset)
+            hi = parse_sfz_note(merged["hikey"], octave_offset)
+            if lo is not None and hi is not None:
+                root = (lo + hi) // 2
+        if root is None:
+            continue
+
+        lovel = int(merged.get("lovel", 0))
+        hivel = int(merged.get("hivel", 127))
+
+        path = _resolve_sfz_path(sfz_dir, merged.get("default_path", ""), sample)
+        if path is None:
+            print(f"  [WARN] sample not found on disk: {sample}", file=sys.stderr)
+            continue
+        out.setdefault(root, []).append((lovel, hivel, path))
+    return out
+
+def _pick_sfz(regions: list, want: str) -> Path | None:
+    """Choose the region whose velocity range contains 64 (soft) or 110 (hard).
+    Falls back to the region with the widest velocity coverage."""
+    if not regions:
+        return None
+    target = 64 if want == "soft" else 110
+    for lovel, hivel, path in regions:
+        if lovel <= target <= hivel:
+            return path
+    # Widest coverage (organs typically have a single 0–127 region per key).
+    return max(regions, key=lambda r: r[1] - r[0])[2]
+
 _MIDI_IN_NAME_RE = re.compile(r"\b(\d{1,3})\b")
 
 def scan_generic(src: Path, soft_glob: str, hard_glob: str) -> dict[int, dict]:
@@ -269,24 +418,28 @@ def import_instrument(
     roots: list[int],
     out_dir: Path,
     instrument_id: str,
-) -> None:
+) -> list[int]:
+    """Writes the WAV grid. Returns the sorted list of roots that ended up with
+    a complete set of velocity layers (the set the descriptor must declare)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     available = sorted(file_map)
     if not available:
         print(f"ERROR: no samples found for {instrument_id}", file=sys.stderr)
         sys.exit(1)
 
-    wrote   = 0
-    missing = []
+    wrote        = 0
+    skipped      = []
+    complete     = []   # roots with ALL velocity layers written
 
     for root in roots:
         near = nearest(root, available)
         if abs(root - near) > 6:
-            missing.append(root)
+            skipped.append(root)
             print(f"  [WARN] MIDI {root}: nearest source is {near} "
                   f"({abs(root-near)} semitones away — skipping)")
             continue
 
+        layers_written = 0
         for vel_midi, vel_label in _LAYERS:
             src_path = pick_fn(file_map[near], vel_label)
             if src_path is None:
@@ -297,16 +450,26 @@ def import_instrument(
                 pcm = convert_wav(src_path)
                 write_wav(out_path, pcm)
                 wrote += 1
+                layers_written += 1
                 if wrote <= 5 or wrote % 10 == 0:
                     print(f"  [{wrote:3d}] {out_path.name:20s} ← {src_path.name}")
             except Exception as exc:
                 print(f"  [ERROR] {src_path}: {exc}", file=sys.stderr)
 
-    print(f"\nWrote {wrote} files to {out_dir}")
-    if missing:
-        print(f"Skipped MIDI notes (no nearby source): {missing}")
+        # SamplerEngine requires every declared root to have every velocity layer;
+        # only count a root as usable if all layers landed.
+        if layers_written == len(_LAYERS):
+            complete.append(root)
+        elif layers_written > 0:
+            # Remove the partial set so the folder stays consistent with the descriptor.
+            for vel_midi, _ in _LAYERS:
+                (out_dir / f"{root}_{vel_midi}.wav").unlink(missing_ok=True)
+            skipped.append(root)
 
-    _print_descriptor(instrument_id, [r for r in roots if r not in missing])
+    print(f"\nWrote {wrote} files to {out_dir}")
+    if skipped:
+        print(f"Skipped MIDI notes (no nearby/complete source): {sorted(skipped)}")
+    return complete
 
 def _camel(s: str) -> str:
     words = s.split("_")
@@ -315,20 +478,55 @@ def _camel(s: str) -> str:
 def _display(s: str) -> str:
     return " ".join(w.capitalize() for w in s.split("_"))
 
-def _print_descriptor(iid: str, roots: list[int]) -> None:
-    print(f"""
-── Suggested SamplerInstrument update ──────────────────────────────────
-Paste this into OmnisphereSynth/Models/SynthPreset.swift:
+def _swift_roots_literal(roots: list[int]) -> str:
+    return "[" + ", ".join(str(r) for r in roots) + "]"
 
-    static let {_camel(iid)} = SamplerInstrument(
+def _print_descriptor(iid: str, roots: list[int]) -> None:
+    name = _DESCRIPTOR_NAMES.get(iid, _camel(iid))
+    print(f"""
+── SamplerInstrument descriptor ────────────────────────────────────────
+    static let {name} = SamplerInstrument(
         id: "{iid}", displayName: "{_display(iid)}",
-        rootNotes: {roots},
+        rootNotes: {_swift_roots_literal(roots)},
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ]
     )
 ────────────────────────────────────────────────────────────────────────""")
+
+def patch_descriptor(swift_path: Path, iid: str, roots: list[int]) -> bool:
+    """Rewrite the `rootNotes:` line of the `static let <name> = SamplerInstrument`
+    block whose `id:` matches `iid`, so it exactly matches the files just written.
+    Returns True if a substitution was made."""
+    name = _DESCRIPTOR_NAMES.get(iid)
+    if name is None:
+        return False
+    if not swift_path.exists():
+        print(f"  [WARN] {swift_path} not found — skipping descriptor patch.",
+              file=sys.stderr)
+        return False
+
+    text = swift_path.read_text()
+    anchor = f'id: "{iid}"'
+    start = text.find(anchor)
+    if start < 0:
+        print(f"  [WARN] descriptor for id \"{iid}\" not found in {swift_path.name}.")
+        return False
+
+    # Replace the first `rootNotes: <...>,` after the anchor (single line).
+    rn = re.compile(r"(\n[ \t]*rootNotes:\s*).*?(,[ \t]*\n)")
+    m = rn.search(text, start)
+    if not m:
+        print(f"  [WARN] rootNotes line not found for \"{iid}\".")
+        return False
+
+    new_line = m.group(1) + _swift_roots_literal(roots) + m.group(2)
+    text = text[:m.start()] + new_line + text[m.end():]
+    swift_path.write_text(text)
+    print(f"  Patched {swift_path.name}: {name}.rootNotes = "
+          f"{len(roots)} notes {_swift_roots_literal(roots)}")
+    return True
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -338,16 +536,23 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--source", required=True,
-                   choices=["salamander", "vsco2-strings", "vsco2-flute", "generic"],
+                   choices=["salamander", "vsco2-strings", "vsco2-flute", "sfz", "generic"],
                    help="Sample library format")
     p.add_argument("--input", required=True, type=Path,
-                   help="Folder containing downloaded sample library")
+                   help="Folder (or .sfz file) containing the downloaded sample library")
     p.add_argument("--output", type=Path, default=None,
                    help="Output folder (default: OmnisphereSynth/Resources/Samples/<id>)")
     p.add_argument("--soft-glob", default="pp",
                    help="Substring in filename indicating soft dynamic (generic source)")
     p.add_argument("--hard-glob", default="ff",
                    help="Substring in filename indicating hard dynamic (generic source)")
+    p.add_argument("--octave-offset", type=int, default=0,
+                   help="Add N octaves to SFZ note names (use 1 if a library treats c3 as MIDI 60)")
+    p.add_argument("--patch", type=Path,
+                   default=Path("OmnisphereSynth/Models/SynthPreset.swift"),
+                   help="Swift file whose SamplerInstrument rootNotes are updated to match output")
+    p.add_argument("--no-patch", action="store_true",
+                   help="Do not edit the Swift descriptor; just print the suggested one")
     args = p.parse_args()
 
     if not HAS_SCIPY:
@@ -372,6 +577,10 @@ def main() -> None:
         iid     = "concert_flute"
         fmap    = scan_vsco2(src)
         pick_fn = _pick_vsco2
+    elif source == "sfz":
+        iid     = args.output.name if args.output else "pipe_organ"
+        fmap    = scan_sfz(src, args.octave_offset)
+        pick_fn = _pick_sfz
     else:  # generic
         iid     = args.output.name if args.output else "unknown"
         fmap    = scan_generic(src, args.soft_glob, args.hard_glob)
@@ -391,7 +600,20 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(1)
 
-    import_instrument(fmap, pick_fn, _ROOTS.get(iid, list(range(36, 85, 3))), out, iid)
+    roots = import_instrument(fmap, pick_fn, _ROOTS.get(iid, list(range(36, 85, 3))), out, iid)
+    if not roots:
+        print("ERROR: no complete roots written — nothing to wire up.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.no_patch:
+        _print_descriptor(iid, roots)
+    else:
+        patched = patch_descriptor(args.patch, iid, roots)
+        if not patched:
+            _print_descriptor(iid, roots)
+
+    print("\nNext:")
+    print("  python3 Scripts/validate_samples.py")
 
 if __name__ == "__main__":
     main()

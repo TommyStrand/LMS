@@ -14,11 +14,14 @@ Usage:
     python3 Scripts/validate_samples.py
 """
 
-import os, sys, wave, struct
+import os, re, sys, wave, struct
 
 # Single source of truth: pull the expected layout straight from the generator
 # so the validator can never drift from what we actually produce.
 from generate_samples import INSTRUMENTS, VELOCITIES, SAMPLE_RATE, OUT_ROOT
+
+# Filename scheme every sampler folder must follow: {midi_note}_{velocity}.wav
+NAME_RE = re.compile(r"^(\d{1,3})_(\d{1,3})\.wav$")
 
 EXPECT_CHANNELS = 1
 EXPECT_WIDTH    = 2          # 16-bit
@@ -88,6 +91,34 @@ def main():
                 bad += 1
         ok = len(actual & expected) - bad
         print(f"  {folder:16} {ok}/{len(expected)} files OK")
+
+    # Imported instruments (e.g. pipe_organ) live under the same Samples root but
+    # are NOT produced by generate_samples.py, so they have no fixed grid contract —
+    # real libraries cover an irregular set of keys. Validate whatever is there for
+    # format/content/naming and feed them into the collision tracker, but don't
+    # demand a complete note range.
+    known = {folder for folder, *_ in INSTRUMENTS}
+    if os.path.isdir(OUT_ROOT):
+        for folder in sorted(os.listdir(OUT_ROOT)):
+            out_dir = os.path.join(OUT_ROOT, folder)
+            if folder in known or not os.path.isdir(out_dir):
+                continue
+            wavs = sorted(f for f in os.listdir(out_dir) if f.endswith(".wav"))
+            if not wavs:
+                warn(f"{folder}: no .wav files (imported instrument folder is empty)")
+                continue
+            bad = 0
+            for name in wavs:
+                if not NAME_RE.match(name):
+                    fail(f"{folder}/{name}: name must be {{note}}_{{velocity}}.wav")
+                    bad += 1
+                    continue
+                bare_name_owners.setdefault(name, []).append(folder)
+                problems = check_wav(os.path.join(out_dir, name))
+                if problems:
+                    fail(f"{folder}/{name}: " + ", ".join(problems))
+                    bad += 1
+            print(f"  {folder:16} {len(wavs)-bad}/{len(wavs)} files OK (imported)")
 
     # Cross-folder filename collisions. This is EXPECTED here (all instruments use
     # the same {note}_{velocity}.wav scheme) — the point is to make the hazard

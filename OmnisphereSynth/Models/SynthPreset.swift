@@ -173,6 +173,21 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ]
     )
+    // Real recorded pipe organ (imported from an SFZ library via
+    // Scripts/import_samples.py --source sfz). rootNotes is rewritten by that
+    // script to exactly match the WAVs written, so SamplerEngine.load()'s
+    // loaded==expected assertion holds even when the library's key coverage is
+    // irregular. The placeholder below matches an empty/full grid; the importer
+    // trims it. Pipe organs aren't velocity-sensitive, so the importer writes
+    // the same recording into both velocity layers.
+    static let pipeOrgan = SamplerInstrument(
+        id: "pipe_organ", displayName: "Pipe Organ",
+        rootNotes: Array(stride(from: 24, through: 96, by: 3)),
+        velocityLayers: [
+            VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
+            VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
+        ]
+    )
 }
 
 extension SynthPreset {
@@ -563,6 +578,14 @@ extension SynthPreset {
             attack: 0.03, decay: 0.2, sustain: 0.85, release: 0.4,
             reverbMix: 0.32, delayMix: 0.08, delayTime: 0.375,
             iconStyle: .fluteShape
+        ),
+        SynthPreset(
+            name: "Pipe Organ",
+            color: "#9A8047",
+            voiceMode: .sampler(.pipeOrgan),
+            attack: 0.01, decay: 0.0, sustain: 1.0, release: 0.12,
+            reverbMix: 0.6, delayMix: 0.08, delayTime: 0.5,
+            iconStyle: .churchPipes
         ),
     ]
 }
