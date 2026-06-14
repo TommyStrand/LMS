@@ -201,14 +201,39 @@ final class SamplerEngine {
     }
 
     private func findBuffer(midi: Int, vel: Int) -> (rootNote: Int, buf: AVAudioPCMBuffer)? {
-        let layer = instrument.velocityLayers.first { vel >= $0.loVel && vel <= $0.hiVel }
-            ?? instrument.velocityLayers.last
-        guard let velMidi = layer?.midiValue else { return nil }
+        guard let velMidi = SamplerSelection.velocityMidiValue(
+                for: vel, layers: instrument.velocityLayers) else { return nil }
 
         let roots = buffers.keys.filter { buffers[$0]?[velMidi] != nil }
-        guard !roots.isEmpty else { return nil }
+        guard let root = SamplerSelection.nearestRoot(
+                to: midi, available: Array(roots)) else { return nil }
 
-        let root = roots.min(by: { abs($0 - midi) < abs($1 - midi) })!
         return (root, buffers[root]![velMidi]!)
+    }
+}
+
+// MARK: - Pure selection logic (no AVFoundation — unit-tested in SuperNovaPadTests)
+
+/// The note/velocity → sample selection rules, factored out of `SamplerEngine`
+/// so they can be tested without loading any audio. Keeping them pure also makes
+/// the tie-breaking deterministic, which the old `Dictionary.keys` ordering was not.
+enum SamplerSelection {
+
+    /// The recorded velocity layer (its file-suffix `midiValue`) that covers a
+    /// given MIDI velocity. Falls back to the last layer if none matches.
+    static func velocityMidiValue(for vel: Int,
+                                  layers: [SamplerInstrument.VelocityLayer]) -> Int? {
+        let layer = layers.first { vel >= $0.loVel && vel <= $0.hiVel } ?? layers.last
+        return layer?.midiValue
+    }
+
+    /// The available root note closest to `midi`. Ties resolve to the LOWER root
+    /// so the result is deterministic regardless of input ordering.
+    static func nearestRoot(to midi: Int, available roots: [Int]) -> Int? {
+        guard !roots.isEmpty else { return nil }
+        return roots.min { a, b in
+            let da = abs(a - midi), db = abs(b - midi)
+            return da != db ? da < db : a < b
+        }
     }
 }

@@ -40,6 +40,7 @@
 		A100001F /* Samples in Resources */              = {isa = PBXBuildFile; fileRef = A2000028 /* Samples */; };
 		A1000020 /* Diagnostics.swift in Sources */      = {isa = PBXBuildFile; fileRef = A2000029 /* Diagnostics.swift */; };
 		A1000021 /* DiagnosticsView.swift in Sources */  = {isa = PBXBuildFile; fileRef = A200002A /* DiagnosticsView.swift */; };
+		A1000022 /* SuperNovaPadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C /* SuperNovaPadTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -79,6 +80,8 @@
 		A2000028 /* Samples */                = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/Samples;   sourceTree = "<group>"; };
 		A2000029 /* Diagnostics.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift;     sourceTree = "<group>"; };
 		A200002A /* DiagnosticsView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		A200002B /* SuperNovaPadTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SuperNovaPadTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A200002C /* SuperNovaPadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperNovaPadTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +93,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A3000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -97,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				A4000001 /* OmnisphereSynth */,
+				A4000006 /* SuperNovaPadTests */,
 				A4000005 /* Frameworks */,
 				A5000001 /* Products */,
 			);
@@ -179,8 +190,17 @@
 			isa = PBXGroup;
 			children = (
 				A200000C /* SuperNovaPad.app */,
+				A200002B /* SuperNovaPadTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A4000006 /* SuperNovaPadTests */ = {
+			isa = PBXGroup;
+			children = (
+				A200002C /* SuperNovaPadTests.swift */,
+			);
+			path = SuperNovaPadTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -203,6 +223,24 @@
 			productReference = A200000C /* SuperNovaPad.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A6000002 /* SuperNovaPadTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A8000007 /* Build configuration list for PBXNativeTarget "SuperNovaPadTests" */;
+			buildPhases = (
+				A3000004 /* Sources */,
+				A3000005 /* Frameworks */,
+				A3000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A9000001 /* PBXTargetDependency */,
+			);
+			name = SuperNovaPadTests;
+			productName = SuperNovaPadTests;
+			productReference = A200002B /* SuperNovaPadTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -215,6 +253,10 @@
 				TargetAttributes = {
 					A6000001 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					A6000002 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = A6000001;
 					};
 				};
 			};
@@ -232,6 +274,7 @@
 			projectRoot = "";
 			targets = (
 				A6000001 /* SuperNovaPad */,
+				A6000002 /* SuperNovaPadTests */,
 			);
 		};
 /* End PBXProject section */
@@ -244,6 +287,13 @@
 				A1000012 /* Assets.xcassets in Resources */,
 				A100001C /* DrumSamples in Resources */,
 				A100001F /* Samples in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A3000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,7 +336,33 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A3000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000022 /* SuperNovaPadTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		AA000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A7000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A6000001;
+			remoteInfo = SuperNovaPad;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A9000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A6000001 /* SuperNovaPad */;
+			targetProxy = AA000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A8000003 /* Debug */ = {
@@ -471,6 +547,46 @@
 			};
 			name = Release;
 		};
+		A8000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AD6AUU8L6Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tommystrand.supernovapadTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SuperNovaPad.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SuperNovaPad";
+			};
+			name = Debug;
+		};
+		A8000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AD6AUU8L6Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tommystrand.supernovapadTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SuperNovaPad.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SuperNovaPad";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -488,6 +604,15 @@
 			buildConfigurations = (
 				A8000003 /* Debug */,
 				A8000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A8000007 /* Build configuration list for PBXNativeTarget "SuperNovaPadTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A8000008 /* Debug */,
+				A8000009 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
