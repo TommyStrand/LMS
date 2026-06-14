@@ -10,7 +10,7 @@ final class HammondVoice: AnyVoice {
     private static let detunes:    [Double] = [0.0,0.0,1.2,-0.8,0.5,-1.1,0.9,-0.6,0.3]
     private static let totalLevel: Double   = levels.reduce(0) { $0 + Double($1) }
 
-    var filterCutoffMod: Float = 0.5  // unused (organ), kept for protocol
+    var filterCutoffMod: Float = 0.5  // → brightness (pad Y): one-pole tone LPF
     var lfoDepthMod:     Float = 0.5  // → Leslie speed (high = fast/tremolo)
     var pitchBendSemitones: Float = 0
     var isFinished: Bool { envStage == .idle }
@@ -43,6 +43,7 @@ final class HammondVoice: AnyVoice {
     private var noiseState: UInt32 = 44444
     private var clickLpf:   Double = 0   // smooths the key-click noise
     private var smoothPitchBend: Double = 0
+    private var briL: Double = 0, briR: Double = 0   // brightness LPF state (pad Y)
 
     init(note: Int, velocity: Float, sampleRate: Double) {
         self.freq       = 440.0 * pow(2.0, Double(note - 69) / 12.0)
@@ -127,7 +128,15 @@ final class HammondVoice: AnyVoice {
         let amR = 0.72 + 0.28 * cos(angle)
 
         leslieWrite = (leslieWrite + 1) & (lesliBufSize - 1)
-        return (readAt(dA) * Float(amL), readAt(dB) * Float(amR))
+        let outL = readAt(dA) * Float(amL)
+        let outR = readAt(dB) * Float(amR)
+
+        // Brightness from the pad's vertical axis: a one-pole low-pass that opens
+        // up as filterCutoffMod rises, so playing higher sounds brighter/more open.
+        let coef = Double(0.08 + filterCutoffMod * 0.92)
+        briL += coef * (Double(outL) - briL)
+        briR += coef * (Double(outR) - briR)
+        return (Float(briL), Float(briR))
     }
 
     private func advanceEnv(dt: Double) -> Double {

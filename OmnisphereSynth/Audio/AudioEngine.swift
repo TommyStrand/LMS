@@ -558,7 +558,12 @@ final class AudioEngine: ObservableObject {
             return
         }
 
-        voice.filterCutoffMod = x
+        // Pad Y drives brightness (filter) and modulation intensity uniformly across
+        // every voice type; X only selects which note (handled in the view). Feeding
+        // the same vertical value to both gives one intuitive "open up" expression
+        // axis. (Previously X→filter, Y→LFO depth, so Y did almost nothing on organ/
+        // Rhodes/Hammond voices, which ignore the LFO-depth knob.)
+        voice.filterCutoffMod = y
         voice.lfoDepthMod     = y
         // Start before inserting into the shared dict so the render thread never
         // sees a voice that hasn't begun generating samples yet.
@@ -627,14 +632,15 @@ final class AudioEngine: ObservableObject {
     }
 
     func updateTouch(touchID: Int, x: Float, y: Float) {
+        // Y → brightness + modulation (see spawnVoice); X is note-only.
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
                 let v = liveVoice(controlID: touchID * 1000 + presetIdx)
-                v?.filterCutoffMod = x; v?.lfoDepthMod = y
+                v?.filterCutoffMod = y; v?.lfoDepthMod = y
             }
         } else {
             let v = liveVoice(controlID: touchID)
-            v?.filterCutoffMod = x
+            v?.filterCutoffMod = y
             v?.lfoDepthMod     = y
         }
     }
@@ -644,12 +650,12 @@ final class AudioEngine: ObservableObject {
             for presetIdx in indices {
                 let v = liveVoice(controlID: touchID * 1000 + presetIdx)
                 v?.pitchBendSemitones = semitones
-                v?.filterCutoffMod    = x; v?.lfoDepthMod = y
+                v?.filterCutoffMod    = y; v?.lfoDepthMod = y
             }
         } else {
             let v = liveVoice(controlID: touchID)
             v?.pitchBendSemitones = semitones
-            v?.filterCutoffMod    = x
+            v?.filterCutoffMod    = y
             v?.lfoDepthMod        = y
         }
     }

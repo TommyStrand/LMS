@@ -11,7 +11,7 @@ final class OrganVoice: AnyVoice {
     static let ratios: [Double]         = [0.5,  1.0, 1.5, 2.0, 3.0,  4.0,  5.0, 6.0, 8.0]
     private static let churchLevelSum: Double = churchLevels.reduce(0) { $0 + Double($1) }
 
-    var filterCutoffMod: Float = 0.5  // unused for organ, kept for protocol
+    var filterCutoffMod: Float = 0.5  // → brightness (pad Y): one-pole tone LPF
     var lfoDepthMod: Float = 0.5      // maps to tremulant depth
     var pitchBendSemitones: Float = 0
     var tremulantDepth: Float         // mutable so AudioEngine can push live knob changes
@@ -21,6 +21,7 @@ final class OrganVoice: AnyVoice {
     private let freq: Double
     private let velocity: Float
     private let sampleRate: Double
+    private var briState: Double = 0   // brightness LPF state (pad Y)
 
     private var phases: [Double]
     private var tremPhase: Double = 0
@@ -99,7 +100,10 @@ final class OrganVoice: AnyVoice {
         let env = advanceEnvelope(dt: dt)
         sum = (sum + click) * env
 
-        let s = Float(sum * Double(velocity))
+        // Brightness from the pad's vertical axis (filterCutoffMod): one-pole LPF.
+        let coef = Double(0.08 + filterCutoffMod * 0.92)
+        briState += coef * (sum * Double(velocity) - briState)
+        let s = Float(briState)
         return (s, s)
     }
 

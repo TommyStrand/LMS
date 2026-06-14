@@ -168,7 +168,7 @@ struct XYPadView: View {
             .components(separatedBy: CharacterSet.decimalDigits).joined()
         VStack {
             HStack {
-                Text(themeManager.playMode == .glissando ? "← Slide" : "← Brightness")
+                Text(themeManager.playMode == .glissando ? "← Slide pitch" : "← Notes")
                     .font(.system(size: 10, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText.opacity(0.35))
                 Spacer()
@@ -179,7 +179,7 @@ struct XYPadView: View {
             Spacer()
             HStack {
                 Spacer()
-                Text("Modulation ↑")
+                Text("Brightness ↑")
                     .font(.system(size: 10, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText.opacity(0.35))
                     .rotationEffect(.degrees(-90))

@@ -5,11 +5,12 @@ import Foundation
 // Natural exponential decay regardless of key state.
 final class RhodesVoice: AnyVoice {
 
-    var filterCutoffMod: Float = 0.5
+    var filterCutoffMod: Float = 0.5  // → brightness (pad Y): one-pole tone LPF
     var lfoDepthMod:     Float = 0.5  // → tremolo depth
     var pitchBendSemitones: Float = 0
     var isFinished: Bool { envStage == .idle && decayEnv < 0.0001 }
 
+    private var briState: Double = 0   // brightness LPF state (pad Y)
     private let freq:       Double
     private let velocity:   Float
     private let sampleRate: Double
@@ -86,7 +87,10 @@ final class RhodesVoice: AnyVoice {
         out *= trem
 
         let env = advanceEnv(dt: dt)
-        let s   = Float(out * env * decayEnv * Double(velocity) * 0.45)
+        // Brightness from the pad's vertical axis (filterCutoffMod): one-pole LPF.
+        let coef = Double(0.08 + filterCutoffMod * 0.92)
+        briState += coef * (out * env * decayEnv * Double(velocity) * 0.45 - briState)
+        let s = Float(briState)
         return (s, s)
     }
 

@@ -220,10 +220,10 @@ struct ContentView: View {
     private func transportGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
         HStack(spacing: 8) {
             transposeControls(theme: theme, accent: accent)
+            modeToggle(theme: theme, accent: accent, compact: compact)
             if !showDrumMachine {
                 playModeControl(theme: theme, accent: accent, compact: compact)
             }
-            drumButton(theme: theme, accent: accent, compact: compact)
         }
     }
 
@@ -351,30 +351,50 @@ struct ContentView: View {
         }
     }
 
-    /// Dedicated drum-machine toggle. It switches the whole play surface, so it
-    /// reads as a labelled, accent-filled pill (icon + "DRUMS") rather than one
-    /// anonymous icon among many. Compact (iPhone) falls back to icon-only.
-    private func drumButton(theme: AppTheme, accent: Color, compact: Bool) -> some View {
-        Button {
-            withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "music.quarternote.3")
-                    .font(.system(size: 15))
-                if !compact {
-                    Text("DRUMS")
-                        .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
-                        .kerning(1)
+    /// Top-level surface switch: PLAY (instrument) vs DRUMS. Always visible — both
+    /// segments are shown at all times, so returning from the drum machine to the
+    /// play grid is an obvious one-tap action rather than re-tapping a toggle.
+    private func modeToggle(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        HStack(spacing: 2) {
+            modeSegment(icon: "pianokeys", label: "PLAY", active: !showDrumMachine,
+                        theme: theme, accent: accent, compact: compact) {
+                if showDrumMachine {
+                    withAnimation(.spring(response: 0.3)) { showDrumMachine = false }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }
             }
-            .foregroundColor(showDrumMachine ? .white : theme.secondaryText)
-            .padding(.horizontal, compact ? 0 : 12)
-            .frame(width: compact ? 36 : nil, height: 36)
-            .background(showDrumMachine ? accent : theme.panelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                .strokeBorder(showDrumMachine ? accent : theme.panelBorder, lineWidth: 1))
+            modeSegment(icon: "music.quarternote.3", label: "DRUMS", active: showDrumMachine,
+                        theme: theme, accent: accent, compact: compact) {
+                if !showDrumMachine {
+                    withAnimation(.spring(response: 0.3)) { showDrumMachine = true }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+            }
+        }
+        .padding(3)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
+    }
+
+    private func modeSegment(icon: String, label: String, active: Bool,
+                             theme: AppTheme, accent: Color, compact: Bool,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 13, weight: .medium))
+                if !compact {
+                    Text(label)
+                        .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                        .kerning(0.5)
+                }
+            }
+            .foregroundColor(active ? .white : theme.secondaryText)
+            .padding(.horizontal, compact ? 0 : 10)
+            .frame(width: compact ? 34 : nil, height: 30)
+            .background(active ? accent : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 2))
         }
     }
 
