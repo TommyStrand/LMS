@@ -218,12 +218,12 @@ struct ContentView: View {
     // MARK: Header clusters
 
     private func transportGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
-        HStack(spacing: compact ? 8 : 8) {
+        HStack(spacing: 8) {
             transposeControls(theme: theme, accent: accent)
             if !showDrumMachine {
                 playModeControl(theme: theme, accent: accent, compact: compact)
             }
-            drumButton(theme: theme)
+            drumButton(theme: theme, accent: accent, compact: compact)
         }
     }
 
@@ -351,10 +351,30 @@ struct ContentView: View {
         }
     }
 
-    private func drumButton(theme: AppTheme) -> some View {
-        iconButton(systemName: "music.quarternote.3", active: showDrumMachine, theme: theme) {
+    /// Dedicated drum-machine toggle. It switches the whole play surface, so it
+    /// reads as a labelled, accent-filled pill (icon + "DRUMS") rather than one
+    /// anonymous icon among many. Compact (iPhone) falls back to icon-only.
+    private func drumButton(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        Button {
             withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "music.quarternote.3")
+                    .font(.system(size: 15))
+                if !compact {
+                    Text("DRUMS")
+                        .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                        .kerning(1)
+                }
+            }
+            .foregroundColor(showDrumMachine ? .white : theme.secondaryText)
+            .padding(.horizontal, compact ? 0 : 12)
+            .frame(width: compact ? 36 : nil, height: 36)
+            .background(showDrumMachine ? accent : theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                .strokeBorder(showDrumMachine ? accent : theme.panelBorder, lineWidth: 1))
         }
     }
 
