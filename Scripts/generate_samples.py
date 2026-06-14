@@ -103,67 +103,100 @@ def piano_sample(midi_note, velocity):
     return samples
 
 # ---------------------------------------------------------------------------
-# String Ensemble  –  6 detuned bowed voices, independent vibrato per voice
+# String Ensemble  –  12 detuned bowed voices, sawtooth-like spectrum
 # ---------------------------------------------------------------------------
-# v3 changes vs v2:
-#   • Harmonic ratios rebalanced to emphasise odd harmonics (3, 5, 7, 9).
-#     This creates the characteristic "hollow" bowed-string timbre and
-#     separates the ensemble clearly from piano's even-heavy spectrum.
-#   • Voice detunes spread wider (up to ±12 cents) for a lush section sound.
-#   • Vibrato depth doubled to ≈ ±10 cents — closer to real ensemble vibrato.
-#   • Slower bow-grab attack (180 ms vs 120 ms) — bowing is slower than a hammer.
-#   • Sustained rosin noise added at ~1 % of signal — gives continuous "bow on
-#     string" texture throughout the note without being audible as digital hiss.
+# v4 redesign — previous versions used odd-harmonic emphasis (clarinet-like)
+# and only 6 voices at ±12 cents.  Real bowed strings need:
+#
+#   1. SAWTOOTH spectrum (all harmonics, peak at h2 via body resonance, then
+#      rolling off like 1/k) — NOT odd-harmonic (that is clarinet).
+#   2. 12 voices spread ±34 cents to simulate a real orchestral section where
+#      players are never perfectly in unison.
+#   3. Per-voice independent bow-pressure flutter (±3 %, ~1.7 Hz) that
+#      thickens and animates the sound in a way vibrato alone cannot.
+#   4. Register-adaptive harmonic count: low strings (C2) are warm/dark (4
+#      partials); high strings (C6) are bright (12 partials).
+#   5. Exponential bow-engagement attack rather than a linear ramp.
+#   6. Bow-scrape onset transient that is NOT killed by the attack envelope
+#      (the scrape is loudest at t≈0 before the tone has built up).
 # ---------------------------------------------------------------------------
 STRING_DURATION = 4.0
 
-_STRING_DETUNES    = [0.0000,  0.0018, -0.0018,  0.0042, -0.0042,  0.0072]
-_STRING_AMPS       = [1.00,    0.75,    0.75,     0.45,    0.45,    0.22  ]
-# Odd harmonics (3, 5, 7, 9) boosted relative to even ones — bowed-string body resonance.
-_STRING_HARM       = [(1, 1.00), (2, 0.42), (3, 0.58), (4, 0.10),
-                      (5, 0.32), (6, 0.06), (7, 0.18), (8, 0.03), (9, 0.10)]
-_STRING_VIB_RATES  = [5.0,  4.8,  5.2,  5.0,  4.9,  5.4]
-_STRING_VIB_PHASES = [0.00, 0.37, 0.71, 1.23, 1.85, 2.54]
-_VIB_DEPTH = 0.0058      # ≈ ±10 cents (was 0.0028 / ±5 cents)
+_N_STR_VOICES  = 12
+# Detunes in fractional frequency: spread up to ±34 cents (≈ 0.020 ratio)
+_STR_DETUNES   = [ 0.0000,  0.0023, -0.0023,  0.0052, -0.0052,
+                   0.0087, -0.0087,  0.0122, -0.0122,  0.0156,
+                  -0.0156,  0.0197]
+_STR_V_AMPS    = [1.00, 0.93, 0.93, 0.83, 0.83,
+                  0.70, 0.70, 0.55, 0.55, 0.40,
+                  0.40, 0.26]
+_STR_VIB_RATES = [5.00, 4.87, 5.13, 4.94, 5.06,
+                  4.81, 5.19, 4.91, 5.10, 5.24,
+                  4.76, 5.03]
+# Phase offsets 30° apart so vibrato never fully aligns across voices
+_STR_VIB_PH    = [0.00, 0.52, 1.05, 1.57, 2.09,
+                  2.62, 3.14, 3.67, 4.19, 4.71,
+                  5.24, 5.76]
+_STR_VIB_DEPTH = 0.0040   # ≈ ±7 cents pitch vibrato per voice
+
+# Sawtooth spectrum shaped by violin/viola body resonance:
+# h2 is strongest (body resonance amplification), then roughly 1/k rolloff.
+# Full 12-partial table; n_harm is capped per register (see strings_sample).
+_STR_HARM_FULL = [
+    (1, 0.68), (2, 1.00), (3, 0.78), (4, 0.50),
+    (5, 0.36), (6, 0.24), (7, 0.17), (8, 0.12),
+    (9, 0.08), (10, 0.06), (11, 0.04), (12, 0.03),
+]
 
 def strings_sample(midi_note, velocity):
-    freq       = midi_to_hz(midi_note)
-    vel        = velocity / 127.0
-    n          = int(STRING_DURATION * SAMPLE_RATE)
-    sr         = float(SAMPLE_RATE)
-    attack_tau = 0.18   # slower bow grab vs piano hammer
-    vib_onset  = 0.50
-    vib_ramp   = 0.30
-    n_voices   = len(_STRING_DETUNES)
-    n_harm     = len(_STRING_HARM)
+    freq = midi_to_hz(midi_note)
+    vel  = velocity / 127.0
+    n    = int(STRING_DURATION * SAMPLE_RATE)
+    sr   = float(SAMPLE_RATE)
 
-    # Per-voice, per-harmonic phase accumulators — avoids the sin(f·t) drift.
-    phases = [[0.0] * n_harm for _ in range(n_voices)]
+    # Register-adaptive partial count: MIDI 36 → 4, MIDI 84 → 12
+    n_harm = max(4, min(12, 4 + (midi_note - 36) // 6))
+    # Nyquist guard — drop partials that would alias
+    while n_harm > 1 and freq * _STR_HARM_FULL[n_harm - 1][0] > sr * 0.45:
+        n_harm -= 1
+
+    raw = _STR_HARM_FULL[:n_harm]
+    norm = sum(a for _, a in raw)
+    harm_amps = [(h, a / norm) for h, a in raw]
+
+    attack_tau = 0.25   # exponential bow-engagement time constant
+    vib_onset  = 0.50   # seconds before vibrato begins
+    vib_ramp   = 0.35   # vibrato fade-in duration
+
+    phases = [[0.0] * n_harm for _ in range(_N_STR_VOICES)]
     _seed(midi_note * 31)
 
     samples = []
     for i in range(n):
-        t       = i / sr
-        atk     = min(t / attack_tau, 1.0)
-        rel     = max(0.0, min(1.0, (STRING_DURATION - t) / 0.5))
+        t   = i / sr
+        atk = 1.0 - math.exp(-t / attack_tau)            # smooth bow engagement
+        rel = max(0.0, min(1.0, (STRING_DURATION - t) / 0.6))
         vib_env = max(0.0, min(1.0, (t - vib_onset) / vib_ramp))
 
         s = 0.0
-        for vi in range(n_voices):
-            vib_rate  = _STRING_VIB_RATES[vi]
-            vib_phase = _STRING_VIB_PHASES[vi]
-            det       = _STRING_DETUNES[vi]
-            str_amp   = _STRING_AMPS[vi]
-            vib = 1.0 + _VIB_DEPTH * math.sin(
-                2.0 * math.pi * vib_rate * t + vib_phase) * vib_env
-            f_base = freq * (1.0 + det) * vib
-            for hi, (h, ha) in enumerate(_STRING_HARM):
+        for vi in range(_N_STR_VOICES):
+            vib     = 1.0 + _STR_VIB_DEPTH * math.sin(
+                2.0 * math.pi * _STR_VIB_RATES[vi] * t + _STR_VIB_PH[vi]) * vib_env
+            # Slow bow-pressure flutter per voice — desynchronised ±3 % at ~1.7 Hz
+            flutter = 1.0 + 0.030 * math.sin(
+                2.0 * math.pi * 1.7 * t + _STR_VIB_PH[vi] * 1.3)
+            f_base  = freq * (1.0 + _STR_DETUNES[vi]) * vib
+            va      = _STR_V_AMPS[vi] * flutter
+            for hi, (h, ha) in enumerate(harm_amps):
                 phases[vi][hi] += 2.0 * math.pi * f_base * h / sr
-                s += str_amp * ha * math.sin(phases[vi][hi])
+                s += va * ha * math.sin(phases[vi][hi])
 
-        bow_grab    = _lcg() * 0.20 * math.exp(-t * 8.0)  # initial bow scrape
-        bow_sustain = _lcg() * 0.025                        # continuous rosin roughness (~1 % of signal)
-        samples.append((s + bow_grab + bow_sustain) * atk * rel * vel * 0.12)
+        tone = s * atk * rel * vel * 0.10
+        # Bow-catch transient: loudest at t=0, gone by ~200 ms; NOT gated by atk
+        bow_scrape = _lcg() * 0.12 * math.exp(-t * 15.0) * vel
+        # Rosin roughness: tracks amplitude envelope throughout the note
+        rosin      = _lcg() * (0.005 + vel * 0.004) * atk * rel
+        samples.append(tone + bow_scrape + rosin)
     return samples
 
 # ---------------------------------------------------------------------------
