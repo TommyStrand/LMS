@@ -38,6 +38,8 @@
 		A100001D /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* NowPlayingManager.swift */; };
 		A100001E /* SamplerEngine.swift in Sources */    = {isa = PBXBuildFile; fileRef = A2000027 /* SamplerEngine.swift */; };
 		A100001F /* Samples in Resources */              = {isa = PBXBuildFile; fileRef = A2000028 /* Samples */; };
+		A1000020 /* Diagnostics.swift in Sources */      = {isa = PBXBuildFile; fileRef = A2000029 /* Diagnostics.swift */; };
+		A1000021 /* DiagnosticsView.swift in Sources */  = {isa = PBXBuildFile; fileRef = A200002A /* DiagnosticsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -75,6 +77,8 @@
 		A2000026 /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
 		A2000027 /* SamplerEngine.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SamplerEngine.swift; sourceTree = "<group>"; };
 		A2000028 /* Samples */                = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/Samples;   sourceTree = "<group>"; };
+		A2000029 /* Diagnostics.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift;     sourceTree = "<group>"; };
+		A200002A /* DiagnosticsView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -132,6 +136,7 @@
 				A2000023 /* GrooveImporter.swift */,
 				A2000026 /* NowPlayingManager.swift */,
 				A2000027 /* SamplerEngine.swift */,
+				A2000029 /* Diagnostics.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -146,6 +151,7 @@
 				A2000013 /* SettingsView.swift */,
 				A2000015 /* PianoKeyboardView.swift */,
 				A2000020 /* DrumMachineView.swift */,
+				A200002A /* DiagnosticsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -275,6 +281,8 @@
 				A100001B /* FavoritesStore.swift in Sources */,
 				A100001D /* NowPlayingManager.swift in Sources */,
 				A100001E /* SamplerEngine.swift in Sources */,
+				A1000020 /* Diagnostics.swift in Sources */,
+				A1000021 /* DiagnosticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

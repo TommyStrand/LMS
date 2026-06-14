@@ -256,6 +256,7 @@ final class AudioEngine: ObservableObject {
         setupMasterNode()
         try? engine.start()
         applyPreset(currentPreset)
+        Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
     }
 
     // MARK: - Layer management
@@ -325,8 +326,14 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Preset
 
+    /// Total sampler slots producing audio across all loaded instruments.
+    var samplerActiveVoiceCount: Int {
+        samplerEngines.values.reduce(0) { $0 + $1.activeVoiceCount }
+    }
+
     func applyPreset(_ preset: SynthPreset) {
         currentPreset = preset
+        Diagnostics.shared.log("Preset → \(preset.name)")
 
         reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
         reverb.wetDryMix = preset.reverbMix * 100

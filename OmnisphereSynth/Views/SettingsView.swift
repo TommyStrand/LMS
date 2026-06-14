@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var engine: AudioEngine
     @EnvironmentObject var themeManager: ThemeManager
     @Environment(\.dismiss) private var dismiss
 
@@ -156,6 +157,32 @@ struct SettingsView: View {
                         .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
                             .strokeBorder(theme.panelBorder, lineWidth: 1))
                         .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+
+                        // MARK: Diagnostics
+                        sectionHeader("DIAGNOSTICS", theme: theme)
+
+                        NavigationLink {
+                            DiagnosticsView(engine: engine)
+                                .environmentObject(themeManager)
+                        } label: {
+                            HStack {
+                                Image(systemName: "waveform.path.ecg")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(theme.accentOverride ?? .accentColor)
+                                Text("Performance & Event Log")
+                                    .font(.system(size: 14, weight: .medium, design: theme.fontDesign))
+                                    .foregroundColor(theme.primaryText)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(theme.secondaryText)
+                            }
+                            .padding(16)
+                            .background(theme.panelBackground)
+                            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+                                .strokeBorder(theme.panelBorder, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
+                        }
 
                         // MARK: About
                         sectionHeader("ABOUT", theme: theme)

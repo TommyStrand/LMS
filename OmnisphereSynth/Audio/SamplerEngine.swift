@@ -60,6 +60,14 @@ final class SamplerEngine {
     /// Uses FileManager enumeration (same technique as DrumEngine) which works
     /// reliably with Xcode folder references, unlike Bundle.url(forResource:subdirectory:).
     func load() {
+        // Key by "<folder>/<filename>" — NOT the bare filename. All three sampler
+        // instruments name their files identically (e.g. grand_piano/60_64.wav,
+        // string_ensemble/60_64.wav, concert_flute/60_64.wav). Keying on the bare
+        // filename let the last-enumerated folder overwrite the others, so every
+        // instrument ended up playing whichever folder won the collision (flute,
+        // in practice) for any note present in more than one folder. Including the
+        // parent folder makes each sample unique. Relies on the Samples directory
+        // being added to Xcode as a folder reference (structure preserved in bundle).
         var wavMap: [String: URL] = [:]
         if let en = FileManager.default.enumerator(
             at: Bundle.main.bundleURL,
@@ -67,15 +75,17 @@ final class SamplerEngine {
             options: [.skipsHiddenFiles]
         ) {
             for case let url as URL in en where url.pathExtension.lowercased() == "wav" {
-                wavMap[url.deletingPathExtension().lastPathComponent] = url
+                let folder = url.deletingLastPathComponent().lastPathComponent
+                let name   = url.deletingPathExtension().lastPathComponent
+                wavMap["\(folder)/\(name)"] = url
             }
         }
 
         var loaded = 0
         for layer in instrument.velocityLayers {
             for root in instrument.rootNotes {
-                let name = "\(root)_\(layer.midiValue)"
-                guard let url  = wavMap[name],
+                let key = "\(instrument.id)/\(root)_\(layer.midiValue)"
+                guard let url  = wavMap[key],
                       let file = try? AVAudioFile(forReading: url),
                       let mono = AVAudioPCMBuffer(
                           pcmFormat: file.processingFormat,
@@ -86,12 +96,15 @@ final class SamplerEngine {
                       // requires the buffer channel count to match exactly.
                       let buf  = makeStereo(mono)
                 else { continue }
+                applyEdgeFades(buf)   // declick: guarantee zero-crossing start/end
                 buffers[root, default: [:]][layer.midiValue] = buf
                 loaded += 1
             }
         }
         let expected = instrument.rootNotes.count * instrument.velocityLayers.count
-        print("SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded")
+        let summary = "SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded"
+        print(summary)
+        Diagnostics.shared.log(summary)
     }
 
     // MARK: - Playback
@@ -116,7 +129,31 @@ final class SamplerEngine {
         // Samples carry their own decay/release tail — let them play to completion.
     }
 
+    /// Number of pool slots currently producing audio — surfaced for diagnostics.
+    var activeVoiceCount: Int {
+        pool.reduce(0) { $0 + ($1.player.isPlaying ? 1 : 0) }
+    }
+
     // MARK: - Helpers
+
+    /// Ramps the first and last few milliseconds of every channel to zero so the
+    /// buffer always begins and ends on a zero crossing. Without this, samples
+    /// whose first/last frame is non-zero produce an audible click on note-on and
+    /// when a slot is recycled mid-tail.
+    private func applyEdgeFades(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
+        guard let ch = buf.floatChannelData else { return }
+        let n = Int(buf.frameLength)
+        let f = min(n / 2, Int(ms / 1000.0 * buf.format.sampleRate))
+        guard f > 0 else { return }
+        for c in 0..<Int(buf.format.channelCount) {
+            let data = ch[c]
+            for i in 0..<f {
+                let g = Float(i) / Float(f)
+                data[i]         *= g
+                data[n - 1 - i] *= g
+            }
+        }
+    }
 
     private func nextSlot() -> VoiceSlot {
         // Prefer an idle slot to avoid cutting release tails on busy pools.

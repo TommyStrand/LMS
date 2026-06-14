@@ -38,6 +38,17 @@ final class SynthVoice: AnyVoice {
     private var bq_x1: Double = 0, bq_x2: Double = 0
     private var bq_y1: Double = 0, bq_y2: Double = 0
 
+    // Cached, normalised biquad coefficients. Recomputing cos/sin and the full
+    // coefficient set every sample (per voice) is the single most expensive thing
+    // in the render loop; under a held polyphonic chord it overloads the audio
+    // thread and causes dropouts that sound like notes cutting out. We update the
+    // coefficients once per BIQUAD_UPDATE samples instead — at 44.1 kHz that is a
+    // ~2.8 kHz update rate, far faster than the smoothed cutoff actually moves, so
+    // there is no audible stepping.
+    private var cb0 = 0.0, cb1 = 0.0, cb2 = 0.0, ca1 = 0.0, ca2 = 0.0
+    private var coefCounter = 0
+    private static let BIQUAD_UPDATE = 16
+
     private let freq: Double
 
     var isFinished: Bool { envStage == .idle }
@@ -74,11 +85,13 @@ final class SynthVoice: AnyVoice {
         if vibPhase > 1 { vibPhase -= 1 }
         let vibRamp = max(0.0, min(1.0, (noteAge - 0.4) / 0.4))
         let vibCents = sin(vibPhase * 2 * .pi) * vibRamp * 22.0
-        let vibFactor = pow(2.0, vibCents / 1200.0)
+        // Skip the pow() while vibrato is still silent (first 400 ms of every note).
+        let vibFactor = vibCents != 0 ? pow(2.0, vibCents / 1200.0) : 1.0
 
         // Smooth pitch glide
         smoothPitchBend += (Double(pitchBendSemitones) - smoothPitchBend) * 0.0003
-        let bendFactor = pow(2.0, smoothPitchBend / 12.0)
+        // Skip the pow() unless a glissando bend is actually in effect.
+        let bendFactor = abs(smoothPitchBend) > 1e-6 ? pow(2.0, smoothPitchBend / 12.0) : 1.0
 
         // Frequency with detune + LFO pitch mod + vibrato + glissando bend
         var f1 = freq * vibFactor * bendFactor
@@ -163,21 +176,29 @@ final class SynthVoice: AnyVoice {
     }
 
     private func applyBiquadLP(input: Double, cutoff: Double, resonance: Double) -> Double {
-        let w0 = 2.0 * .pi * cutoff / sampleRate
-        let cosW = cos(w0)
-        let sinW = sin(w0)
-        let q = max(0.5, Double(1.0 / (1.0 - resonance * 0.95)))
-        let alpha = sinW / (2.0 * q)
+        // Recompute coefficients only every BIQUAD_UPDATE samples (counter starts at
+        // 0 so the very first sample always computes a valid set).
+        if coefCounter == 0 {
+            let w0 = 2.0 * .pi * cutoff / sampleRate
+            let cosW = cos(w0)
+            let sinW = sin(w0)
+            let q = max(0.5, Double(1.0 / (1.0 - resonance * 0.95)))
+            let alpha = sinW / (2.0 * q)
 
-        let b0 = (1.0 - cosW) / 2.0
-        let b1 = 1.0 - cosW
-        let b2 = (1.0 - cosW) / 2.0
-        let a0 = 1.0 + alpha
-        let a1 = -2.0 * cosW
-        let a2 = 1.0 - alpha
+            let b0 = (1.0 - cosW) / 2.0
+            let b1 = 1.0 - cosW
+            let b2 = (1.0 - cosW) / 2.0
+            let a0 = 1.0 + alpha
+            let a1 = -2.0 * cosW
+            let a2 = 1.0 - alpha
 
-        let y = (b0 / a0) * input + (b1 / a0) * bq_x1 + (b2 / a0) * bq_x2
-                - (a1 / a0) * bq_y1 - (a2 / a0) * bq_y2
+            cb0 = b0 / a0; cb1 = b1 / a0; cb2 = b2 / a0
+            ca1 = a1 / a0; ca2 = a2 / a0
+        }
+        coefCounter += 1
+        if coefCounter >= SynthVoice.BIQUAD_UPDATE { coefCounter = 0 }
+
+        let y = cb0 * input + cb1 * bq_x1 + cb2 * bq_x2 - ca1 * bq_y1 - ca2 * bq_y2
 
         bq_x2 = bq_x1; bq_x1 = input
         bq_y2 = bq_y1; bq_y1 = y

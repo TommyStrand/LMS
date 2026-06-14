@@ -51,7 +51,7 @@ struct ContentView: View {
         .preferredColorScheme(themeManager.current.colorScheme)
         .onAppear { midi.attach(to: engine) }
         .sheet(isPresented: $showSettings) {
-            SettingsView().environmentObject(themeManager)
+            SettingsView(engine: engine).environmentObject(themeManager)
         }
         .sheet(isPresented: $showShareSheet, onDismiss: { recorder.exportURL = nil }) {
             if let url = recorder.exportURL {
