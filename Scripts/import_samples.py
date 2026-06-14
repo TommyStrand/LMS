@@ -18,9 +18,15 @@ Supported sources
                   lovel-hivel, sample=, default_path=). Pass the .sfz file OR a
                   folder containing one as --input.
 
-  generic         Any WAV folder where each file is a single pitch.
-                  Reads MIDI note number from the filename (first integer found).
-                  Set --soft-glob and --hard-glob to filter by dynamic marking.
+  generic         Any folder where each file is a single pitch (WAV/MP3/AIFF/FLAC).
+                  Note is read from the filename as either a MIDI number or a
+                  note name (A4, Cs5='C#5', Ab3). Dynamic words/abbreviations
+                  (pianissimo..fortissimo, pp..ff) pick the soft/hard layer.
+                  --require / --exclude filter by articulation, e.g.
+                  --require arco-normal (strings) to skip pizzicato/tremolo.
+                  This is the mode for the Philharmonia Orchestra library:
+                    violin_A4_15_forte_arco-normal.mp3
+                  MP3/AIFF are decoded via afconvert (macOS) or ffmpeg.
 
 Usage examples
 ──────────────
@@ -42,11 +48,19 @@ Usage examples
       --source sfz \\
       --input ~/Downloads/ChurchOrganEmulation
 
+  # Philharmonia strings → String Ensemble (sustained bowed takes only):
   python3 Scripts/import_samples.py \\
       --source generic \\
-      --input ~/Downloads/MyFluteSamples \\
+      --input ~/Downloads/all-samples/violin \\
+      --output OmnisphereSynth/Resources/Samples/string_ensemble \\
+      --require arco-normal
+
+  # Philharmonia flute → Concert Flute:
+  python3 Scripts/import_samples.py \\
+      --source generic \\
+      --input ~/Downloads/all-samples/flute \\
       --output OmnisphereSynth/Resources/Samples/concert_flute \\
-      --soft-glob pp --hard-glob ff
+      --require normal --exclude flutter,staccato,trill
 
 By default the matching SamplerInstrument descriptor's `rootNotes` in
 OmnisphereSynth/Models/SynthPreset.swift is patched to match the files that
@@ -62,8 +76,11 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import wave
 from math import gcd
 from pathlib import Path
@@ -94,13 +111,48 @@ def note_to_midi(name: str, octave: int) -> int:
     """Return MIDI note number; C4 = 60."""
     return _PITCH_CLASS[name] + (octave + 1) * 12
 
+# ── Audio decode (MP3/AIFF/FLAC → WAV) ────────────────────────────────────────
+
+def _decoder() -> list[str] | None:
+    """Return a command template for decoding to mono/16-bit/44100 WAV.
+    Prefers macOS afconvert, falls back to ffmpeg. None if neither exists."""
+    if shutil.which("afconvert"):
+        return ["afconvert", "-f", "WAVE", "-d", f"LEI16@{TARGET_SR}", "-c", "1"]
+    if shutil.which("ffmpeg"):
+        return ["ffmpeg", "-y", "-loglevel", "error", "-ac", "1", "-ar", str(TARGET_SR)]
+    return None
+
+def ensure_wav(src: Path) -> tuple[Path, Path | None]:
+    """If src is already WAV, return it unchanged. Otherwise decode to a temp
+    mono/16-bit/44100 WAV and return (temp_path, temp_path_to_clean_up)."""
+    if src.suffix.lower() == ".wav":
+        return src, None
+    dec = _decoder()
+    if dec is None:
+        raise RuntimeError(
+            f"cannot decode {src.suffix} — install ffmpeg, or run on macOS "
+            f"(afconvert). WAV inputs need no decoder.")
+    tmp = Path(tempfile.mkstemp(suffix=".wav")[1])
+    if dec[0] == "afconvert":
+        cmd = dec + [str(src), str(tmp)]
+    else:  # ffmpeg: input before output
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
+               "-ac", "1", "-ar", str(TARGET_SR), str(tmp)]
+    subprocess.run(cmd, check=True)
+    return tmp, tmp
+
 # ── Audio conversion ──────────────────────────────────────────────────────────
 
 def convert_wav(src: Path) -> bytes:
-    """Return mono 16-bit 44100 Hz PCM bytes for any WAV input."""
-    if HAS_SCIPY:
-        return _convert_scipy(src)
-    return _convert_stdlib(src)
+    """Return mono 16-bit 44100 Hz PCM bytes for any WAV/MP3/AIFF/FLAC input."""
+    wav, cleanup = ensure_wav(src)
+    try:
+        if HAS_SCIPY:
+            return _convert_scipy(wav)
+        return _convert_stdlib(wav)
+    finally:
+        if cleanup is not None:
+            cleanup.unlink(missing_ok=True)
 
 def _convert_scipy(src: Path) -> bytes:
     sr, data = wavfile.read(str(src))
@@ -379,33 +431,94 @@ def _pick_sfz(regions: list, want: str) -> Path | None:
     return max(regions, key=lambda r: r[1] - r[0])[2]
 
 _MIDI_IN_NAME_RE = re.compile(r"\b(\d{1,3})\b")
+# A note-name token: letter + optional accidental (#, s=sharp, b=flat) + octave.
+_NAME_TOKEN_RE = re.compile(r"^([A-Ga-g])([#sb]?)(-?\d{1,2})$")
 
-def scan_generic(src: Path, soft_glob: str, hard_glob: str) -> dict[int, dict]:
-    """
-    Generic: look for the first 1-3 digit integer in the filename as MIDI note.
-    soft_glob / hard_glob are substrings to match (e.g. "pp", "ff").
-    """
-    out: dict[int, dict] = {}
-    for f in sorted(src.rglob("*.wav")):
-        m = _MIDI_IN_NAME_RE.search(f.stem)
-        if not m:
+# Dynamic markings → loudness rank (0 = softest, 5 = loudest). Used to pick which
+# take feeds the soft (target ~1) vs hard (target ~4) velocity layer.
+_DYNAMIC_RANK = {
+    "pianissimo": 0, "pp": 0,
+    "piano": 1, "p": 1,
+    "mezzo-piano": 2, "mezzopiano": 2, "mp": 2,
+    "mezzo-forte": 3, "mezzoforte": 3, "mf": 3,
+    "forte": 4, "f": 4,
+    "fortissimo": 5, "ff": 5, "fff": 5,
+}
+_DEFAULT_RANK = 3   # unknown dynamic → treat as mezzo-forte
+
+def parse_name_note(token: str) -> int | None:
+    """'A4' -> 69, 'Cs5' -> 73 (s=sharp), 'Ab3' -> 56 (b=flat). None if not a note."""
+    m = _NAME_TOKEN_RE.match(token)
+    if not m:
+        return None
+    letter = m.group(1).upper()
+    acc    = m.group(2).lower()
+    base   = _PITCH_CLASS.get(letter)
+    if base is None:
+        return None
+    if acc in ("#", "s"):
+        base += 1
+    elif acc == "b":
+        base -= 1
+    return base + (int(m.group(3)) + 1) * 12
+
+def _note_from_filename(stem: str, note_style: str) -> int | None:
+    """Extract a MIDI note. note_style: 'auto' tries note-name tokens first then
+    a bare integer; 'name' only note-name; 'midi' only integer."""
+    tokens = re.split(r"[ _\-.]+", stem)
+    if note_style in ("auto", "name"):
+        for tok in tokens:
+            n = parse_name_note(tok)
+            if n is not None and 0 <= n <= 127:
+                return n
+        if note_style == "name":
+            return None
+    # MIDI integer (skip note-name tokens so e.g. duration '15' isn't mistaken).
+    m = _MIDI_IN_NAME_RE.search(stem)
+    if m:
+        v = int(m.group(1))
+        if 0 <= v <= 127:
+            return v
+    return None
+
+def _dynamic_rank(name_lc: str) -> int:
+    tokens = re.split(r"[ _\-.]+", name_lc)
+    for tok in tokens:                       # exact token match first (precise)
+        if tok in _DYNAMIC_RANK:
+            return _DYNAMIC_RANK[tok]
+    for word in ("fortissimo", "mezzo-forte", "forte",
+                 "pianissimo", "mezzo-piano", "piano"):   # longest-first substring
+        if word in name_lc:
+            return _DYNAMIC_RANK[word]
+    return _DEFAULT_RANK
+
+_AUDIO_EXTS = {".wav", ".mp3", ".aif", ".aiff", ".flac"}
+
+def scan_generic(src: Path, note_style: str,
+                 require: list[str], exclude: list[str]) -> dict[int, list]:
+    """Returns dict[midi] -> list of (rank, path). Filters by articulation:
+    a file must contain every --require substring and no --exclude substring."""
+    out: dict[int, list] = {}
+    for f in sorted(src.rglob("*")):
+        if f.suffix.lower() not in _AUDIO_EXTS:
             continue
-        midi = int(m.group(1))
-        if not (0 <= midi <= 127):
-            continue
-        out.setdefault(midi, {})
         name_lc = f.name.lower()
-        if soft_glob and soft_glob.lower() in name_lc:
-            out[midi]["soft"] = f
-        elif hard_glob and hard_glob.lower() in name_lc:
-            out[midi]["hard"] = f
-        else:
-            out[midi].setdefault("soft", f)
-            out[midi].setdefault("hard", f)
+        if require and not all(r in name_lc for r in require):
+            continue
+        if exclude and any(x in name_lc for x in exclude):
+            continue
+        midi = _note_from_filename(f.stem, note_style)
+        if midi is None:
+            continue
+        out.setdefault(midi, []).append((_dynamic_rank(name_lc), f))
     return out
 
-def _pick_generic(vel_map: dict, want: str) -> Path | None:
-    return vel_map.get(want) or vel_map.get("hard") or vel_map.get("soft")
+def _pick_generic(regions: list, want: str) -> Path | None:
+    """Pick the take whose dynamic rank is closest to soft (~1) or hard (~4)."""
+    if not regions:
+        return None
+    target = 1 if want == "soft" else 4
+    return min(regions, key=lambda r: (abs(r[0] - target), r[0]))[1]
 
 # ── Core importer ─────────────────────────────────────────────────────────────
 
@@ -542,10 +655,14 @@ def main() -> None:
                    help="Folder (or .sfz file) containing the downloaded sample library")
     p.add_argument("--output", type=Path, default=None,
                    help="Output folder (default: OmnisphereSynth/Resources/Samples/<id>)")
-    p.add_argument("--soft-glob", default="pp",
-                   help="Substring in filename indicating soft dynamic (generic source)")
-    p.add_argument("--hard-glob", default="ff",
-                   help="Substring in filename indicating hard dynamic (generic source)")
+    p.add_argument("--note-style", choices=["auto", "name", "midi"], default="auto",
+                   help="How to read the note from a generic filename (default auto)")
+    p.add_argument("--require", default="",
+                   help="Comma-separated substrings a generic file MUST contain "
+                        "(e.g. arco-normal). Use to keep sustained takes only.")
+    p.add_argument("--exclude", default="",
+                   help="Comma-separated substrings that disqualify a generic file "
+                        "(e.g. pizz,tremolo,staccato,trill)")
     p.add_argument("--octave-offset", type=int, default=0,
                    help="Add N octaves to SFZ note names (use 1 if a library treats c3 as MIDI 60)")
     p.add_argument("--patch", type=Path,
@@ -583,7 +700,9 @@ def main() -> None:
         pick_fn = _pick_sfz
     else:  # generic
         iid     = args.output.name if args.output else "unknown"
-        fmap    = scan_generic(src, args.soft_glob, args.hard_glob)
+        require = [s.strip().lower() for s in args.require.split(",") if s.strip()]
+        exclude = [s.strip().lower() for s in args.exclude.split(",") if s.strip()]
+        fmap    = scan_generic(src, args.note_style, require, exclude)
         pick_fn = _pick_generic
 
     out = args.output or (Path("OmnisphereSynth/Resources/Samples") / iid)
