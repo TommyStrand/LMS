@@ -21,9 +21,15 @@ final class MIDIController: ObservableObject {
     private var sustainedNotes: Set<Int> = []
     private let touchIDBase = 0x10000
 
-    init(engine: AudioEngine) {
-        self.engine = engine
+    init() {
         setup()
+    }
+
+    /// Wire up the audio engine after construction. Kept separate from `init`
+    /// so the controller can be created in a `@StateObject` initialiser without
+    /// eagerly allocating the engine on every SwiftUI view re-init.
+    func attach(to engine: AudioEngine) {
+        self.engine = engine
     }
 
     deinit {

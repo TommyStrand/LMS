@@ -4,9 +4,15 @@ import AVKit
 import MediaPlayer
 
 struct ContentView: View {
-    @StateObject private var engine: AudioEngine
-    @StateObject private var themeManager: ThemeManager
-    @StateObject private var midi: MIDIController
+    // Plain property initialisers: SwiftUI evaluates a @StateObject's wrapped
+    // value exactly once and discards re-inits. Allocating these objects eagerly
+    // in a custom init() instead spins up a new AudioEngine (AVAudioSession +
+    // AVAudioEngine + AVAudioSourceNode) and MIDIController (CoreMIDI client/port)
+    // on every view re-init, all of which SwiftUI then throws away — churning
+    // mach-port/dispatch objects and risking use-after-free crashes.
+    @StateObject private var engine       = AudioEngine()
+    @StateObject private var themeManager = ThemeManager()
+    @StateObject private var midi         = MIDIController()
     @StateObject private var drum      = DrumEngine()
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var recorder  = AudioRecorder()
@@ -20,13 +26,6 @@ struct ContentView: View {
 
     // Initialise NowPlayingManager once so remote commands are registered early
     private let nowPlaying = NowPlayingManager.shared
-
-    init() {
-        let e = AudioEngine()
-        _engine       = StateObject(wrappedValue: e)
-        _themeManager = StateObject(wrappedValue: ThemeManager())
-        _midi         = StateObject(wrappedValue: MIDIController(engine: e))
-    }
 
     var currentPreset: SynthPreset { SynthPreset.presets[selectedPresetIndex] }
 
@@ -50,6 +49,7 @@ struct ContentView: View {
         }
         .environmentObject(themeManager)
         .preferredColorScheme(themeManager.current.colorScheme)
+        .onAppear { midi.attach(to: engine) }
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(themeManager)
         }
