@@ -49,7 +49,10 @@ struct ContentView: View {
         }
         .environmentObject(themeManager)
         .preferredColorScheme(themeManager.current.colorScheme)
-        .onAppear { midi.attach(to: engine) }
+        .onAppear {
+            midi.attach(to: engine)
+            Diagnostics.shared.startSampling()   // drives the always-on header meter
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(engine: engine).environmentObject(themeManager)
         }
@@ -130,7 +133,7 @@ struct ContentView: View {
 
     private func iphoneLayout(theme: AppTheme) -> some View {
         VStack(spacing: 0) {
-            header(theme: theme)
+            header(theme: theme, compact: true)
 
             PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                 engine.applyPreset(preset)
@@ -156,7 +159,7 @@ struct ContentView: View {
 
     private func ipadLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
         VStack(spacing: 0) {
-            header(theme: theme)
+            header(theme: theme, compact: false)
 
             HStack(alignment: .top, spacing: 0) {
                 // Left panel: presets + controls
@@ -186,144 +189,210 @@ struct ContentView: View {
     }
 
     // MARK: - Header
+    //
+    // Organised into three labelled clusters separated by dividers rather than a
+    // single row of multi-purpose icons:
+    //   • Transport  — transpose, play mode, drum machine
+    //   • Status     — voice activity, MIDI, live CPU/RAM meter
+    //   • System     — controls, record, AirPlay, settings
+    // `compact` (iPhone) tightens spacing, drops the dividers and the brand
+    // subtitle, and keeps the cycling play-mode button; expanded (iPad) uses the
+    // extra width for an explicit segmented play-mode picker and the full meter.
 
-    private func header(theme: AppTheme) -> some View {
+    private func header(theme: AppTheme, compact: Bool) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("SUPERNOVA PAD")
-                    .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
-                    .foregroundColor(accent.opacity(0.9))
-                    .kerning(3)
-                Text("Touch Synthesizer")
-                    .font(.system(size: 18, weight: .thin, design: theme.fontDesign))
-                    .foregroundColor(theme.primaryText)
-            }
-
-            Spacer()
-
-            // Transpose controls
-            HStack(spacing: 0) {
-                Button {
-                    if themeManager.transposeOctave > -3 {
-                        themeManager.transposeOctave -= 1
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                        .frame(width: 30, height: 30)
-                }
-
-                Text(themeManager.transposeOctave == 0
-                     ? "OCT"
-                     : (themeManager.transposeOctave > 0
-                        ? "+\(themeManager.transposeOctave)"
-                        : "\(themeManager.transposeOctave)"))
-                    .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
-                    .foregroundColor(themeManager.transposeOctave == 0
-                                     ? theme.secondaryText
-                                     : accent)
-                    .frame(width: 28)
-
-                Button {
-                    if themeManager.transposeOctave < 3 {
-                        themeManager.transposeOctave += 1
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                        .frame(width: 30, height: 30)
-                }
-            }
-            .background(theme.panelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                    .strokeBorder(theme.panelBorder, lineWidth: 1)
-            )
-
-            // Voice indicators
-            HStack(spacing: 4) {
-                ForEach(0..<6, id: \.self) { i in
-                    Circle()
-                        .fill(i < engine.voices.count ? accent : theme.primaryText.opacity(0.12))
-                        .frame(width: 7, height: 7)
-                        .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
-                }
-            }
-
-            // MIDI indicator
-            if midi.isConnected {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(accent.opacity(midiActivityLit ? 1.0 : 0.3))
-                        .frame(width: 6, height: 6)
-                        .animation(.easeOut(duration: 0.2), value: midiActivityLit)
-                    Text(String((midi.primaryDeviceName ?? "MIDI").prefix(12)))
-                        .font(.system(size: 9, weight: .semibold, design: theme.fontDesign))
-                        .foregroundColor(theme.secondaryText)
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(theme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                        .strokeBorder(theme.panelBorder, lineWidth: 1)
-                )
-            }
-
-            // Drum machine toggle
-            iconButton(systemName: "music.quarternote.3",
-                       active: showDrumMachine, theme: theme) {
-                withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            }
-
-            // Play mode toggle (hidden while drum machine is active)
-            if !showDrumMachine {
-                iconButton(systemName: themeManager.playMode.icon, active: false, theme: theme) {
-                    withAnimation(.spring(response: 0.3)) {
-                        let modes = PlayMode.allCases
-                        let idx   = modes.firstIndex(of: themeManager.playMode) ?? 0
-                        themeManager.selectPlayMode(modes[(idx + 1) % modes.count])
-                    }
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
-            }
-
-            // Controls toggle
-            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
-                       active: showControls, theme: theme) {
-                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
-            }
-
-            // Record / export
-            recordButton(theme: theme, accent: accent)
-
-            // AirPlay output picker
-            AirPlayButton(tintColor: UIColor(theme.secondaryText))
-                .frame(width: 36, height: 36)
-                .background(theme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                        .strokeBorder(theme.panelBorder, lineWidth: 1)
-                )
-
-            // Settings
-            iconButton(systemName: "gearshape", active: false, theme: theme) {
-                showSettings = true
-            }
+        return HStack(spacing: compact ? 8 : 14) {
+            brandView(theme: theme, accent: accent, compact: compact)
+            Spacer(minLength: 8)
+            transportGroup(theme: theme, accent: accent, compact: compact)
+            if !compact { groupDivider(theme: theme) }
+            statusGroup(theme: theme, accent: accent, compact: compact)
+            if !compact { groupDivider(theme: theme) }
+            systemGroup(theme: theme, accent: accent)
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 4)
+    }
+
+    // MARK: Header clusters
+
+    private func transportGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        HStack(spacing: compact ? 8 : 8) {
+            transposeControls(theme: theme, accent: accent)
+            if !showDrumMachine {
+                playModeControl(theme: theme, accent: accent, compact: compact)
+            }
+            drumButton(theme: theme)
+        }
+    }
+
+    private func statusGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            if !compact { voiceDots(theme: theme, accent: accent) }
+            if midi.isConnected { midiChip(theme: theme, accent: accent) }
+            HeaderMeter(compact: compact, theme: theme)
+        }
+    }
+
+    private func systemGroup(theme: AppTheme, accent: Color) -> some View {
+        HStack(spacing: 8) {
+            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
+                       active: showControls, theme: theme) {
+                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
+            }
+            recordButton(theme: theme, accent: accent)
+            AirPlayButton(tintColor: UIColor(theme.secondaryText))
+                .frame(width: 36, height: 36)
+                .background(theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+                .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                    .strokeBorder(theme.panelBorder, lineWidth: 1))
+            iconButton(systemName: "gearshape", active: false, theme: theme) {
+                showSettings = true
+            }
+        }
+    }
+
+    // MARK: Header pieces
+
+    private func brandView(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("SUPERNOVA PAD")
+                .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(accent.opacity(0.9))
+                .kerning(compact ? 1.5 : 3)
+            if !compact {
+                Text("Touch Synthesizer")
+                    .font(.system(size: 18, weight: .thin, design: theme.fontDesign))
+                    .foregroundColor(theme.primaryText)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func transposeControls(theme: AppTheme, accent: Color) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                if themeManager.transposeOctave > -3 {
+                    themeManager.transposeOctave -= 1
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                    .frame(width: 30, height: 30)
+            }
+
+            Text(themeManager.transposeOctave == 0
+                 ? "OCT"
+                 : (themeManager.transposeOctave > 0
+                    ? "+\(themeManager.transposeOctave)"
+                    : "\(themeManager.transposeOctave)"))
+                .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                .foregroundColor(themeManager.transposeOctave == 0 ? theme.secondaryText : accent)
+                .frame(width: 28)
+
+            Button {
+                if themeManager.transposeOctave < 3 {
+                    themeManager.transposeOctave += 1
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                    .frame(width: 30, height: 30)
+            }
+        }
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func playModeControl(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+        if compact {
+            // Compact: single cycling button (no room for a segmented control).
+            iconButton(systemName: themeManager.playMode.icon, active: false, theme: theme) {
+                withAnimation(.spring(response: 0.3)) {
+                    let modes = PlayMode.allCases
+                    let idx   = modes.firstIndex(of: themeManager.playMode) ?? 0
+                    themeManager.selectPlayMode(modes[(idx + 1) % modes.count])
+                }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+        } else {
+            // Expanded: explicit segmented picker — no more guessing what the
+            // cycling icon will switch to.
+            HStack(spacing: 2) {
+                ForEach(PlayMode.allCases) { mode in
+                    let isOn = themeManager.playMode == mode
+                    Button {
+                        withAnimation(.spring(response: 0.3)) { themeManager.selectPlayMode(mode) }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Image(systemName: mode.icon)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(isOn ? .white : theme.secondaryText)
+                            .frame(width: 36, height: 30)
+                            .background(isOn ? accent : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 2))
+                    }
+                }
+            }
+            .padding(3)
+            .background(theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+                .strokeBorder(theme.panelBorder, lineWidth: 1))
+        }
+    }
+
+    private func drumButton(theme: AppTheme) -> some View {
+        iconButton(systemName: "music.quarternote.3", active: showDrumMachine, theme: theme) {
+            withAnimation(.spring(response: 0.3)) { showDrumMachine.toggle() }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    private func voiceDots(theme: AppTheme, accent: Color) -> some View {
+        HStack(spacing: 4) {
+            ForEach(0..<6, id: \.self) { i in
+                Circle()
+                    .fill(i < engine.voices.count ? accent : theme.primaryText.opacity(0.12))
+                    .frame(width: 7, height: 7)
+                    .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
+            }
+        }
+    }
+
+    private func midiChip(theme: AppTheme, accent: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(accent.opacity(midiActivityLit ? 1.0 : 0.3))
+                .frame(width: 6, height: 6)
+                .animation(.easeOut(duration: 0.2), value: midiActivityLit)
+            Text(String((midi.primaryDeviceName ?? "MIDI").prefix(12)))
+                .font(.system(size: 9, weight: .semibold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
+    }
+
+    private func groupDivider(theme: AppTheme) -> some View {
+        RoundedRectangle(cornerRadius: 0.5)
+            .fill(theme.panelBorder)
+            .frame(width: 1, height: 26)
+            .opacity(0.7)
     }
 
     private func iconButton(systemName: String, active: Bool, theme: AppTheme, action: @escaping () -> Void) -> some View {
@@ -376,6 +445,44 @@ struct ContentView: View {
             .frame(width: 36, height: 36)
         }
         .disabled(recorder.isExporting)
+    }
+}
+
+// MARK: - Header CPU / RAM meter
+
+/// Always-visible performance readout in the header. Observes the shared
+/// Diagnostics sampler (running for the app's lifetime). Compact mode shows CPU
+/// only; expanded adds memory. Turns red when CPU is pegged so a performance
+/// problem is obvious at a glance while playing.
+struct HeaderMeter: View {
+    @ObservedObject private var diag = Diagnostics.shared
+    let compact: Bool
+    let theme: AppTheme
+
+    var body: some View {
+        let cpuWarn = diag.cpuPercent >= 85
+        return HStack(spacing: 7) {
+            metric(icon: "cpu", value: String(format: "%.0f%%", diag.cpuPercent), warn: cpuWarn)
+            if !compact {
+                metric(icon: "memorychip",
+                       value: String(format: "%.0f MB", diag.memoryMB),
+                       warn: diag.memoryMB > 300)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
+            .strokeBorder(cpuWarn ? Color.red.opacity(0.65) : theme.panelBorder, lineWidth: 1))
+    }
+
+    private func metric(icon: String, value: String, warn: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(value).font(.system(size: 10, weight: .semibold, design: .monospaced))
+        }
+        .foregroundColor(warn ? .red : theme.secondaryText)
     }
 }
 

@@ -92,11 +92,10 @@ struct DiagnosticsView: View {
             samplerVoices = engine.samplerActiveVoiceCount
         }
         .onAppear {
-            diag.startSampling()
+            diag.startSampling()   // idempotent; the header meter keeps it running
             synthVoices   = engine.voices.count
             samplerVoices = engine.samplerActiveVoiceCount
         }
-        .onDisappear { diag.stopSampling() }
     }
 
     private func meter(_ label: String, value: String, warn: Bool, theme: AppTheme) -> some View {

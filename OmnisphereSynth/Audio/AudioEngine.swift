@@ -167,6 +167,21 @@ final class AudioEngine: ObservableObject {
             let left  = ld.assumingMemoryBound(to: Float.self)
             let right = rd.assumingMemoryBound(to: Float.self)
 
+            // Decide which effects are active ONCE per buffer. Skipping disabled
+            // effects is what keeps idle/light CPU low — previously every one of
+            // these custom per-sample processors ran 44 100×/sec regardless of its
+            // amount, which pinned the audio thread even in silence.
+            let doAutoWah  = p.autoWahAmount    > 0.001
+            let doGrit     = p.gritAmount       > 0.001
+            let doLofi     = p.lofiAmount       > 0.001
+            let doSpace    = p.spaceEchoAmount  > 0.001
+            let doTape     = p.brokenTape       > 0.001
+            let doBloom    = p.bloomAmount      > 0.005
+            let doMod      = p.tremulantDepth   > 0.001 || p.chorusMix > 0.001
+            let doDist     = p.distortionAmount > 0.001
+            let doPhaser   = p.phaserAmount     > 0.001
+            let doModDelay = p.modDelayAmount   > 0.001
+
             for i in 0..<Int(frameCount) {
                 var l: Float = 0.0
                 var r: Float = 0.0
@@ -180,43 +195,53 @@ final class AudioEngine: ObservableObject {
                     r += vr * gain
                 }
 
-                // Effects chain applied ONCE on the summed signal.
-                l = self.masterAutoWahL.process(l, amount: p.autoWahAmount)
-                r = self.masterAutoWahR.process(r, amount: p.autoWahAmount)
-
-                l = self.masterGrit.process(l, amount: p.gritAmount)
-                r = self.masterGrit.process(r, amount: p.gritAmount)
-
-                l = self.masterLofiL.process(l, amount: p.lofiAmount)
-                r = self.masterLofiR.process(r, amount: p.lofiAmount)
-
-                l = self.masterSpaceEchoL.process(l, amount: p.spaceEchoAmount)
-                r = self.masterSpaceEchoR.process(r, amount: p.spaceEchoAmount)
-
-                let btAmt = p.brokenTape
-                l = self.masterTapeL.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
-                r = self.masterTapeR.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
-
-                let blAmt = p.bloomAmount
-                if blAmt > 0.005 {
+                // Effects chain applied ONCE on the summed signal — each gated by
+                // whether it's actually enabled for the current preset.
+                if doAutoWah {
+                    l = self.masterAutoWahL.process(l, amount: p.autoWahAmount)
+                    r = self.masterAutoWahR.process(r, amount: p.autoWahAmount)
+                }
+                if doGrit {
+                    l = self.masterGrit.process(l, amount: p.gritAmount)
+                    r = self.masterGrit.process(r, amount: p.gritAmount)
+                }
+                if doLofi {
+                    l = self.masterLofiL.process(l, amount: p.lofiAmount)
+                    r = self.masterLofiR.process(r, amount: p.lofiAmount)
+                }
+                if doSpace {
+                    l = self.masterSpaceEchoL.process(l, amount: p.spaceEchoAmount)
+                    r = self.masterSpaceEchoR.process(r, amount: p.spaceEchoAmount)
+                }
+                if doTape {
+                    let btAmt = p.brokenTape
+                    l = self.masterTapeL.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
+                    r = self.masterTapeR.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
+                }
+                if doBloom {
+                    let blAmt = p.bloomAmount
                     let (bl, br) = self.masterBloom.process((l + r) * 0.5, amount: blAmt)
                     l = l * (1.0 - blAmt * 0.3) + bl
                     r = r * (1.0 - blAmt * 0.3) + br
                 }
-
-                let (ml, mr) = self.masterMod.process(l: l, r: r,
-                                                       tremDepth: p.tremulantDepth,
-                                                       chorusMix: p.chorusMix)
-                l = ml; r = mr
-
-                l = tubeSaturate(l, drive: p.distortionAmount)
-                r = tubeSaturate(r, drive: p.distortionAmount)
-
-                l = self.masterPhaserL.process(l, amount: p.phaserAmount)
-                r = self.masterPhaserR.process(r, amount: p.phaserAmount)
-
-                l = self.masterModDelayL.process(l, amount: p.modDelayAmount)
-                r = self.masterModDelayR.process(r, amount: p.modDelayAmount)
+                if doMod {
+                    let (ml, mr) = self.masterMod.process(l: l, r: r,
+                                                          tremDepth: p.tremulantDepth,
+                                                          chorusMix: p.chorusMix)
+                    l = ml; r = mr
+                }
+                if doDist {
+                    l = tubeSaturate(l, drive: p.distortionAmount)
+                    r = tubeSaturate(r, drive: p.distortionAmount)
+                }
+                if doPhaser {
+                    l = self.masterPhaserL.process(l, amount: p.phaserAmount)
+                    r = self.masterPhaserR.process(r, amount: p.phaserAmount)
+                }
+                if doModDelay {
+                    l = self.masterModDelayL.process(l, amount: p.modDelayAmount)
+                    r = self.masterModDelayR.process(r, amount: p.modDelayAmount)
+                }
 
                 left[i]  = l
                 right[i] = r
@@ -588,7 +613,12 @@ final class AudioEngine: ObservableObject {
     private func feedAnalysis(_ sample: Float) {
         analysisBuffer[analysisIndex % 128] = sample
         analysisIndex += 1
-        if analysisIndex % 64 == 0 {
+        // Publish at ~30 Hz, NOT every 64 samples (~689 Hz). waveformSamples is
+        // @Published, so every update invalidates every view observing the engine;
+        // at 689 Hz that re-rendered the whole UI continuously and was a major
+        // idle-CPU sink. 30 Hz is smooth for any visualiser and keeps the header's
+        // voice-activity indicators live.
+        if analysisIndex % 1470 == 0 {
             let snap = analysisBuffer
             DispatchQueue.main.async { [weak self] in self?.waveformSamples = snap }
         }

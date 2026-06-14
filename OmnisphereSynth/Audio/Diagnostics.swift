@@ -60,7 +60,7 @@ final class Diagnostics: ObservableObject {
     func startSampling() {
         guard timer == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        t.schedule(deadline: .now(), repeating: 1.0)
+        t.schedule(deadline: .now(), repeating: 0.5)
         t.setEventHandler { [weak self] in
             guard let self else { return }
             let cpu = Diagnostics.currentCPUPercent()
