@@ -157,11 +157,11 @@ def convert_wav(src: Path) -> bytes:
 def _convert_scipy(src: Path) -> bytes:
     sr, data = wavfile.read(str(src))
 
-    # Stereo → mono
-    if data.ndim > 1:
-        data = data.mean(axis=1)
-
-    # Normalise to float64 [-1, 1]
+    # Normalise to float64 [-1, 1] BEFORE taking the channel mean.
+    # np.mean() on an int16 array returns float64, so the dtype check
+    # must happen while `data` still has its original integer dtype —
+    # otherwise stereo int16 audio (values in [-32768, 32767]) falls into
+    # the float branch and gets clipped to ±1 → 100% distortion.
     if data.dtype == np.int16:
         f = data.astype(np.float64) / 32768.0
     elif data.dtype == np.int32:
@@ -170,6 +170,10 @@ def _convert_scipy(src: Path) -> bytes:
         f = data.astype(np.float64)
     else:
         raise ValueError(f"Unsupported dtype {data.dtype} in {src}")
+
+    # Stereo → mono (safe now that values are normalised floats)
+    if f.ndim > 1:
+        f = f.mean(axis=1)
 
     # Resample
     if sr != TARGET_SR:
