@@ -16,6 +16,7 @@ struct ContentView: View {
     @StateObject private var drum      = DrumEngine()
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var recorder  = AudioRecorder()
+    @StateObject private var looper    = LooperEngine()
     @State private var selectedPresetIndex = 0
     @State private var showControls    = true
     @State private var showSettings    = false
@@ -23,6 +24,7 @@ struct ContentView: View {
     @State private var showDrumMachine = false
     @State private var showShareSheet  = false
     @State private var recBlink        = false
+    @State private var showBlob        = false   // blob background visualizer
 
     // Initialise NowPlayingManager once so remote commands are registered early
     private let nowPlaying = NowPlayingManager.shared
@@ -52,6 +54,8 @@ struct ContentView: View {
         .onAppear {
             midi.attach(to: engine)
             Diagnostics.shared.startSampling()   // drives the always-on header meter
+            looper.audioEngine = engine
+            engine.looper      = looper
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(engine: engine).environmentObject(themeManager)
@@ -119,20 +123,40 @@ struct ContentView: View {
 
     @ViewBuilder
     private func playSurface(preset: SynthPreset) -> some View {
+        let theme  = themeManager.current
+        let accent = theme.accent(for: Color(hex: preset.color))
+
         if showDrumMachine {
             DrumMachineView(drum: drum, favorites: favorites)
-        } else if themeManager.playMode == .keyboard {
-            PianoKeyboardView(engine: engine, preset: preset)
         } else {
-            // .grid and .glissando both use the XY pad; glissando changes touch behaviour
-            XYPadView(engine: engine, preset: preset)
+            ZStack {
+                // Optional blob background — sits behind the play surface and
+                // reacts to the live waveform without blocking touch input.
+                if showBlob {
+                    BlobVisualizerView(engine: engine, color: accent, theme: theme)
+                        .allowsHitTesting(false)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius * 1.4))
+                }
+
+                switch themeManager.playMode {
+                case .keyboard:
+                    PianoKeyboardView(engine: engine, preset: preset)
+                case .isomorphic:
+                    IsomorphicPadView(engine: engine, preset: preset)
+                default:
+                    // .grid and .glissando both use the XY pad; glissando changes
+                    // touch behaviour inside the view.
+                    XYPadView(engine: engine, preset: preset)
+                }
+            }
         }
     }
 
     // MARK: - iPhone layout
 
     private func iphoneLayout(theme: AppTheme) -> some View {
-        VStack(spacing: 0) {
+        let accent = theme.accent(for: Color(hex: currentPreset.color))
+        return VStack(spacing: 0) {
             header(theme: theme, compact: true)
 
             PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
@@ -145,9 +169,13 @@ struct ContentView: View {
                 .padding(.top, 10)
                 .frame(maxHeight: .infinity)
 
+            // Looper strip — always visible so recording can start instantly
+            LooperView(looper: looper, theme: theme, accent: accent)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+
             if showControls {
                 ControlsView(engine: engine)
-                    .padding(.top, 10)
+                    .padding(.top, 4)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -158,7 +186,8 @@ struct ContentView: View {
     // MARK: - iPad layout (side-by-side)
 
     private func ipadLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
+        let accent = theme.accent(for: Color(hex: currentPreset.color))
+        return VStack(spacing: 0) {
             header(theme: theme, compact: false)
 
             HStack(alignment: .top, spacing: 0) {
@@ -167,6 +196,8 @@ struct ContentView: View {
                     PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                         engine.applyPreset(preset)
                     }
+
+                    LooperView(looper: looper, theme: theme, accent: accent)
 
                     if showControls {
                         ControlsView(engine: engine)
@@ -240,6 +271,10 @@ struct ContentView: View {
             iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
                        active: showControls, theme: theme) {
                 withAnimation(.spring(response: 0.3)) { showControls.toggle() }
+            }
+            // Blob visualizer toggle
+            iconButton(systemName: "waveform.circle", active: showBlob, theme: theme) {
+                withAnimation(.spring(response: 0.4)) { showBlob.toggle() }
             }
             recordButton(theme: theme, accent: accent)
             AirPlayButton(tintColor: UIColor(theme.secondaryText))

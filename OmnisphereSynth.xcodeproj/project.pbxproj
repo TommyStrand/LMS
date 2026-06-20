@@ -41,6 +41,10 @@
 		A1000020 /* Diagnostics.swift in Sources */      = {isa = PBXBuildFile; fileRef = A2000029 /* Diagnostics.swift */; };
 		A1000021 /* DiagnosticsView.swift in Sources */  = {isa = PBXBuildFile; fileRef = A200002A /* DiagnosticsView.swift */; };
 		A1000022 /* SuperNovaPadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200002C /* SuperNovaPadTests.swift */; };
+		A1000023 /* LooperEngine.swift in Sources */      = {isa = PBXBuildFile; fileRef = A200002D /* LooperEngine.swift */; };
+		A1000024 /* LooperView.swift in Sources */         = {isa = PBXBuildFile; fileRef = A200002E /* LooperView.swift */; };
+		A1000025 /* IsomorphicPadView.swift in Sources */  = {isa = PBXBuildFile; fileRef = A200002F /* IsomorphicPadView.swift */; };
+		A1000026 /* BlobVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* BlobVisualizerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +86,10 @@
 		A200002A /* DiagnosticsView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		A200002B /* SuperNovaPadTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SuperNovaPadTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200002C /* SuperNovaPadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuperNovaPadTests.swift; sourceTree = "<group>"; };
+		A200002D /* LooperEngine.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LooperEngine.swift;      sourceTree = "<group>"; };
+		A200002E /* LooperView.swift */        = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LooperView.swift;        sourceTree = "<group>"; };
+		A200002F /* IsomorphicPadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IsomorphicPadView.swift; sourceTree = "<group>"; };
+		A2000030 /* BlobVisualizerView.swift */= {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobVisualizerView.swift;sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +156,7 @@
 				A2000026 /* NowPlayingManager.swift */,
 				A2000027 /* SamplerEngine.swift */,
 				A2000029 /* Diagnostics.swift */,
+				A200002D /* LooperEngine.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -163,6 +172,9 @@
 				A2000015 /* PianoKeyboardView.swift */,
 				A2000020 /* DrumMachineView.swift */,
 				A200002A /* DiagnosticsView.swift */,
+				A200002E /* LooperView.swift */,
+				A200002F /* IsomorphicPadView.swift */,
+				A2000030 /* BlobVisualizerView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -333,6 +345,10 @@
 				A100001E /* SamplerEngine.swift in Sources */,
 				A1000020 /* Diagnostics.swift in Sources */,
 				A1000021 /* DiagnosticsView.swift in Sources */,
+				A1000023 /* LooperEngine.swift in Sources */,
+				A1000024 /* LooperView.swift in Sources */,
+				A1000025 /* IsomorphicPadView.swift in Sources */,
+				A1000026 /* BlobVisualizerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

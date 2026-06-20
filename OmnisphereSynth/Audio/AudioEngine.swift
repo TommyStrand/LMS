@@ -487,9 +487,16 @@ final class AudioEngine: ObservableObject {
         return se
     }
 
+    // MARK: - Looper hook (weak — owned by ContentView's @StateObject)
+    weak var looper: LooperEngine?
+
     // MARK: - Touch Events
 
     func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
+        // Don't capture playback-originating events back into the looper (they
+        // use touchIDs >= 90000 so the looper can skip re-recording its own output).
+        if touchID < 90000 { looper?.recordOn(touchID: touchID, note: note,
+                                               velocity: velocity, x: x, y: y) }
         if isLayeringMode && !activeLayerIndices.isEmpty {
             noteOnLayer(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
         } else {
@@ -591,6 +598,7 @@ final class AudioEngine: ObservableObject {
     }
 
     func noteOff(touchID: Int) {
+        if touchID < 90000 { looper?.recordOff(touchID: touchID) }
         if isLayeringMode, let layerIndices = noteOnLayerIndices[touchID] {
             for presetIdx in layerIndices {
                 let cid    = touchID * 1000 + presetIdx

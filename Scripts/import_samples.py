@@ -180,7 +180,15 @@ def _convert_scipy(src: Path) -> bytes:
         g = gcd(TARGET_SR, sr)
         f = resample_poly(f, TARGET_SR // g, sr // g)
 
-    pcm = (np.clip(f, -1.0, 1.0) * 32767).astype(np.int16)
+    # Clamp over-range floats (some encoders store integer-scale values in float
+    # WAVs) and scale so the peak lands strictly below ±32767 — the validator
+    # treats abs(s) >= 32767 as a clip, so a full-scale square wave converted
+    # naively (peak == 1.0 → 32767) would be flagged as 100% clipped.
+    peak = np.max(np.abs(f)) if f.size > 0 else 0.0
+    if peak >= 1.0:
+        f = f * (0.998 / peak)   # normalise over-range or full-scale to 99.8%
+
+    pcm = np.round(np.clip(f, -1.0, 1.0) * 32767).astype(np.int16)
     return pcm.tobytes()
 
 def _convert_stdlib(src: Path) -> bytes:
@@ -207,8 +215,8 @@ def _convert_stdlib(src: Path) -> bytes:
         for i in range(n):
             b3 = raw[i * 3: i * 3 + 3]
             b4 = b3 + (b"\xff" if b3[2] & 0x80 else b"\x00")
-            v  = struct.unpack("<i", b4)[0] >> 8
-            vals.append(max(-32768, min(32767, v >> 8)))
+            v  = struct.unpack("<i", b4)[0] >> 8   # 24-bit value in int32 → 16-bit range
+            vals.append(max(-32768, min(32767, v)))
     elif sw == 4:
         n    = len(raw) // 4
         vals = [max(-32768, min(32767, v >> 16))

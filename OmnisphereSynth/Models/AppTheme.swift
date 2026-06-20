@@ -3,25 +3,28 @@ import SwiftUI
 // MARK: - Play mode
 
 enum PlayMode: String, CaseIterable, Identifiable {
-    case grid      = "grid"
-    case glissando = "glissando"
-    case keyboard  = "keyboard"
+    case grid        = "grid"
+    case glissando   = "glissando"
+    case keyboard    = "keyboard"
+    case isomorphic  = "isomorphic"
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .grid:      return "Grid"
-        case .glissando: return "Glissando"
-        case .keyboard:  return "Keyboard"
+        case .grid:       return "Grid"
+        case .glissando:  return "Glissando"
+        case .keyboard:   return "Keyboard"
+        case .isomorphic: return "Fretboard"
         }
     }
 
     var icon: String {
         switch self {
-        case .grid:      return "square.grid.3x3"
-        case .glissando: return "hand.draw"
-        case .keyboard:  return "pianokeys"
+        case .grid:       return "square.grid.3x3"
+        case .glissando:  return "hand.draw"
+        case .keyboard:   return "pianokeys"
+        case .isomorphic: return "rectangle.grid.3x2"
         }
     }
 }
