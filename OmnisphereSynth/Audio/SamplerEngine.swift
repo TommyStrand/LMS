@@ -28,6 +28,13 @@ final class SamplerEngine {
     private let poolSize   = 12
     private var lastStealLog: TimeInterval = 0   // throttles voice-steal logging
 
+    // Looping-voice bookkeeping (main-thread only). slotNote maps a pool index to
+    // the MIDI note currently sustaining on it so noteOff can release that slot;
+    // slotToken is a per-slot generation counter so an in-flight volume ramp can
+    // tell when a newer note-on/note-off has superseded it and bail out.
+    private var slotNote:  [Int: Int] = [:]
+    private var slotToken: [Int: Int] = [:]
+
     // rootNote → velocityMidiValue → buffer
     private var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
 
@@ -103,7 +110,11 @@ final class SamplerEngine {
                 // and it turns that whole class of bug into an immediate debug crash.
                 assert(url.deletingLastPathComponent().lastPathComponent == instrument.id,
                        "SamplerEngine[\(instrument.id)] resolved \(key) to \(url.path) — wrong folder")
-                applyEdgeFades(buf)   // declick: guarantee zero-crossing start/end
+                // One-shots get zero-crossing edge fades to declick note-on and
+                // slot recycling. Looping buffers must NOT — an edge fade would
+                // dip to silence at every loop wrap; they rely on their seamless
+                // crossfade (generator) and the engine's note-on/off volume ramps.
+                if !instrument.loops { applyEdgeFades(buf) }
                 buffers[root, default: [:]][layer.midiValue] = buf
                 loaded += 1
             }
@@ -125,19 +136,57 @@ final class SamplerEngine {
         let vel  = Int(velocity)
         guard let (root, buf) = findBuffer(midi: midi, vel: vel) else { return }
 
-        let slot = nextSlot()
+        let idx  = nextSlotIndex()
+        let slot = pool[idx]
         if slot.player.isPlaying { slot.player.stop() }
+
+        // Bump the slot's generation so any ramp still scheduled on it stops.
+        let token = (slotToken[idx] ?? 0) + 1
+        slotToken[idx] = token
 
         // Rate = 2^(semitones/12), clamped to AVAudioUnitVarispeed valid range [0.25, 4.0].
         let rate = Float(pow(2.0, Double(midi - root) / 12.0))
         slot.varispeed.rate = max(0.25, min(4.0, rate))
-        slot.player.volume  = max(0.3, Float(vel) / 127.0)
-        slot.player.scheduleBuffer(buf, at: nil, options: [])
-        slot.player.play()
+
+        let target = max(0.3, Float(vel) / 127.0)
+        let options: AVAudioPlayerNodeBufferOptions = instrument.loops ? [.loops] : []
+
+        if instrument.loops {
+            // Sustain by looping; ramp volume up so the (non-zero-crossing) loop
+            // start doesn't click, and remember the note so noteOff can release it.
+            slotNote[idx]      = midi
+            slot.player.volume = 0
+            slot.player.scheduleBuffer(buf, at: nil, options: options)
+            slot.player.play()
+            rampVolume(idx: idx, token: token, to: target, duration: instrument.attack)
+        } else {
+            // One-shot: play once at full level and let the tail ring out.
+            slotNote.removeValue(forKey: idx)
+            slot.player.volume = target
+            slot.player.scheduleBuffer(buf, at: nil, options: options)
+            slot.player.play()
+        }
     }
 
     func noteOff(_ note: UInt8) {
-        // Samples carry their own decay/release tail — let them play to completion.
+        // One-shots carry their own decay tail — let them ring out.
+        guard instrument.loops else { return }
+        let midi = Int(note)
+        // Collect first — releasing mutates slotNote, which can't be done while
+        // iterating it.
+        let indices = slotNote.compactMap { $0.value == midi ? $0.key : nil }
+        for idx in indices {
+            let token = (slotToken[idx] ?? 0) + 1
+            slotToken[idx] = token
+            slotNote.removeValue(forKey: idx)
+            let player = pool[idx].player
+            // Fade the looping note out, then stop it (unless a newer note-on has
+            // already claimed the slot, in which case the token guard skips stop).
+            rampVolume(idx: idx, token: token, to: 0, duration: instrument.release) { [weak self] in
+                guard let self = self, self.slotToken[idx] == token else { return }
+                player.stop()
+            }
+        }
     }
 
     /// Number of pool slots currently producing audio — surfaced for diagnostics.
@@ -166,9 +215,9 @@ final class SamplerEngine {
         }
     }
 
-    private func nextSlot() -> VoiceSlot {
+    private func nextSlotIndex() -> Int {
         // Prefer an idle slot to avoid cutting release tails on busy pools.
-        if let idle = pool.first(where: { !$0.player.isPlaying }) { return idle }
+        if let idle = pool.firstIndex(where: { !$0.player.isPlaying }) { return idle }
         // All slots busy — steal round-robin. Stealing truncates a still-ringing
         // note and can click, so surface it (throttled) as a likely culprit when
         // troubleshooting audio artefacts during dense playing.
@@ -177,9 +226,28 @@ final class SamplerEngine {
             lastStealLog = now
             Diagnostics.shared.log("Sampler[\(instrument.id)] stealing voices — pool full (\(poolSize))")
         }
-        let slot = pool[poolCursor % poolSize]
+        let idx = poolCursor % poolSize
         poolCursor += 1
-        return slot
+        return idx
+    }
+
+    /// Linearly ramps a slot's player volume to `target` over `duration`, stepping
+    /// on the main run loop. Each step checks `slotToken[idx]` so a ramp that has
+    /// been superseded by a newer note-on/note-off on the same slot stops cleanly.
+    /// Runs entirely at control rate (never on the audio render thread).
+    private func rampVolume(idx: Int, token: Int, to target: Float,
+                            duration: TimeInterval, completion: (() -> Void)? = nil) {
+        let player  = pool[idx].player
+        let stepDur = 0.008
+        let steps   = max(1, Int(duration / stepDur))
+        let start   = player.volume
+        func step(_ k: Int) {
+            guard slotToken[idx] == token else { return }   // superseded
+            player.volume = start + (target - start) * Float(k) / Float(steps)
+            if k >= steps { completion?(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDur) { step(k + 1) }
+        }
+        step(0)
     }
 
     /// Duplicates a mono buffer into a non-interleaved stereo buffer.

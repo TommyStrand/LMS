@@ -143,6 +143,16 @@ struct SamplerInstrument: Equatable, Hashable {
     let rootNotes:   [Int]    // MIDI note numbers of recorded root samples
     let velocityLayers: [VelocityLayer]
 
+    // Sustaining instruments (strings/flute) loop their buffer so a held note
+    // rings indefinitely instead of dying when the recording ends. Their WAVs
+    // are generated as seamless loops (no baked attack/release); the engine
+    // applies a note-on attack ramp and a note-off release ramp of these lengths.
+    // One-shot instruments (piano, and real recorded imports) leave loops=false
+    // and ring out for the sample's natural length.
+    var loops:   Bool   = false
+    var attack:  Double = 0.004   // note-on volume fade (seconds), looping voices
+    var release: Double = 0.20    // note-off volume fade (seconds), looping voices
+
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
         let loVel:     Int   // lowest MIDI velocity mapped to this zone
@@ -163,7 +173,8 @@ struct SamplerInstrument: Equatable, Hashable {
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
-        ]
+        ],
+        loops: true, attack: 0.09, release: 0.35   // slow bow swell + smooth release
     )
     static let concertFlute = SamplerInstrument(
         id: "concert_flute", displayName: "Concert Flute",
@@ -171,7 +182,8 @@ struct SamplerInstrument: Equatable, Hashable {
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
-        ]
+        ],
+        loops: true, attack: 0.04, release: 0.18    // breath onset + gentle release
     )
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). rootNotes is rewritten by that

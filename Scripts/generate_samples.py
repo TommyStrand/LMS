@@ -62,6 +62,26 @@ def write_wav(path, samples_f):
         w.writeframes(pcm)
 
 # ---------------------------------------------------------------------------
+# Seamless loop crossfade
+# ---------------------------------------------------------------------------
+# Sustaining instruments (strings, flute) are played by SamplerEngine with the
+# AVAudioPlayerNode .loops option so a held note rings indefinitely instead of
+# dying when the recording ends. For that the buffer must wrap from its last
+# sample back to its first WITHOUT a click. We synthesise `n + xf` samples of a
+# steady tone (no baked attack/release — the engine ramps volume on note-on/off)
+# then fold the `xf`-sample continuation that occurs *past* the loop point back
+# into the head: out[0] becomes the natural continuation of out[n-1], so the
+# wrap is phase- and amplitude-continuous. The note-on discontinuity that this
+# leaves at out[0] is masked by the engine's short attack ramp.
+def crossfade_loop(samples, xf):
+    n = len(samples) - xf
+    out = samples[:n]
+    for k in range(xf):
+        a = k / xf                       # 0 at the seam → 1 back to original head
+        out[k] = out[k] * a + samples[n + k] * (1.0 - a)
+    return out
+
+# ---------------------------------------------------------------------------
 # Grand Piano  –  detuned unison strings, stretched (inharmonic) partials,
 #                 two-stage prompt + aftersound decay
 # ---------------------------------------------------------------------------
@@ -166,7 +186,10 @@ def piano_sample(midi_note, velocity):
 #   6. Bow-scrape onset transient that is NOT killed by the attack envelope
 #      (the scrape is loudest at t≈0 before the tone has built up).
 # ---------------------------------------------------------------------------
-STRING_DURATION = 4.0
+# Loopable: a long steady body (no attack/release — SamplerEngine ramps those)
+# plus a crossfade so the buffer wraps seamlessly and a held note sustains.
+STRING_LOOP   = 2.6     # seconds of steady tone in the loop body
+STRING_XFADE  = 0.04    # seamless-wrap crossfade length
 
 _N_STR_VOICES  = 12
 # Detunes in fractional frequency: spread up to ±34 cents (≈ 0.020 ratio)
@@ -197,8 +220,9 @@ _STR_HARM_FULL = [
 def strings_sample(midi_note, velocity):
     freq = midi_to_hz(midi_note)
     vel  = velocity / 127.0
-    n    = int(STRING_DURATION * SAMPLE_RATE)
     sr   = float(SAMPLE_RATE)
+    n    = int(STRING_LOOP * sr)
+    xf   = int(STRING_XFADE * sr)
 
     # Register-adaptive partial count: MIDI 36 → 4, MIDI 84 → 12
     n_harm = max(4, min(12, 4 + (midi_note - 36) // 6))
@@ -210,24 +234,19 @@ def strings_sample(midi_note, velocity):
     norm = sum(a for _, a in raw)
     harm_amps = [(h, a / norm) for h, a in raw]
 
-    attack_tau = 0.25   # exponential bow-engagement time constant
-    vib_onset  = 0.50   # seconds before vibrato begins
-    vib_ramp   = 0.35   # vibrato fade-in duration
-
     phases = [[0.0] * n_harm for _ in range(_N_STR_VOICES)]
     _seed(midi_note * 31)
 
+    # Steady body only: no bow-engagement attack, no end-release, no onset scrape.
+    # The note-on bow attack and note-off release are applied by SamplerEngine as
+    # volume ramps; vibrato runs at constant depth so it doesn't pulse per loop.
     samples = []
-    for i in range(n):
-        t   = i / sr
-        atk = 1.0 - math.exp(-t / attack_tau)            # smooth bow engagement
-        rel = max(0.0, min(1.0, (STRING_DURATION - t) / 0.6))
-        vib_env = max(0.0, min(1.0, (t - vib_onset) / vib_ramp))
-
+    for i in range(n + xf):
+        t = i / sr
         s = 0.0
         for vi in range(_N_STR_VOICES):
             vib     = 1.0 + _STR_VIB_DEPTH * math.sin(
-                2.0 * math.pi * _STR_VIB_RATES[vi] * t + _STR_VIB_PH[vi]) * vib_env
+                2.0 * math.pi * _STR_VIB_RATES[vi] * t + _STR_VIB_PH[vi])
             # Slow bow-pressure flutter per voice — desynchronised ±3 % at ~1.7 Hz
             flutter = 1.0 + 0.030 * math.sin(
                 2.0 * math.pi * 1.7 * t + _STR_VIB_PH[vi] * 1.3)
@@ -237,13 +256,10 @@ def strings_sample(midi_note, velocity):
                 phases[vi][hi] += 2.0 * math.pi * f_base * h / sr
                 s += va * ha * math.sin(phases[vi][hi])
 
-        tone = s * atk * rel * vel * 0.10
-        # Bow-catch transient: loudest at t=0, gone by ~200 ms; NOT gated by atk
-        bow_scrape = _lcg() * 0.12 * math.exp(-t * 15.0) * vel
-        # Rosin roughness: tracks amplitude envelope throughout the note
-        rosin      = _lcg() * (0.005 + vel * 0.004) * atk * rel
-        samples.append(tone + bow_scrape + rosin)
-    return samples
+        tone  = s * vel * 0.10
+        rosin = _lcg() * (0.005 + vel * 0.004)   # steady rosin roughness
+        samples.append(tone + rosin)
+    return crossfade_loop(samples, xf)
 
 # ---------------------------------------------------------------------------
 # Concert Flute  –  breath attack + vibrato tone
@@ -256,16 +272,18 @@ def strings_sample(midi_note, velocity):
 #   • Vibrato depth increased to ≈ ±9 cents (was ±5 cents); ramps in 0.1 s
 #     sooner for a more expressive, natural-feeling tone.
 # ---------------------------------------------------------------------------
-FLUTE_DURATION = 3.0
+# Loopable: steady body + seamless-wrap crossfade (see strings above).
+FLUTE_LOOP  = 2.6
+FLUTE_XFADE = 0.04
 
 def flute_sample(midi_note, velocity):
     freq       = midi_to_hz(midi_note)
     vel        = velocity / 127.0
-    n          = int(FLUTE_DURATION * SAMPLE_RATE)
     sr         = float(SAMPLE_RATE)
-    atk        = 0.035
-    trem_depth = 0.016   # amplitude tremolo (slight, ramps in after 0.3 s)
-    vib_depth  = 0.0050  # pitch vibrato depth (≈ ±9 cents; was ±5 cents)
+    n          = int(FLUTE_LOOP * sr)
+    xf         = int(FLUTE_XFADE * sr)
+    trem_depth = 0.016   # amplitude tremolo (slight)
+    vib_depth  = 0.0050  # pitch vibrato depth (≈ ±9 cents)
     vib_rate   = 5.2
 
     _seed(midi_note * 97)
@@ -273,18 +291,14 @@ def flute_sample(midi_note, velocity):
     # Phase accumulators for harmonics 1, 2, 3
     ph = [0.0, 0.0, 0.0]
 
+    # Steady body only: the breath-attack transient and the note-on/off envelope
+    # are gone (the engine ramps volume on note-on/off); vibrato/tremolo run at
+    # constant depth so they don't pulse on every loop.
     samples = []
-    for i in range(n):
+    for i in range(n + xf):
         t   = i / sr
-        env = min(t / atk, 1.0) * max(0.0, min(1.0, (FLUTE_DURATION - t) / 0.25))
-
-        # Pitch vibrato ramps in at 0.3 s (was 0.4 s) for a more expressive line.
-        vib_env = max(0.0, min(1.0, (t - 0.30) / 0.35))
-        vib     = 1.0 + vib_depth * math.sin(2.0 * math.pi * vib_rate * t) * vib_env
-
-        # Amplitude tremolo lags slightly behind vibrato (natural flute performance).
-        trem = 1.0 + trem_depth * math.sin(2.0 * math.pi * vib_rate * t + 0.8) \
-               * max(0.0, min(1.0, (t - 0.30) / 0.50))
+        vib  = 1.0 + vib_depth  * math.sin(2.0 * math.pi * vib_rate * t)
+        trem = 1.0 + trem_depth * math.sin(2.0 * math.pi * vib_rate * t + 0.8)
 
         # Harmonic brightness scales with velocity.
         h2 = 0.06 + vel * 0.12
@@ -297,14 +311,11 @@ def flute_sample(midi_note, velocity):
 
         tone = math.sin(ph[0]) + h2 * math.sin(ph[1]) + h3 * math.sin(ph[2])
 
-        # Attack breath (fast decay, gone by ~200 ms).
-        breath_atk = _lcg() * (0.05 + vel * 0.04) * math.exp(-t * 8.0)
-        # Sustained breathiness: envelope-gated so it fades with the note.
-        # ~0.6 % of full-amplitude signal — adds organic air without hiss.
+        # Sustained breathiness: ~0.6 % of full-amplitude signal — organic air.
         breath_sus = _lcg() * 0.008
 
-        samples.append((tone + breath_atk + breath_sus) * env * trem * vel)
-    return samples
+        samples.append((tone + breath_sus) * trem * vel)
+    return crossfade_loop(samples, xf)
 
 # ---------------------------------------------------------------------------
 # Generation driver
@@ -318,13 +329,22 @@ INSTRUMENTS = [
 VELOCITIES = [64, 110]  # soft, loud
 
 def main():
+    import sys
+    # Optional positional args select which folders to (re)generate, e.g.
+    #   python3 generate_samples.py string_ensemble concert_flute
+    # With no args, all instruments are regenerated.
+    wanted = set(sys.argv[1:])
+    instruments = [i for i in INSTRUMENTS if not wanted or i[0] in wanted]
+    if wanted:
+        print(f"Regenerating only: {', '.join(i[0] for i in instruments)}")
+
     t0 = time.time()
     total = sum(
         len(range(s, e+1, step)) * len(VELOCITIES)
-        for _, _, s, e, step in INSTRUMENTS
+        for _, _, s, e, step in instruments
     )
     done = 0
-    for folder, fn, start, end, step in INSTRUMENTS:
+    for folder, fn, start, end, step in instruments:
         out_dir = os.path.join(OUT_ROOT, folder)
         notes   = list(range(start, end + 1, step))
         for n in notes:
