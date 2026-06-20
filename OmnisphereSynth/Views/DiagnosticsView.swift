@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine   // Timer.publish(...).autoconnect() returns Combine publisher types
 
 /// On-device troubleshooting panel: live CPU / memory / voice-count meters and a
 /// scrolling event log. Reached from Settings. Sampling runs only while visible.
