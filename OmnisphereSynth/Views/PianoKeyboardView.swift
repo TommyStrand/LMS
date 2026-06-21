@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Piano keyboard with MorphWiz-style continuous pitch control.
 ///
@@ -33,9 +34,25 @@ struct PianoKeyboardView: View {
     @State private var touchOriginX:    [Int: CGFloat] = [:]
     /// Current touch positions — used to draw the glowing indicators.
     @State private var touchLocations:  [Int: CGPoint] = [:]
+    /// Wall-clock time of each finger's last *significant* move — drives the
+    /// "snap to the nearest scale note once the finger stops" behaviour.
+    @State private var lastMoveTime:    [Int: Double]  = [:]
+    /// Fingers that have already settled onto a scale note (so we snap once, not
+    /// every timer tick, and resume gliding the moment they move again).
+    @State private var snappedTouches:  Set<Int>       = []
+    /// Fingers that have actually slid (not just tapped). Only these snap to scale
+    /// on rest — a plain tap on a black key must keep its exact chromatic pitch.
+    @State private var slidTouches:     Set<Int>       = []
 
     // pressedKeys is derived on-the-fly from touchToKey for SwiftUI key redraws.
     private var pressedKeys: Set<Int> { Set(touchToKey.values) }
+
+    // Drives the settle check. A finger that stops moving for `settleDelay`
+    // seconds eases (via SynthVoice's smooth pitch glide) to the nearest scale
+    // note — MorphWiz's "slide freely, land in tune" gesture.
+    private let settleTimer = Timer.publish(every: 0.04, on: .main, in: .common).autoconnect()
+    private let settleDelay: Double = 0.08
+    private let pitchPerKey  = 12.0 / 7.0   // semitones per white-key width
 
     // MARK: - Note layout
 
@@ -137,6 +154,9 @@ struct PianoKeyboardView: View {
                     handleTouches(events, dims: dims, geo: geo, accent: accent)
                 }
             )
+            .onReceive(settleTimer) { _ in
+                settleStoppedFingers(dims: dims, geo: geo)
+            }
         }
     }
 
@@ -158,40 +178,104 @@ struct PianoKeyboardView: View {
                 touchOriginNote[ev.id] = note
                 touchOriginX[ev.id]    = loc.x
                 touchLocations[ev.id]  = loc
+                lastMoveTime[ev.id]    = Date().timeIntervalSinceReferenceDate
+                snappedTouches.remove(ev.id)
+                slidTouches.remove(ev.id)
                 engine.noteOn(touchID: ev.id, note: note,
                               velocity: 0.65 + y * 0.35, x: x, y: y)
 
             case .moved:
-                guard let originX    = touchOriginX[ev.id],
-                      let originNote = touchOriginNote[ev.id] else { break }
+                guard let originX = touchOriginX[ev.id] else { break }
 
-                // Continuous pitch: X displacement from origin → semitones.
-                // 12/7 ≈ 1.714 semitones per white-key-width (average piano layout):
-                // 12 chromatic semitones spread across 7 white keys per octave.
-                let semitones = Float(loc.x - originX) / Float(dims.keyW) * (12.0 / 7.0)
-
+                // Did the finger actually travel, or is this sub-pixel jitter while
+                // it's effectively held still? We must not reset the settle clock on
+                // jitter, or a stationary finger would never snap.
+                let prev = touchLocations[ev.id]
+                let movedEnough = prev.map {
+                    abs(loc.x - $0.x) > 1.5 || abs(loc.y - $0.y) > 1.5
+                } ?? true
                 touchLocations[ev.id] = loc
 
-                // Track which physical key is under the finger (for highlighting).
-                let currentKey = noteAt(loc, dims: dims)
-                if currentKey != touchToKey[ev.id] {
-                    touchToKey[ev.id] = currentKey
-                }
+                if movedEnough {
+                    // Sliding: glide pitch continuously and reset the settle clock so
+                    // we only snap once the finger comes to rest.
+                    lastMoveTime[ev.id] = Date().timeIntervalSinceReferenceDate
+                    snappedTouches.remove(ev.id)
 
-                // Pass both pitch bend AND expression (Y) through glissando.
-                // `pitchBendSemitones` is audio-thread smooth (see SynthVoice).
-                // Y drives filterCutoffMod + lfoDepthMod (vibrato).
-                _ = originNote   // suppress "unused" warning; anchors the semitone calc
-                engine.updateGlissando(touchID: ev.id, semitones: semitones, x: x, y: y)
+                    // 12/7 ≈ 1.714 semitones per white-key-width: 12 chromatic
+                    // semitones spread across 7 white keys per octave.
+                    let semitones = Float(loc.x - originX) / Float(dims.keyW) * Float(pitchPerKey)
+                    let currentKey = noteAt(loc, dims: dims)
+                    if currentKey != touchToKey[ev.id] { touchToKey[ev.id] = currentKey }
+                    // Mark as a real slide once the finger leaves its starting key by
+                    // ~half a key — only slides snap to scale on rest (taps don't).
+                    if abs(loc.x - originX) > dims.keyW * 0.4 { slidTouches.insert(ev.id) }
+                    engine.updateGlissando(touchID: ev.id, semitones: semitones, x: x, y: y)
+                } else {
+                    // Held still (incl. already snapped): keep expression (Y) live but
+                    // leave the pitch alone so the snapped note isn't dragged off-tune.
+                    engine.updateTouch(touchID: ev.id, x: x, y: y)
+                }
 
             default:
                 touchToKey.removeValue(forKey: ev.id)
                 touchOriginNote.removeValue(forKey: ev.id)
                 touchOriginX.removeValue(forKey: ev.id)
                 touchLocations.removeValue(forKey: ev.id)
+                lastMoveTime.removeValue(forKey: ev.id)
+                snappedTouches.remove(ev.id)
+                slidTouches.remove(ev.id)
                 engine.noteOff(touchID: ev.id)
             }
         }
+    }
+
+    // MARK: - Snap-after-slide
+
+    /// Once a finger has been still for `settleDelay`, ease its pitch to the nearest
+    /// in-scale note. We just change the glissando *target*; SynthVoice's smooth
+    /// pitch glide (~75 ms time constant) does the easing, so the landing is a slur,
+    /// not a click. Snaps once per rest (tracked by `snappedTouches`).
+    private func settleStoppedFingers(dims: KeyDims, geo: GeometryProxy) {
+        guard !touchLocations.isEmpty else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        for (id, loc) in touchLocations {
+            guard slidTouches.contains(id),          // only snap fingers that slid
+                  !snappedTouches.contains(id),
+                  let originX    = touchOriginX[id],
+                  let originNote = touchOriginNote[id],
+                  let lastMove   = lastMoveTime[id],
+                  now - lastMove >= settleDelay
+            else { continue }
+
+            let semitones   = Double(loc.x - originX) / Double(dims.keyW) * pitchPerKey
+            let pitch       = Double(originNote) + semitones
+            let snappedMidi = nearestScaleMidi(to: pitch)
+            let target      = Float(Double(snappedMidi) - Double(originNote))
+            let y           = Float(1 - loc.y / geo.size.height)
+
+            engine.updateGlissando(touchID: id, semitones: target,
+                                   x: Float(loc.x / geo.size.width), y: y)
+            touchToKey[id] = snappedMidi
+            snappedTouches.insert(id)
+        }
+    }
+
+    /// Nearest MIDI note belonging to the current scale (root + scale degrees) to a
+    /// fractional pitch. Falls back to the rounded pitch for the chromatic scale.
+    private func nearestScaleMidi(to pitch: Double) -> Int {
+        let rootPc    = ((themeManager.rootNote % 12) + 12) % 12
+        let intervals = Set(themeManager.scale.intervals)
+        let center    = Int(pitch.rounded())
+        var best      = center
+        var bestDist  = Double.infinity
+        for cand in (center - 6)...(center + 6) {
+            let pc = (((cand - rootPc) % 12) + 12) % 12
+            guard intervals.contains(pc) else { continue }
+            let d = abs(Double(cand) - pitch)
+            if d < bestDist { bestDist = d; best = cand }
+        }
+        return min(127, max(0, best))
     }
 
     // MARK: - Key views
