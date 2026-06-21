@@ -1,10 +1,37 @@
 import AVFoundation
 import CoreAudio
+import os
 
 // Per-layer gain — written from main thread, read from render thread.
 // A class so the render closure can hold a strong reference that stays valid
 // even after the layer is removed from the active set.
 private final class GainBox { var value: Float = 1.0 }
+
+// Just the per-buffer effect scalars the render thread needs, snapshotted from
+// `currentPreset` on the main thread. Reading the whole @Published SynthPreset
+// struct from the render thread is a data race (knob setters mutate it on main);
+// copying these few floats under the render lock makes the read well-defined.
+private struct RenderParams {
+    var autoWah:    Float = 0, grit:  Float = 0, lofi:     Float = 0
+    var space:      Float = 0, tape:  Float = 0, bloom:    Float = 0
+    var tremulant:  Float = 0, chorus: Float = 0, distortion: Float = 0
+    var phaser:     Float = 0, modDelay: Float = 0
+    init() {}
+    init(_ p: SynthPreset) {
+        autoWah = p.autoWahAmount;  grit = p.gritAmount;     lofi = p.lofiAmount
+        space   = p.spaceEchoAmount; tape = p.brokenTape;    bloom = p.bloomAmount
+        tremulant = p.tremulantDepth; chorus = p.chorusMix;  distortion = p.distortionAmount
+        phaser  = p.phaserAmount;    modDelay = p.modDelayAmount
+    }
+}
+
+// Immutable view of everything the render thread reads, published atomically by
+// the main thread. `entries` holds strong refs to the live voices (+ their layer
+// gain box); copying it out under the lock is a single array retain.
+private struct RenderSnapshot {
+    var entries: [(voice: any AnyVoice, gain: GainBox?)] = []
+    var params  = RenderParams()
+}
 
 final class AudioEngine: ObservableObject {
 
@@ -43,12 +70,41 @@ final class AudioEngine: ObservableObject {
     private lazy var masterModDelayR  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.37)
 
     // MARK: - State
+    //
+    // `voices`, `voiceGainBoxes` and `controlToVoiceID` are MAIN-THREAD ONLY now.
+    // Every mutation path (touch, MIDI, looper) dispatches to main, so these need
+    // no lock. The render thread never touches them — it reads `renderLock`'s
+    // immutable RenderSnapshot instead, which the main thread republishes whenever
+    // the voice set or a knob changes.
     private(set) var voices: [Int: any AnyVoice] = [:]
-    // Protects `voices` and `voiceGainBoxes` between main thread and audio render thread.
-    private let voicesLock = NSLock()
 
     // Non-nil only for layer-mode voices; single-mode voices use implicit gain 1.0.
     private var voiceGainBoxes: [Int: GainBox] = [:]
+
+    // Voice/param hand-off to the audio thread. The render callback uses a
+    // try-lock (os_unfair_lock_trylock) that NEVER blocks: if the main thread is
+    // mid-publish, the render thread reuses the snapshot it cached last buffer.
+    // So a main-thread publish can't stall the audio thread (no priority inversion,
+    // unlike the previous NSLock). os_unfair_lock also participates in priority
+    // inheritance, so the brief main-thread critical section can't be preempted
+    // away while the audio thread waits.
+    //
+    // Heap-allocated so the lock has a stable address (an os_unfair_lock must never
+    // be copied; storing it inline in the class and taking &self.lock would be UB).
+    private let snapshotLock: os_unfair_lock_t = {
+        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+        p.initialize(to: os_unfair_lock())
+        return p
+    }()
+    // Guarded by snapshotLock; written on main, read (try-lock) on the audio thread.
+    private var publishedSnapshot = RenderSnapshot()
+    // Render-thread-only cache of the last snapshot read; never touched off-render.
+    private var cachedSnapshot = RenderSnapshot()
+
+    // Hard polyphony ceiling. Past this, the oldest voice is stolen so dense
+    // playing (or a stuck note-on) can't grow the voice set without bound and
+    // pin the audio thread.
+    private let maxPolyphony = 32
 
     // voices / voiceGainBoxes are keyed by a unique, monotonically increasing
     // voiceID — NOT the touchID. UIKit recycles UITouch objects, so a rapid re-tap
@@ -80,15 +136,42 @@ final class AudioEngine: ObservableObject {
     private var noteOnLayerIndices: [Int: [Int]]   = [:]
 
     private let sampleRate: Double = 44100
-    private var analysisBuffer: [Float] = Array(repeating: 0, count: 128)
-    private var analysisIndex = 0
+
+    // Visualiser ring buffer. Written by the render thread into raw, uniquely-owned
+    // memory (no COW, no allocation on the audio thread) and copied to the
+    // @Published `waveformSamples` by a main-thread maintenance timer. The
+    // cross-thread read of plain Floats is a benign race — at worst the visualiser
+    // shows one mixed frame, which is invisible.
+    private static let analysisCount = 128
+    private let analysisPtr = UnsafeMutableBufferPointer<Float>.allocate(capacity: AudioEngine.analysisCount)
+    private var analysisWriteIndex = 0
+    private var lastPublishedSilent = false
+
+    // Periodic main-thread housekeeping: publish the visualiser buffer and reap
+    // voices that have finished their release tail (via AnyVoice.isFinished).
+    private var maintenanceTimer: Timer?
+    // Notification observer tokens, removed in deinit.
+    private var sessionObservers: [NSObjectProtocol] = []
 
     // Serialises audio-session activation and engine start/restart off the main
     // thread. AVAudioSession.setActive(_:) can block long enough to stall the UI,
     // and a serial queue prevents overlapping route-change restarts from racing.
     private let sessionQueue = DispatchQueue(label: "audio.session.control", qos: .userInitiated)
 
-    init() { setupEngine() }
+    init() {
+        analysisPtr.initialize(repeating: 0)
+        setupEngine()
+        startMaintenanceTimer()
+    }
+
+    deinit {
+        maintenanceTimer?.invalidate()
+        sessionObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        if engine.isRunning { engine.stop() }
+        analysisPtr.deallocate()
+        snapshotLock.deinitialize(count: 1)
+        snapshotLock.deallocate()
+    }
 
     // MARK: - Setup
 
@@ -168,13 +251,16 @@ final class AudioEngine: ObservableObject {
         let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList in
             guard let self else { return noErr }
 
-            // Snapshot active voices under lock — keeps main-thread add/remove race-free.
-            self.voicesLock.lock()
-            let voiceSnapshot = self.voices
-            let gainSnapshot  = self.voiceGainBoxes
-            self.voicesLock.unlock()
+            // Read the published snapshot with a NON-BLOCKING try-lock; if the main
+            // thread is mid-publish, reuse the snapshot we cached last buffer. The
+            // audio thread therefore never waits on the main thread.
+            if os_unfair_lock_trylock(self.snapshotLock) {
+                self.cachedSnapshot = self.publishedSnapshot
+                os_unfair_lock_unlock(self.snapshotLock)
+            }
+            let entries = self.cachedSnapshot.entries
+            let params  = self.cachedSnapshot.params
 
-            let p   = self.currentPreset
             let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
             guard abl.count >= 2,
                   let ld = abl[0].mData, let rd = abl[1].mData else { return noErr }
@@ -185,26 +271,35 @@ final class AudioEngine: ObservableObject {
             // effects is what keeps idle/light CPU low — previously every one of
             // these custom per-sample processors ran 44 100×/sec regardless of its
             // amount, which pinned the audio thread even in silence.
-            let doAutoWah  = p.autoWahAmount    > 0.001
-            let doGrit     = p.gritAmount       > 0.001
-            let doLofi     = p.lofiAmount       > 0.001
-            let doSpace    = p.spaceEchoAmount  > 0.001
-            let doTape     = p.brokenTape       > 0.001
-            let doBloom    = p.bloomAmount      > 0.005
-            let doMod      = p.tremulantDepth   > 0.001 || p.chorusMix > 0.001
-            let doDist     = p.distortionAmount > 0.001
-            let doPhaser   = p.phaserAmount     > 0.001
-            let doModDelay = p.modDelayAmount   > 0.001
+            let doAutoWah  = params.autoWah    > 0.001
+            let doGrit     = params.grit       > 0.001
+            let doLofi     = params.lofi       > 0.001
+            let doSpace    = params.space      > 0.001
+            let doTape     = params.tape       > 0.001
+            let doBloom    = params.bloom      > 0.005
+            let doMod      = params.tremulant  > 0.001 || params.chorus > 0.001
+            let doDist     = params.distortion > 0.001
+            let doPhaser   = params.phaser     > 0.001
+            let doModDelay = params.modDelay   > 0.001
 
+            // Push the live tremulant depth to organ voices ONCE per buffer rather
+            // than re-casting every voice every sample (was 44.1k dynamic casts/sec).
+            if params.tremulant > 0.001 {
+                for (voice, _) in entries {
+                    (voice as? OrganVoice)?.tremulantDepth = params.tremulant
+                }
+            }
+
+            var widx = self.analysisWriteIndex
             for i in 0..<Int(frameCount) {
                 var l: Float = 0.0
                 var r: Float = 0.0
 
-                // Sum all active voices before any effects processing.
-                for (id, voice) in voiceSnapshot {
-                    if let ov = voice as? OrganVoice { ov.tremulantDepth = p.tremulantDepth }
+                // Sum all active voices (contiguous array, no dictionary hashing)
+                // before any effects processing.
+                for (voice, gainBox) in entries {
                     let (vl, vr) = voice.nextStereoSample()
-                    let gain = gainSnapshot[id]?.value ?? 1.0
+                    let gain = gainBox?.value ?? 1.0
                     l += vl * gain
                     r += vr * gain
                 }
@@ -212,55 +307,62 @@ final class AudioEngine: ObservableObject {
                 // Effects chain applied ONCE on the summed signal — each gated by
                 // whether it's actually enabled for the current preset.
                 if doAutoWah {
-                    l = self.masterAutoWahL.process(l, amount: p.autoWahAmount)
-                    r = self.masterAutoWahR.process(r, amount: p.autoWahAmount)
+                    l = self.masterAutoWahL.process(l, amount: params.autoWah)
+                    r = self.masterAutoWahR.process(r, amount: params.autoWah)
                 }
                 if doGrit {
-                    l = self.masterGrit.process(l, amount: p.gritAmount)
-                    r = self.masterGrit.process(r, amount: p.gritAmount)
+                    l = self.masterGrit.process(l, amount: params.grit)
+                    r = self.masterGrit.process(r, amount: params.grit)
                 }
                 if doLofi {
-                    l = self.masterLofiL.process(l, amount: p.lofiAmount)
-                    r = self.masterLofiR.process(r, amount: p.lofiAmount)
+                    l = self.masterLofiL.process(l, amount: params.lofi)
+                    r = self.masterLofiR.process(r, amount: params.lofi)
                 }
                 if doSpace {
-                    l = self.masterSpaceEchoL.process(l, amount: p.spaceEchoAmount)
-                    r = self.masterSpaceEchoR.process(r, amount: p.spaceEchoAmount)
+                    l = self.masterSpaceEchoL.process(l, amount: params.space)
+                    r = self.masterSpaceEchoR.process(r, amount: params.space)
                 }
                 if doTape {
-                    let btAmt = p.brokenTape
+                    let btAmt = params.tape
                     l = self.masterTapeL.process(l, delayTime: 0.22, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
                     r = self.masterTapeR.process(r, delayTime: 0.24, feedback: 0.45, mix: btAmt * 0.7, broken: btAmt)
                 }
                 if doBloom {
-                    let blAmt = p.bloomAmount
+                    let blAmt = params.bloom
                     let (bl, br) = self.masterBloom.process((l + r) * 0.5, amount: blAmt)
                     l = l * (1.0 - blAmt * 0.3) + bl
                     r = r * (1.0 - blAmt * 0.3) + br
                 }
                 if doMod {
                     let (ml, mr) = self.masterMod.process(l: l, r: r,
-                                                          tremDepth: p.tremulantDepth,
-                                                          chorusMix: p.chorusMix)
+                                                          tremDepth: params.tremulant,
+                                                          chorusMix: params.chorus)
                     l = ml; r = mr
                 }
                 if doDist {
-                    l = tubeSaturate(l, drive: p.distortionAmount)
-                    r = tubeSaturate(r, drive: p.distortionAmount)
+                    l = tubeSaturate(l, drive: params.distortion)
+                    r = tubeSaturate(r, drive: params.distortion)
                 }
                 if doPhaser {
-                    l = self.masterPhaserL.process(l, amount: p.phaserAmount)
-                    r = self.masterPhaserR.process(r, amount: p.phaserAmount)
+                    l = self.masterPhaserL.process(l, amount: params.phaser)
+                    r = self.masterPhaserR.process(r, amount: params.phaser)
                 }
                 if doModDelay {
-                    l = self.masterModDelayL.process(l, amount: p.modDelayAmount)
-                    r = self.masterModDelayR.process(r, amount: p.modDelayAmount)
+                    l = self.masterModDelayL.process(l, amount: params.modDelay)
+                    r = self.masterModDelayR.process(r, amount: params.modDelay)
                 }
 
-                left[i]  = l
-                right[i] = r
-                self.feedAnalysis((l + r) * 0.5)
+                // Flush sub-denormal magnitudes to zero before they reach the AU
+                // reverb/delay — denormal floats trigger 10–100× CPU spikes in IIR
+                // tails on some hardware (right when many voices are decaying).
+                left[i]  = (l > -1e-15 && l < 1e-15) ? 0 : l
+                right[i] = (r > -1e-15 && r < 1e-15) ? 0 : r
+
+                // Visualiser ring write — plain store into uniquely-owned memory.
+                self.analysisPtr[widx & (Self.analysisCount - 1)] = (l + r) * 0.5
+                widx &+= 1
             }
+            self.analysisWriteIndex = widx
             return noErr
         }
 
@@ -274,7 +376,7 @@ final class AudioEngine: ObservableObject {
     private func observeAudioSession() {
         // AVAudioEngine stops automatically when the hardware route changes (AirPlay
         // connect/disconnect, headphone insert/remove). We must restart it ourselves.
-        NotificationCenter.default.addObserver(
+        let configObs = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine, queue: .main
         ) { [weak self] _ in
@@ -282,7 +384,7 @@ final class AudioEngine: ObservableObject {
             self?.restartEngineIfNeeded()
         }
 
-        NotificationCenter.default.addObserver(
+        let interruptObs = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil, queue: .main
         ) { [weak self] n in
@@ -300,7 +402,7 @@ final class AudioEngine: ObservableObject {
         }
 
         // Belt-and-suspenders: if a route change silently stopped the engine, recover.
-        NotificationCenter.default.addObserver(
+        let routeObs = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: nil, queue: .main
         ) { [weak self] n in
@@ -312,6 +414,8 @@ final class AudioEngine: ObservableObject {
             guard !self.engine.isRunning else { return }
             self.restartEngineIfNeeded()
         }
+
+        sessionObservers = [configObs, interruptObs, routeObs]
     }
 
     private func routeReasonName(_ r: AVAudioSession.RouteChangeReason) -> String {
@@ -447,6 +551,18 @@ final class AudioEngine: ObservableObject {
         shimmerReverb.wetDryMix = 80
         shimmerMixer.outputVolume = preset.shimmerAmount * 0.45
         setShimmerPathActive(preset.shimmerAmount > 0.001)
+
+        // Push the new per-sample effect scalars to the render thread.
+        publishParams(from: preset)
+    }
+
+    /// Republishes just the render effect scalars (called from knob setters and
+    /// preset changes). Thread-safe; takes the snapshot lock only to swap the params.
+    private func publishParams(from preset: SynthPreset) {
+        let params = RenderParams(preset)
+        os_unfair_lock_lock(snapshotLock)
+        publishedSnapshot.params = params
+        os_unfair_lock_unlock(snapshotLock)
     }
 
     /// Bypass the shimmer reverb + pitch-shifter when shimmer is off. The
@@ -459,23 +575,43 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Live knob updates
 
-    func setDistortion(_ v: Float) { currentPreset.distortionAmount = v }
+    // Each knob setter mutates the @Published currentPreset (for the UI) and then
+    // republishes the render params so the audio thread sees the change. Reverb/
+    // delay/shimmer are AU-node params and don't go through RenderParams, so they
+    // skip the republish.
+    func setDistortion(_ v: Float) { currentPreset.distortionAmount = v; publishParams(from: currentPreset) }
     func setShimmer(_ v: Float)    { currentPreset.shimmerAmount = v; shimmerMixer.outputVolume = v * 0.45; setShimmerPathActive(v > 0.001) }
     func setReverb(_ v: Float)     { currentPreset.reverbMix = v;     reverb.wetDryMix = v * 100 }
     func setDelay(_ v: Float)      { currentPreset.delayMix = v;      delay.wetDryMix = v * 100 }
-    func setTremolo(_ v: Float)    { currentPreset.tremulantDepth = v }
-    func setChorus(_ v: Float)     { currentPreset.chorusMix = v }
-    func setLofi(_ v: Float)       { currentPreset.lofiAmount = v }
-    func setSpaceEcho(_ v: Float)  { currentPreset.spaceEchoAmount = v }
-    func setBrokenTape(_ v: Float) { currentPreset.brokenTape = v }
-    func setGrit(_ v: Float)       { currentPreset.gritAmount = v }
-    func setBloom(_ v: Float)      { currentPreset.bloomAmount = v }
-    func setPhaser(_ v: Float)     { currentPreset.phaserAmount = v }
-    func setAutoWah(_ v: Float)    { currentPreset.autoWahAmount = v }
-    func setModDelay(_ v: Float)   { currentPreset.modDelayAmount = v }
+    func setTremolo(_ v: Float)    { currentPreset.tremulantDepth = v;  publishParams(from: currentPreset) }
+    func setChorus(_ v: Float)     { currentPreset.chorusMix = v;       publishParams(from: currentPreset) }
+    func setLofi(_ v: Float)       { currentPreset.lofiAmount = v;      publishParams(from: currentPreset) }
+    func setSpaceEcho(_ v: Float)  { currentPreset.spaceEchoAmount = v; publishParams(from: currentPreset) }
+    func setBrokenTape(_ v: Float) { currentPreset.brokenTape = v;      publishParams(from: currentPreset) }
+    func setGrit(_ v: Float)       { currentPreset.gritAmount = v;      publishParams(from: currentPreset) }
+    func setBloom(_ v: Float)      { currentPreset.bloomAmount = v;     publishParams(from: currentPreset) }
+    func setPhaser(_ v: Float)     { currentPreset.phaserAmount = v;    publishParams(from: currentPreset) }
+    func setAutoWah(_ v: Float)    { currentPreset.autoWahAmount = v;   publishParams(from: currentPreset) }
+    func setModDelay(_ v: Float)   { currentPreset.modDelayAmount = v;  publishParams(from: currentPreset) }
 
     // MARK: - Sampler helpers
 
+    /// Returns the SamplerEngine for an instrument, creating + wiring it on first use.
+    ///
+    /// Lifecycle (#9): sampler engines are retained for the app's lifetime once
+    /// created. This is deliberate — the set is bounded to the handful of sampler
+    /// presets (piano/strings/flute/organ), and detaching an AVAudioNode from a
+    /// *running* engine triggers an AVAudioEngineConfigurationChange, which our own
+    /// observer treats as a route change and restarts the graph (an audible gap).
+    /// Tearing them down mid-session would cost more than the few MB of buffers it
+    /// reclaims. The whole graph is released in `deinit`.
+    ///
+    /// Routing (#10): sampler output is wired to `voiceMixer`, so it shares the AU
+    /// reverb/delay/shimmer chain but NOT the boutique per-sample effects (lofi,
+    /// tape, phaser, …). Those live inside the master source-node render loop, which
+    /// only sums synth voices — AVAudioPlayerNodes are pull-based graph nodes, not
+    /// sample generators we can call per-frame, so they can't be fed through that
+    /// loop without rendering them manually. Intentional limitation, not a bug.
     @discardableResult
     private func samplerEngine(for instrument: SamplerInstrument) -> SamplerEngine {
         if let existing = samplerEngines[instrument.id] { return existing }
@@ -584,17 +720,24 @@ final class AudioEngine: ObservableObject {
         // Rhodes/Hammond voices, which ignore the LFO-depth knob.)
         voice.filterCutoffMod = y
         voice.lfoDepthMod     = y
-        // Start before inserting into the shared dict so the render thread never
-        // sees a voice that hasn't begun generating samples yet.
+        // Start before publishing so the render thread never sees a voice that
+        // hasn't begun generating samples yet.
         voice.start()
+
+        // Polyphony ceiling: steal the oldest (lowest voiceID) voice so the set
+        // can't grow without bound under dense playing or a stuck note.
+        if voices.count >= maxPolyphony, let oldest = voices.keys.min() {
+            voices.removeValue(forKey: oldest)
+            voiceGainBoxes.removeValue(forKey: oldest)
+            controlToVoiceID = controlToVoiceID.filter { $0.value != oldest }
+        }
 
         let voiceID = nextVoiceID
         nextVoiceID += 1
-        voicesLock.lock()
         voices[voiceID] = voice
         if let gb = gainBox { voiceGainBoxes[voiceID] = gb }
-        voicesLock.unlock()
         controlToVoiceID[controlID] = voiceID
+        publishSnapshot()
     }
 
     func noteOff(touchID: Int) {
@@ -623,32 +766,28 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    /// Releases the voice currently bound to `controlID` (if any) and schedules its
-    /// removal. Clears the control→voice mapping so the control id is free to bind a
-    /// fresh voice immediately. No-op when nothing is bound (e.g. first tap).
+    /// Releases the voice currently bound to `controlID` (if any). Clears the
+    /// control→voice mapping so the id is free to bind a fresh voice immediately.
+    /// The voice keeps sounding its release tail and is reaped by the maintenance
+    /// timer once `isFinished` reports true — no hardcoded per-voice tail times,
+    /// and no audio-thread work. No-op when nothing is bound (e.g. first tap).
     private func retireVoice(controlID: Int, preset: SynthPreset) {
         guard let voiceID = controlToVoiceID.removeValue(forKey: controlID) else { return }
+        voices[voiceID]?.release()
+    }
 
-        voicesLock.lock()
-        let voice = voices[voiceID]
-        voicesLock.unlock()
-        voice?.release()
+    // MARK: - Render snapshot publishing
 
-        let tail: Double
-        switch preset.voiceMode {
-        case .hammondB3:   tail = 0.1
-        case .organChurch: tail = 0.15
-        case .rhodes:      tail = 3.0
-        case .synth:       tail = Double(preset.release) + 0.1
-        case .sampler:     tail = 0.5  // unreachable; sampler noteOff is handled separately
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + tail) { [weak self] in
-            guard let self else { return }
-            self.voicesLock.lock()
-            self.voices.removeValue(forKey: voiceID)
-            self.voiceGainBoxes.removeValue(forKey: voiceID)
-            self.voicesLock.unlock()
-        }
+    /// Rebuilds the immutable render snapshot (voice list + params) and swaps it
+    /// in under the render lock. Main-thread only.
+    private func publishSnapshot() {
+        var entries: [(voice: any AnyVoice, gain: GainBox?)] = []
+        entries.reserveCapacity(voices.count)
+        for (id, v) in voices { entries.append((v, voiceGainBoxes[id])) }
+        let params = RenderParams(currentPreset)
+        os_unfair_lock_lock(snapshotLock)
+        publishedSnapshot = RenderSnapshot(entries: entries, params: params)
+        os_unfair_lock_unlock(snapshotLock)
     }
 
     func updateTouch(touchID: Int, x: Float, y: Float) {
@@ -686,19 +825,50 @@ final class AudioEngine: ObservableObject {
         return voices[voiceID]
     }
 
-    // MARK: - Waveform Analysis
+    // MARK: - Maintenance timer (visualiser publish + voice reaping)
 
-    private func feedAnalysis(_ sample: Float) {
-        analysisBuffer[analysisIndex % 128] = sample
-        analysisIndex += 1
-        // Publish at ~30 Hz, NOT every 64 samples (~689 Hz). waveformSamples is
-        // @Published, so every update invalidates every view observing the engine;
-        // at 689 Hz that re-rendered the whole UI continuously and was a major
-        // idle-CPU sink. 30 Hz is smooth for any visualiser and keeps the header's
-        // voice-activity indicators live.
-        if analysisIndex % 1470 == 0 {
-            let snap = analysisBuffer
-            DispatchQueue.main.async { [weak self] in self?.waveformSamples = snap }
+    /// Runs at ~30 Hz on the main run loop. Does two cheap jobs that used to be
+    /// done from the audio thread (a dispatch per visualiser frame) or by a
+    /// per-voice asyncAfter timer:
+    ///   1. Copy the visualiser ring buffer into the @Published `waveformSamples`,
+    ///      skipping the publish entirely while silent so SwiftUI isn't re-rendered
+    ///      30×/sec during idle.
+    ///   2. Reap voices that have finished their release tail (AnyVoice.isFinished),
+    ///      then republish the render snapshot if any were removed.
+    private func startMaintenanceTimer() {
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            self?.runMaintenance()
         }
+        // .common so the visualiser keeps updating during scroll/gesture tracking.
+        RunLoop.main.add(timer, forMode: .common)
+        maintenanceTimer = timer
+    }
+
+    private func runMaintenance() {
+        // 1. Visualiser — copy the ring and publish only when it changes audibly.
+        var snap = [Float](repeating: 0, count: Self.analysisCount)
+        var peak: Float = 0
+        for i in 0..<Self.analysisCount {
+            let v = analysisPtr[i]
+            snap[i] = v
+            let a = v < 0 ? -v : v
+            if a > peak { peak = a }
+        }
+        let silent = peak < 0.0003
+        if !(silent && lastPublishedSilent) {
+            waveformSamples = snap          // skip republishing zeros over zeros
+            lastPublishedSilent = silent
+        }
+
+        // 2. Reap finished voices.
+        guard !voices.isEmpty else { return }
+        let finished = voices.filter { $0.value.isFinished }.map { $0.key }
+        guard !finished.isEmpty else { return }
+        for id in finished {
+            voices.removeValue(forKey: id)
+            voiceGainBoxes.removeValue(forKey: id)
+        }
+        controlToVoiceID = controlToVoiceID.filter { voices[$0.value] != nil }
+        publishSnapshot()
     }
 }
