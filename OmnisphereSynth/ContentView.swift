@@ -65,16 +65,16 @@ struct ContentView: View {
                 ShareSheet(url: url)
             }
         }
-        .onChange(of: midi.activityPulse) { _ in
+        .onChangeCompat(of: midi.activityPulse) { _ in
             midiActivityLit = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 midiActivityLit = false
             }
         }
-        .onChange(of: recorder.exportURL) { url in
+        .onChangeCompat(of: recorder.exportURL) { url in
             if url != nil { showShareSheet = true }
         }
-        .onChange(of: recorder.isRecording) { recording in
+        .onChangeCompat(of: recorder.isRecording) { recording in
             if recording {
                 withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                     recBlink = true
@@ -84,23 +84,23 @@ struct ContentView: View {
             }
         }
         // MARK: - AirPlay 2 / Now Playing updates
-        .onChange(of: selectedPresetIndex) { idx in
+        .onChangeCompat(of: selectedPresetIndex) { idx in
             nowPlaying.update(presetName: SynthPreset.presets[idx].name,
                               isLiveInstrument: true, isPlaying: false)
         }
-        .onChange(of: showDrumMachine) { drumActive in
+        .onChangeCompat(of: showDrumMachine) { drumActive in
             let title = drumActive
                 ? DrumPattern.all[drum.patternIndex].name + " — Drum"
                 : SynthPreset.presets[selectedPresetIndex].name
             nowPlaying.update(presetName: title, isLiveInstrument: true,
                               isPlaying: drumActive && drum.isPlaying)
         }
-        .onChange(of: drum.patternIndex) { idx in
+        .onChangeCompat(of: drum.patternIndex) { idx in
             guard showDrumMachine else { return }
             nowPlaying.update(presetName: DrumPattern.all[idx].name + " — Drum",
                               isLiveInstrument: true, isPlaying: drum.isPlaying)
         }
-        .onChange(of: drum.isPlaying) { playing in
+        .onChangeCompat(of: drum.isPlaying) { playing in
             nowPlaying.setPlaybackState(playing)
         }
         // Remote commands from lock screen / AirPlay device / Control Centre
@@ -622,6 +622,25 @@ extension Color {
         let g = Double((rgb >> 8)  & 0xFF) / 255
         let b = Double(rgb & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - onChange compatibility (iOS 16 deployment target)
+
+extension View {
+    /// `onChange(of:perform:)` is deprecated from iOS 17 in favour of the two-
+    /// parameter closure form — which doesn't exist on iOS 16. Branching on
+    /// availability keeps the iOS 16.0 deployment target warning-free: the legacy
+    /// call compiles only into the `else` context, where the OS is known to be
+    /// < 17 and the API is not deprecated. Behaviour is identical on both.
+    @ViewBuilder
+    func onChangeCompat<V: Equatable>(of value: V,
+                                      perform action: @escaping (V) -> Void) -> some View {
+        if #available(iOS 17.0, *) {
+            self.onChange(of: value) { _, newValue in action(newValue) }
+        } else {
+            self.onChange(of: value, perform: action)
+        }
     }
 }
 

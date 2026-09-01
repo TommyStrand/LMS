@@ -79,7 +79,7 @@ struct DiagnosticsView: View {
                 }
                 .padding(20)
             }
-            .onChange(of: diag.entries.count) { _ in
+            .onChangeCompat(of: diag.entries.count) { _ in
                 if let last = diag.entries.last?.id {
                     withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                 }
