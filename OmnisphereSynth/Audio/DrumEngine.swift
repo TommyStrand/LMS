@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import Observation
 
 // MARK: - Sample voice (value type, pool-allocated, no ARC in hot path)
 
@@ -32,15 +33,19 @@ struct SampleVoice {
 
 // MARK: - DrumEngine
 
-final class DrumEngine: ObservableObject {
+// @Observable: the UI-facing properties below are tracked; everything the render
+// thread reads is @ObservationIgnored so the audio callback never enters the
+// observation registrar (see AudioEngine for the full rationale).
+@Observable
+final class DrumEngine {
 
-    // MARK: Published
+    // MARK: Observed (UI-facing)
 
-    @Published var isPlaying   = false
-    @Published var bpm: Double = 90 {
+    var isPlaying   = false
+    var bpm: Double = 90 {
         didSet { renderBpm = bpm; updateDelayTime() }
     }
-    @Published var patternIndex: Int = 0 {
+    var patternIndex: Int = 0 {
         didSet {
             let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
             // Keep the stored value in range too, so views that read patternIndex
@@ -53,20 +58,20 @@ final class DrumEngine: ObservableObject {
             customHitsLock.lock(); renderCustomHits = nil; customHitsLock.unlock()
         }
     }
-    @Published var delayMix: Float = 0.22 {
+    var delayMix: Float = 0.22 {
         didSet { delayNode.wetDryMix = delayMix * 100 }
     }
-    @Published var shimmer: Float = 0.32 {
+    var shimmer: Float = 0.32 {
         didSet { reverbNode.wetDryMix = shimmer * 100 }
     }
-    @Published var grit: Float = 0.0 {
+    var grit: Float = 0.0 {
         didSet { renderGrit = grit }
     }
-    @Published var masterVolume: Float = 0.8 {
+    var masterVolume: Float = 0.8 {
         didSet { renderMasterVolume = masterVolume }
     }
-    @Published var beatFraction: Double = 0
-    @Published var customHits: [DrumHit]?
+    var beatFraction: Double = 0
+    var customHits: [DrumHit]?
 
     // MARK: Audio graph
 
@@ -74,31 +79,31 @@ final class DrumEngine: ObservableObject {
     var avEngine: AVAudioEngine { audioEngine }
     private let delayNode   = AVAudioUnitDelay()
     private let reverbNode  = AVAudioUnitReverb()
-    private var sourceNode: AVAudioSourceNode!
+    @ObservationIgnored private var sourceNode: AVAudioSourceNode!
 
     // MARK: Sample bank (main-thread write before engine start, audio-thread read only)
 
     // Buffers are retained here for the engine's lifetime so SampleVoice raw pointers stay valid
-    private var sampleBuffers: [DrumVoiceID: [AVAudioPCMBuffer]] = [:]
-    private var rrIndex: [Int] = Array(repeating: 0, count: DrumVoiceID.allCases.count)
+    @ObservationIgnored private var sampleBuffers: [DrumVoiceID: [AVAudioPCMBuffer]] = [:]
+    @ObservationIgnored private var rrIndex: [Int] = Array(repeating: 0, count: DrumVoiceID.allCases.count)
 
     // Lowercased filename (no extension) → URL, built by scanning the entire bundle tree.
     // Handles both flat resources and folder-reference subdirectories added in Xcode.
-    private var bundleWavMap: [String: URL] = [:]
+    @ObservationIgnored private var bundleWavMap: [String: URL] = [:]
 
-    // MARK: Render-thread state
+    // MARK: Render-thread state (all @ObservationIgnored — touched from the audio callback)
 
-    private var voicePool:       [SampleVoice?] = Array(repeating: nil, count: 32)
-    private var tickPosition:    Double = 0
-    private var renderBpm:       Double = 90
-    private var renderGrit:      Float  = 0
-    private var _pattern:        DrumPattern = DrumPattern.all[0]
-    private var renderCustomHits: [DrumHit]?
+    @ObservationIgnored private var voicePool:       [SampleVoice?] = Array(repeating: nil, count: 32)
+    @ObservationIgnored private var tickPosition:    Double = 0
+    @ObservationIgnored private var renderBpm:       Double = 90
+    @ObservationIgnored private var renderGrit:      Float  = 0
+    @ObservationIgnored private var _pattern:        DrumPattern = DrumPattern.all[0]
+    @ObservationIgnored private var renderCustomHits: [DrumHit]?
     private let customHitsLock = NSLock()
-    private var renderIsPlaying:    Bool   = false
-    private var renderMasterVolume: Float  = 0.8
-    private var beatCounter:        Int    = 0
-    private var shuffleBag:         [Int]  = []
+    @ObservationIgnored private var renderIsPlaying:    Bool   = false
+    @ObservationIgnored private var renderMasterVolume: Float  = 0.8
+    @ObservationIgnored private var beatCounter:        Int    = 0
+    @ObservationIgnored private var shuffleBag:         [Int]  = []
 
     // MARK: Init
 

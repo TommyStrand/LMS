@@ -4,19 +4,19 @@ import AVKit
 import MediaPlayer
 
 struct ContentView: View {
-    // Plain property initialisers: SwiftUI evaluates a @StateObject's wrapped
-    // value exactly once and discards re-inits. Allocating these objects eagerly
-    // in a custom init() instead spins up a new AudioEngine (AVAudioSession +
-    // AVAudioEngine + AVAudioSourceNode) and MIDIController (CoreMIDI client/port)
-    // on every view re-init, all of which SwiftUI then throws away — churning
-    // mach-port/dispatch objects and risking use-after-free crashes.
-    @StateObject private var engine       = AudioEngine()
-    @StateObject private var themeManager = ThemeManager()
-    @StateObject private var midi         = MIDIController()
-    @StateObject private var drum      = DrumEngine()
-    @StateObject private var favorites = FavoritesStore()
-    @StateObject private var recorder  = AudioRecorder()
-    @StateObject private var looper    = LooperEngine()
+    // App-lifetime @Observable models, created once in SuperNovaPadApp and injected
+    // via the environment. (Creating them here with `@State var x = X()` would
+    // re-allocate an AudioEngine / CoreMIDI client on every ContentView re-init and
+    // throw it away — see the note in SuperNovaPadApp.) SwiftUI tracks exactly
+    // which of their properties this body reads, so e.g. the 30 Hz waveform
+    // publish no longer invalidates this whole view.
+    @Environment(AudioEngine.self)    private var engine
+    @Environment(ThemeManager.self)   private var themeManager
+    @Environment(MIDIController.self) private var midi
+    @Environment(DrumEngine.self)     private var drum
+    @Environment(FavoritesStore.self) private var favorites
+    @Environment(AudioRecorder.self)  private var recorder
+    @Environment(LooperEngine.self)   private var looper
     @State private var selectedPresetIndex = 0
     @State private var showControls    = true
     @State private var showSettings    = false
@@ -49,7 +49,6 @@ struct ContentView: View {
                 }
             }
         }
-        .environmentObject(themeManager)
         .preferredColorScheme(themeManager.current.colorScheme)
         .onAppear {
             midi.attach(to: engine)
@@ -58,23 +57,23 @@ struct ContentView: View {
             engine.looper      = looper
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView(engine: engine).environmentObject(themeManager)
+            SettingsView(engine: engine)
         }
         .sheet(isPresented: $showShareSheet, onDismiss: { recorder.exportURL = nil }) {
             if let url = recorder.exportURL {
                 ShareSheet(url: url)
             }
         }
-        .onChangeCompat(of: midi.activityPulse) { _ in
+        .onChange(of: midi.activityPulse) {
             midiActivityLit = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 midiActivityLit = false
             }
         }
-        .onChangeCompat(of: recorder.exportURL) { url in
+        .onChange(of: recorder.exportURL) { _, url in
             if url != nil { showShareSheet = true }
         }
-        .onChangeCompat(of: recorder.isRecording) { recording in
+        .onChange(of: recorder.isRecording) { _, recording in
             if recording {
                 withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                     recBlink = true
@@ -84,23 +83,23 @@ struct ContentView: View {
             }
         }
         // MARK: - AirPlay 2 / Now Playing updates
-        .onChangeCompat(of: selectedPresetIndex) { idx in
+        .onChange(of: selectedPresetIndex) { _, idx in
             nowPlaying.update(presetName: SynthPreset.presets[idx].name,
                               isLiveInstrument: true, isPlaying: false)
         }
-        .onChangeCompat(of: showDrumMachine) { drumActive in
+        .onChange(of: showDrumMachine) { _, drumActive in
             let title = drumActive
                 ? DrumPattern.all[drum.patternIndex].name + " — Drum"
                 : SynthPreset.presets[selectedPresetIndex].name
             nowPlaying.update(presetName: title, isLiveInstrument: true,
                               isPlaying: drumActive && drum.isPlaying)
         }
-        .onChangeCompat(of: drum.patternIndex) { idx in
+        .onChange(of: drum.patternIndex) { _, idx in
             guard showDrumMachine else { return }
             nowPlaying.update(presetName: DrumPattern.all[idx].name + " — Drum",
                               isLiveInstrument: true, isPlaying: drum.isPlaying)
         }
-        .onChangeCompat(of: drum.isPlaying) { playing in
+        .onChange(of: drum.isPlaying) { _, playing in
             nowPlaying.setPlaybackState(playing)
         }
         // Remote commands from lock screen / AirPlay device / Control Centre
@@ -530,7 +529,8 @@ struct ContentView: View {
 /// only; expanded adds memory. Turns red when CPU is pegged so a performance
 /// problem is obvious at a glance while playing.
 struct HeaderMeter: View {
-    @ObservedObject private var diag = Diagnostics.shared
+    // @Observable singleton: reads in `body` are tracked automatically, no wrapper needed.
+    private let diag = Diagnostics.shared
     let compact: Bool
     let theme: AppTheme
 
@@ -625,23 +625,13 @@ extension Color {
     }
 }
 
-// MARK: - onChange compatibility (iOS 16 deployment target)
-
-extension View {
-    /// `onChange(of:perform:)` is deprecated from iOS 17 in favour of the two-
-    /// parameter closure form — which doesn't exist on iOS 16. Branching on
-    /// availability keeps the iOS 16.0 deployment target warning-free: the legacy
-    /// call compiles only into the `else` context, where the OS is known to be
-    /// < 17 and the API is not deprecated. Behaviour is identical on both.
-    @ViewBuilder
-    func onChangeCompat<V: Equatable>(of value: V,
-                                      perform action: @escaping (V) -> Void) -> some View {
-        if #available(iOS 17.0, *) {
-            self.onChange(of: value) { _, newValue in action(newValue) }
-        } else {
-            self.onChange(of: value, perform: action)
-        }
-    }
+#Preview {
+    ContentView()
+        .environment(AudioEngine())
+        .environment(ThemeManager())
+        .environment(MIDIController())
+        .environment(DrumEngine())
+        .environment(FavoritesStore())
+        .environment(AudioRecorder())
+        .environment(LooperEngine())
 }
-
-#Preview { ContentView() }

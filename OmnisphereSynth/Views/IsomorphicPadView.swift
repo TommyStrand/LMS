@@ -10,8 +10,8 @@ import SwiftUI
 /// Scale notes are lit; chromatic passing tones are dim. Root notes glow with
 /// the preset accent colour. Multi-touch is fully supported.
 struct IsomorphicPadView: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     let preset: SynthPreset
 
     private let nRows       = 4

@@ -51,3 +51,8 @@ When you can't run on-device, prefer encoding an invariant (validator check or
 - SamplerEngine uses AVAudioPlayerNode + AVAudioUnitVarispeed pool (not AVAudioUnitSampler)
 - Bundle WAV lookup via FileManager.enumerator, not Bundle.url(forResource:subdirectory:)
 - Mono WAV buffers are promoted to stereo in makeStereo() before scheduling
+- Deployment target is iOS 17. Model classes use `@Observable` (not ObservableObject);
+  app-lifetime objects are created once in `SuperNovaPadApp` and injected via `.environment()`
+- **Real-time rule:** `@Observable` tracking accessors take a lock, so any property the audio
+  render thread touches (AudioEngine, DrumEngine) MUST be `@ObservationIgnored`. Only
+  main-thread, UI-facing properties may be tracked

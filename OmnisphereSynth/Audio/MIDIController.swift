@@ -1,24 +1,29 @@
 import CoreMIDI
 import Foundation
+import Observation
 
 // MIDI input bridge. Auto-connects to every available MIDI source and
 // translates Note On/Off, mod wheel, sustain pedal and the eight MPK Mini
 // Plus default knobs (CC70-77) into engine calls.
-final class MIDIController: ObservableObject {
+//
+// @Observable: only the four UI-facing properties are tracked (all mutated on
+// main via the dispatch hops below). Internal state is @ObservationIgnored.
+@Observable
+final class MIDIController {
 
-    @Published private(set) var connectedDeviceNames: [String] = []
-    @Published private(set) var lastNote: Int? = nil
-    @Published private(set) var lastNoteVelocity: Float = 0
-    @Published private(set) var activityPulse: Int = 0   // increments on every note
+    private(set) var connectedDeviceNames: [String] = []
+    private(set) var lastNote: Int? = nil
+    private(set) var lastNoteVelocity: Float = 0
+    private(set) var activityPulse: Int = 0   // increments on every note
 
-    private var client: MIDIClientRef = 0
-    private var inputPort: MIDIPortRef = 0
-    private weak var engine: AudioEngine?
+    @ObservationIgnored private var client: MIDIClientRef = 0
+    @ObservationIgnored private var inputPort: MIDIPortRef = 0
+    @ObservationIgnored private weak var engine: AudioEngine?
 
     // Per-note state
-    private var midiNoteIDs: [Int: Int] = [:]
-    private var sustainHeld = false
-    private var sustainedNotes: Set<Int> = []
+    @ObservationIgnored private var midiNoteIDs: [Int: Int] = [:]
+    @ObservationIgnored private var sustainHeld = false
+    @ObservationIgnored private var sustainedNotes: Set<Int> = []
     private let touchIDBase = 0x10000
 
     init() {
@@ -26,7 +31,7 @@ final class MIDIController: ObservableObject {
     }
 
     /// Wire up the audio engine after construction. Kept separate from `init`
-    /// so the controller can be created in a `@StateObject` initialiser without
+    /// so the controller can be created as App-level `@State` without
     /// eagerly allocating the engine on every SwiftUI view re-init.
     func attach(to engine: AudioEngine) {
         self.engine = engine

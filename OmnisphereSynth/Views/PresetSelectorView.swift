@@ -2,8 +2,8 @@ import SwiftUI
 
 struct PresetSelectorView: View {
     @Binding var selectedIndex: Int
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     let onSelect: (SynthPreset) -> Void
 
     var body: some View {

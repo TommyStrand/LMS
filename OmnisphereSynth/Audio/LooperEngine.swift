@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Observation
 
 /// MIDI-event looper. Records note-on/off events (with timestamps) as the user
 /// plays and plays them back on a repeating timer. Wire-up:
@@ -8,13 +9,14 @@ import Combine
 ///
 /// Looper-originated playback uses touchIDs ≥ 90000 so noteOn/Off skips
 /// re-recording those events (preventing exponential note accumulation).
-final class LooperEngine: ObservableObject {
+@Observable
+final class LooperEngine {
 
-    @Published var isRecording = false
-    @Published var isPlaying   = false
-    @Published var progress: Double = 0   // 0–1, position within the loop
+    var isRecording = false
+    var isPlaying   = false
+    var progress: Double = 0   // 0–1, position within the loop
 
-    weak var audioEngine: AudioEngine?
+    @ObservationIgnored weak var audioEngine: AudioEngine?
 
     // MARK: - Internal event store
 
@@ -28,15 +30,15 @@ final class LooperEngine: ObservableObject {
         let y: Float
     }
 
-    private var events: [Event] = []
-    private var loopDuration: Double = 0
-    private var recordStart: Date?
+    @ObservationIgnored private var events: [Event] = []
+    @ObservationIgnored private var loopDuration: Double = 0
+    @ObservationIgnored private var recordStart: Date?
 
-    private var eventCursor  = 0
-    private var lastLoopPass = -1
-    private var playbackStart: Date?
-    private var tickTimer:     AnyCancellable?
-    private var progressTimer: AnyCancellable?
+    @ObservationIgnored private var eventCursor  = 0
+    @ObservationIgnored private var lastLoopPass = -1
+    @ObservationIgnored private var playbackStart: Date?
+    @ObservationIgnored private var tickTimer:     AnyCancellable?
+    @ObservationIgnored private var progressTimer: AnyCancellable?
 
     // MARK: - Recording (called from AudioEngine.noteOn/Off)
 

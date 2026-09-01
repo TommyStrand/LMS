@@ -8,8 +8,8 @@ struct TouchPoint: Identifiable {
 }
 
 struct XYPadView: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     let preset: SynthPreset
 
     @State private var activeTouches: [Int: TouchPoint] = [:]

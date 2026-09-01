@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - ControlsView
 
 struct ControlsView: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     @Environment(\.horizontalSizeClass) var sizeClass
 
     private var isPad: Bool { sizeClass != .compact }
@@ -154,7 +154,7 @@ struct KnobView: View {
     let color: Color
     let onChange: (Float) -> Void
 
-    @EnvironmentObject var themeManager: ThemeManager
+    @Environment(ThemeManager.self) var themeManager
     @Environment(\.horizontalSizeClass) var sizeClass
     @State private var lastDragY: CGFloat = 0
     @State private var isDragging = false

@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct DrumMachineView: View {
-    @ObservedObject var drum:      DrumEngine
-    @ObservedObject var favorites: FavoritesStore
-    @EnvironmentObject var themeManager: ThemeManager
+    @Bindable var drum: DrumEngine        // @Bindable: this view binds $drum.bpm / knobs
+    var favorites: FavoritesStore
+    @Environment(ThemeManager.self) var themeManager
 
     @State private var showFavorites = false
 
@@ -477,8 +477,8 @@ private struct DrumKnob: View {
 // MARK: - Favorites sheet
 
 private struct FavoritesSheet: View {
-    @ObservedObject var drum:      DrumEngine
-    @ObservedObject var favorites: FavoritesStore
+    var drum:      DrumEngine
+    var favorites: FavoritesStore
     let theme: AppTheme
     let ac:    Color
     @Environment(\.dismiss) private var dismiss

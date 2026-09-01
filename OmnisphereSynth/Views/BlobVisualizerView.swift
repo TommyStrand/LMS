@@ -11,7 +11,7 @@ import SwiftUI
 /// surface remains fully interactive on top of it. Observes `engine` directly
 /// so only the canvas re-renders at ~30 Hz, not the whole ContentView.
 struct BlobVisualizerView: View {
-    @ObservedObject var engine: AudioEngine
+    var engine: AudioEngine   // @Observable: only `waveformSamples` reads are tracked
     let color:  Color
     let theme:  AppTheme
 

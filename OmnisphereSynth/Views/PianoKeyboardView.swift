@@ -20,8 +20,8 @@ import Combine
 ///
 /// Multi-touch: each finger is independent; voices persist until lift.
 struct PianoKeyboardView: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     let preset: SynthPreset
 
     // MARK: - Touch state

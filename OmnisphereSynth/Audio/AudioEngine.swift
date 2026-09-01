@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import Observation
 import os
 
 // Per-layer gain — written from main thread, read from render thread.
@@ -8,7 +9,7 @@ import os
 private final class GainBox { var value: Float = 1.0 }
 
 // Just the per-buffer effect scalars the render thread needs, snapshotted from
-// `currentPreset` on the main thread. Reading the whole @Published SynthPreset
+// `currentPreset` on the main thread. Reading the whole observed SynthPreset
 // struct from the render thread is a data race (knob setters mutate it on main);
 // copying these few floats under the render lock makes the read well-defined.
 private struct RenderParams {
@@ -33,7 +34,18 @@ private struct RenderSnapshot {
     var params  = RenderParams()
 }
 
-final class AudioEngine: ObservableObject {
+// @Observable (iOS 17): SwiftUI tracks exactly which properties a view reads, so
+// the 30 Hz `waveformSamples` publish re-renders only the visualiser, not every
+// view holding the engine.
+//
+// REAL-TIME RULE: @Observable synthesises tracking accessors for every stored
+// `var`, and those go through the ObservationRegistrar (a lock + possible
+// allocation). Anything the audio render thread touches MUST therefore be
+// `@ObservationIgnored`, or the render callback would block/allocate. Only the
+// handful of UI-facing properties below are left tracked; all are mutated on
+// the main thread.
+@Observable
+final class AudioEngine {
 
     // MARK: - Nodes
     private let engine        = AVAudioEngine()
@@ -48,26 +60,27 @@ final class AudioEngine: ObservableObject {
     private let shimmerMixer  = AVAudioMixerNode()
 
     // Single master source node — all synth voices summed here, effects applied once.
-    private var masterNode: AVAudioSourceNode?
+    @ObservationIgnored private var masterNode: AVAudioSourceNode?
 
     // MARK: - Master effect chain (single shared set, not per-voice)
     // Initialised lazily so sampleRate is available; first accessed in setupMasterNode()
     // which always runs before the audio thread starts.
-    private lazy var masterMod        = ModulationProcessor(sampleRate: sampleRate)
-    private lazy var masterLofiL      = LofiProcessor()
-    private lazy var masterLofiR      = LofiProcessor()
-    private lazy var masterSpaceEchoL = SpaceEchoProcessor(sampleRate: sampleRate)
-    private lazy var masterSpaceEchoR = SpaceEchoProcessor(sampleRate: sampleRate)
-    private lazy var masterGrit       = GritProcessor()
-    private lazy var masterTapeL      = BrokenTapeDelay(sampleRate: sampleRate)
-    private lazy var masterTapeR      = BrokenTapeDelay(sampleRate: sampleRate)
-    private lazy var masterBloom      = BloomReverbProcessor(sampleRate: sampleRate)
-    private lazy var masterPhaserL    = PhaserProcessor(sampleRate: sampleRate)
-    private lazy var masterPhaserR    = PhaserProcessor(sampleRate: sampleRate, lfoPhaseOffset: 0.5)
-    private lazy var masterAutoWahL   = AutoWahProcessor(sampleRate: sampleRate)
-    private lazy var masterAutoWahR   = AutoWahProcessor(sampleRate: sampleRate)
-    private lazy var masterModDelayL  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.33)
-    private lazy var masterModDelayR  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.37)
+    // Read on the render thread every sample — must stay outside observation tracking.
+    @ObservationIgnored private lazy var masterMod        = ModulationProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterLofiL      = LofiProcessor()
+    @ObservationIgnored private lazy var masterLofiR      = LofiProcessor()
+    @ObservationIgnored private lazy var masterSpaceEchoL = SpaceEchoProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterSpaceEchoR = SpaceEchoProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterGrit       = GritProcessor()
+    @ObservationIgnored private lazy var masterTapeL      = BrokenTapeDelay(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterTapeR      = BrokenTapeDelay(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterBloom      = BloomReverbProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterPhaserL    = PhaserProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterPhaserR    = PhaserProcessor(sampleRate: sampleRate, lfoPhaseOffset: 0.5)
+    @ObservationIgnored private lazy var masterAutoWahL   = AutoWahProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterAutoWahR   = AutoWahProcessor(sampleRate: sampleRate)
+    @ObservationIgnored private lazy var masterModDelayL  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.33)
+    @ObservationIgnored private lazy var masterModDelayR  = ModulatingDelayProcessor(sampleRate: sampleRate, lfoRate: 0.37)
 
     // MARK: - State
     //
@@ -79,7 +92,7 @@ final class AudioEngine: ObservableObject {
     private(set) var voices: [Int: any AnyVoice] = [:]
 
     // Non-nil only for layer-mode voices; single-mode voices use implicit gain 1.0.
-    private var voiceGainBoxes: [Int: GainBox] = [:]
+    @ObservationIgnored private var voiceGainBoxes: [Int: GainBox] = [:]
 
     // Voice/param hand-off to the audio thread. The render callback uses a
     // try-lock (os_unfair_lock_trylock) that NEVER blocks: if the main thread is
@@ -97,9 +110,9 @@ final class AudioEngine: ObservableObject {
         return p
     }()
     // Guarded by snapshotLock; written on main, read (try-lock) on the audio thread.
-    private var publishedSnapshot = RenderSnapshot()
+    @ObservationIgnored private var publishedSnapshot = RenderSnapshot()
     // Render-thread-only cache of the last snapshot read; never touched off-render.
-    private var cachedSnapshot = RenderSnapshot()
+    @ObservationIgnored private var cachedSnapshot = RenderSnapshot()
 
     // Hard polyphony ceiling. Past this, the oldest voice is stolen so dense
     // playing (or a stuck note-on) can't grow the voice set without bound and
@@ -114,44 +127,49 @@ final class AudioEngine: ObservableObject {
     // the new voice. A unique id lets the old voice ring out its release tail next to
     // the new one. controlToVoiceID maps a control id (touchID, or touchID*1000+
     // presetIdx in layer mode) to its current live voiceID. Main-thread only.
-    private var nextVoiceID = 1
-    private var controlToVoiceID: [Int: Int] = [:]
+    @ObservationIgnored private var nextVoiceID = 1
+    @ObservationIgnored private var controlToVoiceID: [Int: Int] = [:]
 
     // Sampler nodes (one per instrument, lazily created)
-    private var samplerEngines: [String: SamplerEngine] = [:]
+    @ObservationIgnored private var samplerEngines: [String: SamplerEngine] = [:]
     // touchID → (instrumentID, midiNote) for single mode; compound ID for layer mode
-    private var samplerTouches: [Int: (instrumentID: String, note: Int)] = [:]
+    @ObservationIgnored private var samplerTouches: [Int: (instrumentID: String, note: Int)] = [:]
 
-    @Published var waveformSamples: [Float] = Array(repeating: 0, count: 128)
-    @Published var currentPreset: SynthPreset = SynthPreset.presets[0]
+    // MARK: - Observed (UI-facing) state — main-thread only
+    var waveformSamples: [Float] = Array(repeating: 0, count: 128)
+    var currentPreset: SynthPreset = SynthPreset.presets[0]
 
     // MARK: - Layer mode
-    @Published var isLayeringMode    = false
-    @Published var activeLayerIndices: [Int] = []
-    @Published var primaryLayerIndex: Int?
+    var isLayeringMode    = false
+    var activeLayerIndices: [Int] = []
+    var primaryLayerIndex: Int?
+    // Layer gains live in GainBox class instances (so the render thread can read
+    // them live); those aren't observable, so this revision counter is bumped on
+    // every setLayerGain and read by layerGain(for:) to make gain edits visible.
+    private(set) var layerGainRevision = 0
 
     // Gain boxes keyed by preset index; shared with voiceGainBoxes entries for render.
-    private var layerGainBoxes:     [Int: GainBox] = [:]
+    @ObservationIgnored private var layerGainBoxes:     [Int: GainBox] = [:]
     // Tracks which preset indices were layered at each noteOn, for correct noteOff cleanup.
-    private var noteOnLayerIndices: [Int: [Int]]   = [:]
+    @ObservationIgnored private var noteOnLayerIndices: [Int: [Int]]   = [:]
 
     private let sampleRate: Double = 44100
 
     // Visualiser ring buffer. Written by the render thread into raw, uniquely-owned
     // memory (no COW, no allocation on the audio thread) and copied to the
-    // @Published `waveformSamples` by a main-thread maintenance timer. The
+    // observed `waveformSamples` by a main-thread maintenance timer. The
     // cross-thread read of plain Floats is a benign race — at worst the visualiser
     // shows one mixed frame, which is invisible.
     private static let analysisCount = 128
     private let analysisPtr = UnsafeMutableBufferPointer<Float>.allocate(capacity: AudioEngine.analysisCount)
-    private var analysisWriteIndex = 0
-    private var lastPublishedSilent = false
+    @ObservationIgnored private var analysisWriteIndex = 0
+    @ObservationIgnored private var lastPublishedSilent = false
 
     // Periodic main-thread housekeeping: publish the visualiser buffer and reap
     // voices that have finished their release tail (via AnyVoice.isFinished).
-    private var maintenanceTimer: Timer?
+    @ObservationIgnored private var maintenanceTimer: Timer?
     // Notification observer tokens, removed in deinit.
-    private var sessionObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var sessionObservers: [NSObjectProtocol] = []
 
     // Serialises audio-session activation and engine start/restart off the main
     // thread. AVAudioSession.setActive(_:) can block long enough to stall the UI,
@@ -448,7 +466,7 @@ final class AudioEngine: ObservableObject {
             self.engine.reset()
             self.setupMasterNode()
             try? self.engine.start()
-            // Re-apply node parameters only — do NOT touch the @Published currentPreset
+            // Re-apply node parameters only — do NOT touch the observed currentPreset
             // from a background thread.
             self.applyPresetToNodes(self.currentPreset)
             Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
@@ -500,16 +518,16 @@ final class AudioEngine: ObservableObject {
             activeLayerIndices.append(presetIndex)
             primaryLayerIndex = presetIndex
         }
-        objectWillChange.send()
     }
 
     func layerGain(for presetIndex: Int) -> Float {
-        layerGainBoxes[presetIndex]?.value ?? 1.0
+        _ = layerGainRevision   // register a dependency so gain edits re-render callers
+        return layerGainBoxes[presetIndex]?.value ?? 1.0
     }
 
     func setLayerGain(_ gain: Float, for presetIndex: Int) {
         layerGainBoxes[presetIndex]?.value = max(0.05, min(1, gain))
-        objectWillChange.send()
+        layerGainRevision &+= 1
     }
 
     @discardableResult
@@ -528,14 +546,14 @@ final class AudioEngine: ObservableObject {
     }
 
     func applyPreset(_ preset: SynthPreset) {
-        currentPreset = preset   // @Published — callers must invoke this on main
+        currentPreset = preset   // observed — callers must invoke this on main
         Diagnostics.shared.log("Preset → \(preset.name)")
         applyPresetToNodes(preset)
     }
 
     /// Applies a preset's reverb/delay/shimmer settings to the audio-unit nodes.
     /// Separate from `applyPreset` so it can run on the session queue during an
-    /// engine restart without mutating the `@Published` currentPreset off-main.
+    /// engine restart without mutating the observed currentPreset off-main.
     private func applyPresetToNodes(_ preset: SynthPreset) {
         reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
         reverb.wetDryMix = preset.reverbMix * 100
@@ -575,7 +593,7 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Live knob updates
 
-    // Each knob setter mutates the @Published currentPreset (for the UI) and then
+    // Each knob setter mutates the observed currentPreset (for the UI) and then
     // republishes the render params so the audio thread sees the change. Reverb/
     // delay/shimmer are AU-node params and don't go through RenderParams, so they
     // skip the republish.
@@ -623,8 +641,8 @@ final class AudioEngine: ObservableObject {
         return se
     }
 
-    // MARK: - Looper hook (weak — owned by ContentView's @StateObject)
-    weak var looper: LooperEngine?
+    // MARK: - Looper hook (weak — the App owns the LooperEngine)
+    @ObservationIgnored weak var looper: LooperEngine?
 
     // MARK: - Touch Events
 
@@ -830,7 +848,7 @@ final class AudioEngine: ObservableObject {
     /// Runs at ~30 Hz on the main run loop. Does two cheap jobs that used to be
     /// done from the audio thread (a dispatch per visualiser frame) or by a
     /// per-voice asyncAfter timer:
-    ///   1. Copy the visualiser ring buffer into the @Published `waveformSamples`,
+    ///   1. Copy the visualiser ring buffer into the observed `waveformSamples`,
     ///      skipping the publish entirely while silent so SwiftUI isn't re-rendered
     ///      30×/sec during idle.
     ///   2. Reap voices that have finished their release tail (AnyVoice.isFinished),

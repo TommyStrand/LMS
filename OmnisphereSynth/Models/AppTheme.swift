@@ -230,13 +230,47 @@ struct AppTheme: Identifiable {
 
 // MARK: - Manager
 
-final class ThemeManager: ObservableObject {
-    @AppStorage("selectedThemeId") private var storedId: String = "cosmos"
-    @AppStorage("controlStyle")    private var storedControlStyle: String = ControlStyle.rotary.rawValue
-    @AppStorage("playMode")        private var storedPlayMode: String = PlayMode.grid.rawValue
-    @AppStorage("scaleId")         private var storedScaleId: String = MusicalScale.major.rawValue
-    @AppStorage("rootNote")        var rootNote: Int = 48
-    @AppStorage("transposeOctave") var transposeOctave: Int = 0
+/// User-selected theme / control style / play mode / scale / root / transpose.
+///
+/// `@Observable` (iOS 17): views re-render only for the properties they actually
+/// read — e.g. changing the scale no longer invalidates views that only read the
+/// theme colours. Persistence is plain UserDefaults via `didSet` (the `@AppStorage`
+/// wrapper is a SwiftUI DynamicProperty and does not work inside an @Observable
+/// class). Keys are unchanged, so existing users keep their settings.
+@Observable
+final class ThemeManager {
+    private let defaults = UserDefaults.standard   // `let`s are never tracked
+
+    private var storedId: String {
+        didSet { defaults.set(storedId, forKey: "selectedThemeId") }
+    }
+    private var storedControlStyle: String {
+        didSet { defaults.set(storedControlStyle, forKey: "controlStyle") }
+    }
+    private var storedPlayMode: String {
+        didSet { defaults.set(storedPlayMode, forKey: "playMode") }
+    }
+    private var storedScaleId: String {
+        didSet { defaults.set(storedScaleId, forKey: "scaleId") }
+    }
+    var rootNote: Int {
+        didSet { defaults.set(rootNote, forKey: "rootNote") }
+    }
+    var transposeOctave: Int {
+        didSet { defaults.set(transposeOctave, forKey: "transposeOctave") }
+    }
+
+    init() {
+        let d = UserDefaults.standard
+        storedId           = d.string(forKey: "selectedThemeId") ?? "cosmos"
+        storedControlStyle = d.string(forKey: "controlStyle")    ?? ControlStyle.rotary.rawValue
+        storedPlayMode     = d.string(forKey: "playMode")        ?? PlayMode.grid.rawValue
+        storedScaleId      = d.string(forKey: "scaleId")         ?? MusicalScale.major.rawValue
+        // integer(forKey:) returns 0 for a missing key, so check presence to keep
+        // the historical default root of C3 (48) on first launch.
+        rootNote        = d.object(forKey: "rootNote") == nil ? 48 : d.integer(forKey: "rootNote")
+        transposeOctave = d.integer(forKey: "transposeOctave")
+    }
 
     var current: AppTheme {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
@@ -254,28 +288,11 @@ final class ThemeManager: ObservableObject {
         MusicalScale(rawValue: storedScaleId) ?? .major
     }
 
-    func select(_ theme: AppTheme) {
-        storedId = theme.id
-        objectWillChange.send()
-    }
-
-    func selectControlStyle(_ style: ControlStyle) {
-        storedControlStyle = style.rawValue
-        objectWillChange.send()
-    }
-
-    func selectPlayMode(_ mode: PlayMode) {
-        storedPlayMode = mode.rawValue
-        objectWillChange.send()
-    }
-
-    func selectScale(_ scale: MusicalScale) {
-        storedScaleId = scale.rawValue
-        objectWillChange.send()
-    }
-
-    func selectRootNote(_ midi: Int) {
-        rootNote = midi
-        objectWillChange.send()
-    }
+    // Mutating the backing storage is itself the change notification under
+    // @Observable — no manual objectWillChange.send() needed.
+    func select(_ theme: AppTheme)                 { storedId = theme.id }
+    func selectControlStyle(_ style: ControlStyle) { storedControlStyle = style.rawValue }
+    func selectPlayMode(_ mode: PlayMode)          { storedPlayMode = mode.rawValue }
+    func selectScale(_ scale: MusicalScale)        { storedScaleId = scale.rawValue }
+    func selectRootNote(_ midi: Int)               { rootNote = midi }
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var engine: AudioEngine
-    @EnvironmentObject var themeManager: ThemeManager
+    var engine: AudioEngine
+    @Environment(ThemeManager.self) var themeManager
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -163,7 +163,6 @@ struct SettingsView: View {
 
                         NavigationLink {
                             DiagnosticsView(engine: engine)
-                                .environmentObject(themeManager)
                         } label: {
                             HStack {
                                 Image(systemName: "waveform.path.ecg")

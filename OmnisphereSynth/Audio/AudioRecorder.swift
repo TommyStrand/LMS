@@ -1,18 +1,22 @@
 import AVFoundation
 import Foundation
+import Observation
 
-final class AudioRecorder: ObservableObject {
-    @Published var isRecording  = false
-    @Published var isExporting  = false
-    @Published var exportURL: URL?
-    @Published var failed       = false
+@Observable
+final class AudioRecorder {
+    var isRecording  = false
+    var isExporting  = false
+    var exportURL: URL?
+    var failed       = false
 
-    private var synthTempURL: URL?
-    private var drumTempURL:  URL?
-    private var synthFile: AVAudioFile?
-    private var drumFile:  AVAudioFile?
-    private weak var synthAVEngine: AVAudioEngine?
-    private weak var drumAVEngine:  AVAudioEngine?
+    // Internal plumbing — written from the tap/write queue, so kept out of
+    // observation tracking.
+    @ObservationIgnored private var synthTempURL: URL?
+    @ObservationIgnored private var drumTempURL:  URL?
+    @ObservationIgnored private var synthFile: AVAudioFile?
+    @ObservationIgnored private var drumFile:  AVAudioFile?
+    @ObservationIgnored private weak var synthAVEngine: AVAudioEngine?
+    @ObservationIgnored private weak var drumAVEngine:  AVAudioEngine?
 
     // Serial queue so tap callbacks never race with file closure
     private let writeQueue = DispatchQueue(label: "audio.recorder.write", qos: .userInteractive)

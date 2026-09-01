@@ -1,9 +1,11 @@
 import Foundation
+import Observation
 
-final class FavoritesStore: ObservableObject {
+@Observable
+final class FavoritesStore {
     private let key = "drum.favorites.v1"
 
-    @Published private(set) var names: Set<String>
+    private(set) var names: Set<String>
 
     init() {
         names = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])

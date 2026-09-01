@@ -4,14 +4,14 @@ import Combine   // Timer.publish(...).autoconnect() returns Combine publisher t
 /// On-device troubleshooting panel: live CPU / memory / voice-count meters and a
 /// scrolling event log. Reached from Settings. Sampling runs only while visible.
 ///
-/// `engine` is held as a plain reference (not @ObservedObject) on purpose — the
+/// `engine` is deliberately only touched in onReceive/onAppear, never in `body` — the
 /// engine republishes its waveform buffer hundreds of times a second, and we do
 /// not want that to thrash this view. Voice counts are polled on a slow timer
 /// instead; meters and the log come from the `Diagnostics` singleton.
 struct DiagnosticsView: View {
     let engine: AudioEngine
-    @ObservedObject private var diag = Diagnostics.shared
-    @EnvironmentObject var themeManager: ThemeManager
+    private let diag = Diagnostics.shared
+    @Environment(ThemeManager.self) var themeManager
 
     @State private var synthVoices   = 0
     @State private var samplerVoices = 0
@@ -79,7 +79,7 @@ struct DiagnosticsView: View {
                 }
                 .padding(20)
             }
-            .onChangeCompat(of: diag.entries.count) { _ in
+            .onChange(of: diag.entries.count) {
                 if let last = diag.entries.last?.id {
                     withAnimation { proxy.scrollTo(last, anchor: .bottom) }
                 }

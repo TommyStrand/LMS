@@ -5,7 +5,7 @@ import Combine
 /// Sits below the play surface. The looper fires note-on/off events through
 /// AudioEngine so all presets and expression (X/Y) are captured faithfully.
 struct LooperView: View {
-    @ObservedObject var looper: LooperEngine
+    var looper: LooperEngine
     let theme: AppTheme
     let accent: Color
 

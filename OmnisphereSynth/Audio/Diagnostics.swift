@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Observation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -11,7 +12,8 @@ import UIKit
 /// All published state is mutated on the main thread. `log(_:)` is safe to call
 /// from any thread EXCEPT the real-time audio render thread — it allocates and
 /// hops to main, neither of which is permissible inside the render callback.
-final class Diagnostics: ObservableObject {
+@Observable
+final class Diagnostics {
 
     static let shared = Diagnostics()
 
@@ -21,13 +23,13 @@ final class Diagnostics: ObservableObject {
         let message: String
     }
 
-    @Published private(set) var entries: [Entry] = []
-    @Published private(set) var cpuPercent: Double = 0
-    @Published private(set) var memoryMB:   Double = 0
+    private(set) var entries: [Entry] = []
+    private(set) var cpuPercent: Double = 0
+    private(set) var memoryMB:   Double = 0
 
     private let maxEntries = 200
-    private var timer: DispatchSourceTimer?
-    private var cpuHigh = false   // hysteresis state for edge-triggered CPU warnings
+    @ObservationIgnored private var timer: DispatchSourceTimer?
+    @ObservationIgnored private var cpuHigh = false   // hysteresis state for edge-triggered CPU warnings
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
