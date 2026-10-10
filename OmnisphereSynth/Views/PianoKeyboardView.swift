@@ -52,7 +52,7 @@ struct PianoKeyboardView: View {
     // note — MorphWiz's "slide freely, land in tune" gesture.
     private let settleTimer = Timer.publish(every: 0.04, on: .main, in: .common).autoconnect()
     private let settleDelay: Double = 0.08
-    private let pitchPerKey  = 12.0 / 7.0   // semitones per white-key width
+    private let pitchPerKey  = PitchSnap.semitonesPerWhiteKey   // semitones per white-key width
 
     // MARK: - Note layout
 
@@ -248,9 +248,11 @@ struct PianoKeyboardView: View {
                   now - lastMove >= settleDelay
             else { continue }
 
-            let semitones   = Double(loc.x - originX) / Double(dims.keyW) * pitchPerKey
+            let semitones   = PitchSnap.semitones(dx: Double(loc.x - originX), keyWidth: Double(dims.keyW))
             let pitch       = Double(originNote) + semitones
-            let snappedMidi = nearestScaleMidi(to: pitch)
+            let snappedMidi = PitchSnap.nearestScaleMidi(to: pitch,
+                                                         rootNote: themeManager.rootNote,
+                                                         scale: themeManager.scale)
             let target      = Float(Double(snappedMidi) - Double(originNote))
             let y           = Float(1 - loc.y / geo.size.height)
 
@@ -261,22 +263,7 @@ struct PianoKeyboardView: View {
         }
     }
 
-    /// Nearest MIDI note belonging to the current scale (root + scale degrees) to a
-    /// fractional pitch. Falls back to the rounded pitch for the chromatic scale.
-    private func nearestScaleMidi(to pitch: Double) -> Int {
-        let rootPc    = ((themeManager.rootNote % 12) + 12) % 12
-        let intervals = Set(themeManager.scale.intervals)
-        let center    = Int(pitch.rounded())
-        var best      = center
-        var bestDist  = Double.infinity
-        for cand in (center - 6)...(center + 6) {
-            let pc = (((cand - rootPc) % 12) + 12) % 12
-            guard intervals.contains(pc) else { continue }
-            let d = abs(Double(cand) - pitch)
-            if d < bestDist { bestDist = d; best = cand }
-        }
-        return min(127, max(0, best))
-    }
+    // nearestScaleMidi lives in PitchSnap (Models/AppTheme.swift) so it's unit-testable.
 
     // MARK: - Key views
 

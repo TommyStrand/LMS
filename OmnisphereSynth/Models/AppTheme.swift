@@ -90,6 +90,41 @@ enum MusicalScale: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Pitch snapping (pure — unit-tested in SuperNovaPadTests)
+
+/// The keyboard's continuous-pitch maths, factored out of `PianoKeyboardView` so
+/// the snap-after-slide behaviour can be verified without touch input.
+enum PitchSnap {
+    /// Semitones of pitch per white-key width of horizontal travel. 12 chromatic
+    /// semitones are spread across 7 white keys per octave, so this is the
+    /// average piano ratio (≈1.714).
+    static let semitonesPerWhiteKey = 12.0 / 7.0
+
+    /// Continuous bend for a horizontal finger displacement.
+    static func semitones(dx: Double, keyWidth: Double) -> Double {
+        guard keyWidth > 0 else { return 0 }
+        return dx / keyWidth * semitonesPerWhiteKey
+    }
+
+    /// Nearest MIDI note belonging to `scale` (rooted at `rootNote`'s pitch class)
+    /// to a fractional pitch. For the chromatic scale this is plain rounding.
+    /// Ties resolve to the LOWER note (first candidate wins on equal distance).
+    static func nearestScaleMidi(to pitch: Double, rootNote: Int, scale: MusicalScale) -> Int {
+        let rootPc    = ((rootNote % 12) + 12) % 12
+        let intervals = Set(scale.intervals)
+        let center    = Int(pitch.rounded())
+        var best      = center
+        var bestDist  = Double.infinity
+        for cand in (center - 6)...(center + 6) {
+            let pc = (((cand - rootPc) % 12) + 12) % 12
+            guard intervals.contains(pc) else { continue }
+            let d = abs(Double(cand) - pitch)
+            if d < bestDist { bestDist = d; best = cand }
+        }
+        return min(127, max(0, best))
+    }
+}
+
 // MARK: - Control style
 
 enum ControlStyle: String, CaseIterable, Identifiable {

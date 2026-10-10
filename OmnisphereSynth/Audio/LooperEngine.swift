@@ -20,7 +20,7 @@ final class LooperEngine {
 
     // MARK: - Internal event store
 
-    private struct Event {
+    struct Event {
         let t: Double        // seconds from loop start
         let touchID: Int     // already offset by +90000 for playback
         let noteOn: Bool
@@ -34,8 +34,7 @@ final class LooperEngine {
     @ObservationIgnored private var loopDuration: Double = 0
     @ObservationIgnored private var recordStart: Date?
 
-    @ObservationIgnored private var eventCursor  = 0
-    @ObservationIgnored private var lastLoopPass = -1
+    @ObservationIgnored private var schedule = LoopSchedule.State()
     @ObservationIgnored private var playbackStart: Date?
     @ObservationIgnored private var tickTimer:     AnyCancellable?
     @ObservationIgnored private var progressTimer: AnyCancellable?
@@ -95,8 +94,7 @@ final class LooperEngine {
         guard loopDuration > 0, !events.isEmpty else { return }
         isPlaying = true
         playbackStart = Date()
-        lastLoopPass = -1
-        eventCursor = 0
+        schedule = LoopSchedule.State()
 
         // 8 ms tick ≈ ~125 Hz — fine enough resolution for musical timing
         tickTimer = Timer.publish(every: 0.008, on: .main, in: .common)
@@ -121,24 +119,15 @@ final class LooperEngine {
 
     private func tick() {
         guard let start = playbackStart, loopDuration > 0 else { return }
-        let elapsed   = Date().timeIntervalSince(start)
-        let loopPass  = Int(elapsed / loopDuration)
-        let loopPhase = elapsed.truncatingRemainder(dividingBy: loopDuration)
-
-        if loopPass > lastLoopPass {
-            // Loop wrapped — silence any held notes, then restart event cursor
-            if lastLoopPass >= 0 {
-                let ids = Set(events.filter { $0.noteOn }.map { $0.touchID })
-                ids.forEach { audioEngine?.noteOff(touchID: $0) }
-            }
-            lastLoopPass = loopPass
-            eventCursor  = 0
+        let elapsed = Date().timeIntervalSince(start)
+        let step = LoopSchedule.advance(&schedule, eventTimes: events.map(\.t),
+                                        loopDuration: loopDuration, elapsed: elapsed)
+        if step.wrapped {
+            // Loop wrapped — silence any notes still held from the previous pass.
+            let ids = Set(events.filter { $0.noteOn }.map { $0.touchID })
+            ids.forEach { audioEngine?.noteOff(touchID: $0) }
         }
-
-        while eventCursor < events.count, events[eventCursor].t <= loopPhase {
-            fire(events[eventCursor])
-            eventCursor += 1
-        }
+        for i in step.fire { fire(events[i]) }
     }
 
     private func fire(_ ev: Event) {
@@ -155,5 +144,44 @@ final class LooperEngine {
         guard let start = playbackStart, loopDuration > 0 else { progress = 0; return }
         let elapsed = Date().timeIntervalSince(start)
         progress = (elapsed / loopDuration).truncatingRemainder(dividingBy: 1.0)
+    }
+}
+
+// MARK: - Pure loop scheduling (no timers/Date — unit-tested in SuperNovaPadTests)
+
+/// Decides which recorded events fire for a given elapsed playback time. Pulled
+/// out of `LooperEngine.tick()` so the wrap-around and cursor logic can be tested
+/// deterministically instead of by listening for dropped or doubled notes.
+enum LoopSchedule {
+    struct State {
+        var cursor   = 0    // index of the next event to fire within this pass
+        var lastPass = -1   // -1 = playback has not started a pass yet
+    }
+
+    struct Step {
+        let fire: [Int]     // indices into eventTimes to fire now, in order
+        let wrapped: Bool   // true when a NEW pass began on a loop boundary (pass ≥ 1)
+    }
+
+    /// `eventTimes` must be ascending (they're recorded in time order).
+    static func advance(_ s: inout State, eventTimes: [Double],
+                        loopDuration: Double, elapsed: Double) -> Step {
+        guard loopDuration > 0 else { return Step(fire: [], wrapped: false) }
+        let pass  = Int(elapsed / loopDuration)
+        let phase = elapsed.truncatingRemainder(dividingBy: loopDuration)
+
+        var wrapped = false
+        if pass > s.lastPass {
+            wrapped    = s.lastPass >= 0      // first pass is a start, not a wrap
+            s.lastPass = pass
+            s.cursor   = 0
+        }
+
+        var fire: [Int] = []
+        while s.cursor < eventTimes.count, eventTimes[s.cursor] <= phase {
+            fire.append(s.cursor)
+            s.cursor += 1
+        }
+        return Step(fire: fire, wrapped: wrapped)
     }
 }

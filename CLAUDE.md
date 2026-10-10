@@ -46,6 +46,13 @@ loaded == expected, so the descriptor and the files on disk must agree exactly.
 When you can't run on-device, prefer encoding an invariant (validator check or
 `assert`) over relying on someone hearing the problem.
 
+Unit tests live in `SuperNovaPadTests/` (Xcode: ⌘U). They cover pure logic only —
+no audio hardware — so the pattern for anything testable is to factor it into a
+plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
+`SamplerSelection` (note/velocity → sample), `PitchSnap` (keyboard glide + snap-
+to-scale), `LoopSchedule` (looper event firing/wrap), `RenderParams` (preset →
+audio-thread scalars), plus descriptor and scale invariants.
+
 ## Key decisions
 - Single master AVAudioSourceNode (not per-voice) to share the effects chain across all voices
 - SamplerEngine uses AVAudioPlayerNode + AVAudioUnitVarispeed pool (not AVAudioUnitSampler)

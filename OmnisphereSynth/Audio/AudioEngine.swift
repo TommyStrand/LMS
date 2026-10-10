@@ -12,7 +12,8 @@ private final class GainBox { var value: Float = 1.0 }
 // `currentPreset` on the main thread. Reading the whole observed SynthPreset
 // struct from the render thread is a data race (knob setters mutate it on main);
 // copying these few floats under the render lock makes the read well-defined.
-private struct RenderParams {
+// Internal (not private) so the preset→params mapping is unit-testable.
+struct RenderParams {
     var autoWah:    Float = 0, grit:  Float = 0, lofi:     Float = 0
     var space:      Float = 0, tape:  Float = 0, bloom:    Float = 0
     var tremulant:  Float = 0, chorus: Float = 0, distortion: Float = 0
