@@ -55,6 +55,10 @@ struct ContentView: View {
             Diagnostics.shared.startSampling()   // drives the always-on header meter
             looper.audioEngine = engine
             engine.looper      = looper
+            engine.yAxisMorph  = themeManager.yAxisMorph
+        }
+        .onChange(of: themeManager.yAxisMorph) { _, morph in
+            engine.yAxisMorph = morph
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(engine: engine)

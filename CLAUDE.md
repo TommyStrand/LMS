@@ -51,7 +51,7 @@ no audio hardware — so the pattern for anything testable is to factor it into 
 plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
 `SamplerSelection` (note/velocity → sample), `PitchSnap` (keyboard glide + snap-
 to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
-(wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `RenderParams` (preset →
+(wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions

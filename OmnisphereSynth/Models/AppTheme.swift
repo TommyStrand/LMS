@@ -336,6 +336,10 @@ final class ThemeManager {
     var transposeOctave: Int {
         didSet { defaults.set(transposeOctave, forKey: "transposeOctave") }
     }
+    /// Vertical pad axis: false = brightness + modulation (default), true = wave morph.
+    var yAxisMorph: Bool {
+        didSet { defaults.set(yAxisMorph, forKey: "yAxisMorph") }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -347,6 +351,7 @@ final class ThemeManager {
         // the historical default root of C3 (48) on first launch.
         rootNote        = d.object(forKey: "rootNote") == nil ? 48 : d.integer(forKey: "rootNote")
         transposeOctave = d.integer(forKey: "transposeOctave")
+        yAxisMorph      = d.bool(forKey: "yAxisMorph")      // missing key → false
     }
 
     var current: AppTheme {

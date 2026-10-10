@@ -10,6 +10,11 @@ final class SynthVoice: AnyVoice {
     var filterCutoffMod: Float = 0.5  // 0–1, mapped from touch X
     var lfoDepthMod: Float = 0.5      // 0–1, mapped from touch Y
     var pitchBendSemitones: Float = 0
+    /// Wave-morph position 0…1 (sine → triangle → saw → square), or < 0 for off
+    /// (the preset's own waveforms). Set from the pad's vertical axis when the
+    /// user picks "Wave Morph" in Settings.
+    var waveMorph: Float = -1
+    private var smoothMorph: Double = -1   // audio-thread only; ~11 ms glide, avoids zipper noise
 
     // Smooth pitch glide (audio-thread only)
     private var smoothPitchBend: Double = 0
@@ -106,8 +111,17 @@ final class SynthVoice: AnyVoice {
         phase1 = (phase1 + f1 * dt).truncatingRemainder(dividingBy: 1.0)
         phase2 = (phase2 + f2 * dt).truncatingRemainder(dividingBy: 1.0)
 
-        let s1 = waveformSample(phase: phase1, waveform: preset.osc1Waveform)
-        let s2 = waveformSample(phase: phase2, waveform: preset.osc2Waveform)
+        let s1: Double
+        let s2: Double
+        if waveMorph >= 0 {
+            if smoothMorph < 0 { smoothMorph = Double(waveMorph) }   // no glide-in from "off"
+            smoothMorph += (Double(waveMorph) - smoothMorph) * 0.002
+            s1 = WaveMorph.sample(phase: phase1, morph: smoothMorph)
+            s2 = WaveMorph.sample(phase: phase2, morph: smoothMorph)
+        } else {
+            s1 = waveformSample(phase: phase1, waveform: preset.osc1Waveform)
+            s2 = waveformSample(phase: phase2, waveform: preset.osc2Waveform)
+        }
         var raw = s1 * Double(1 - preset.oscMix) + s2 * Double(preset.oscMix)
 
         // Envelope
@@ -204,5 +218,28 @@ final class SynthVoice: AnyVoice {
         bq_x2 = bq_x1; bq_x1 = input
         bq_y2 = bq_y1; bq_y1 = y
         return y
+    }
+}
+
+// MARK: - Wave morph (pure — unit-tested in SuperNovaPadTests)
+
+/// MorphWiz-style timbre morph: one continuous control walks the oscillator
+/// through sine → triangle → saw → square, linearly crossfading between
+/// neighbouring shapes. 0 = sine, 1/3 = triangle, 2/3 = saw, 1 = square.
+enum WaveMorph {
+    static func sample(phase: Double, morph: Double) -> Double {
+        let m = min(1, max(0, morph)) * 3
+        let i = min(2, Int(m))
+        let f = m - Double(i)
+        return shape(i, phase) * (1 - f) + shape(i + 1, phase) * f
+    }
+
+    static func shape(_ index: Int, _ phase: Double) -> Double {
+        switch index {
+        case 0:  return sin(phase * 2 * .pi)
+        case 1:  return phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase
+        case 2:  return 2 * phase - 1
+        default: return phase < 0.5 ? 1.0 : -1.0
+        }
     }
 }

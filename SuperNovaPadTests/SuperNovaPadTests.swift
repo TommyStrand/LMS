@@ -293,6 +293,33 @@ final class SuperNovaPadTests: XCTestCase {
         }
     }
 
+    // MARK: - Wave morph
+
+    func testWaveMorphHitsTheFourShapesAtTheirStops() {
+        let p = 0.1
+        XCTAssertEqual(WaveMorph.sample(phase: p, morph: 0),       sin(0.2 * .pi), accuracy: 1e-9)  // sine
+        XCTAssertEqual(WaveMorph.sample(phase: p, morph: 1.0 / 3), -0.6,           accuracy: 1e-9)  // triangle
+        XCTAssertEqual(WaveMorph.sample(phase: p, morph: 2.0 / 3), -0.8,           accuracy: 1e-9)  // saw
+        XCTAssertEqual(WaveMorph.sample(phase: p, morph: 1),        1.0,           accuracy: 1e-9)  // square
+    }
+
+    func testWaveMorphCrossfadesLinearlyBetweenNeighbours() {
+        let p = 0.1
+        let halfway = WaveMorph.sample(phase: p, morph: 0.5)   // midway triangle → saw
+        XCTAssertEqual(halfway, (-0.6 + -0.8) / 2, accuracy: 1e-9)
+    }
+
+    func testWaveMorphClampsAndStaysInRange() {
+        XCTAssertEqual(WaveMorph.sample(phase: 0.3, morph: -2), WaveMorph.sample(phase: 0.3, morph: 0))
+        XCTAssertEqual(WaveMorph.sample(phase: 0.3, morph: 9),  WaveMorph.sample(phase: 0.3, morph: 1))
+        for m in stride(from: 0.0, through: 1.0, by: 0.05) {
+            for ph in stride(from: 0.0, to: 1.0, by: 0.01) {
+                let v = WaveMorph.sample(phase: ph, morph: m)
+                XCTAssertTrue(v >= -1.0000001 && v <= 1.0000001, "morph \(m) phase \(ph) → \(v)")
+            }
+        }
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {

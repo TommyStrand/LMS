@@ -744,8 +744,7 @@ final class AudioEngine {
         // the same vertical value to both gives one intuitive "open up" expression
         // axis. (Previously X→filter, Y→LFO depth, so Y did almost nothing on organ/
         // Rhodes/Hammond voices, which ignore the LFO-depth knob.)
-        voice.filterCutoffMod = y
-        voice.lfoDepthMod     = y
+        applyY(y, to: voice)
         // Start before publishing so the render thread never sees a voice that
         // hasn't begun generating samples yet.
         voice.start()
@@ -818,17 +817,34 @@ final class AudioEngine {
         os_unfair_lock_unlock(snapshotLock)
     }
 
+    /// When true the pad's vertical axis morphs the synth waveform (MorphWiz
+    /// style) instead of driving brightness + modulation. Mirrored from
+    /// ThemeManager.yAxisMorph by ContentView. Main-thread only.
+    @ObservationIgnored var yAxisMorph = false
+
+    /// Single place the vertical axis is applied to a voice. In morph mode, synth
+    /// voices morph sine→triangle→saw→square with a fixed, moderately open filter
+    /// (so the timbre change is audible) and no Y-driven vibrato. Organ / Hammond /
+    /// Rhodes have no morphable oscillator, so they always keep expression mode.
+    private func applyY(_ y: Float, to voice: any AnyVoice) {
+        if yAxisMorph, let synth = voice as? SynthVoice {
+            synth.waveMorph       = y
+            synth.filterCutoffMod = 0.7
+            synth.lfoDepthMod     = 0
+        } else {
+            voice.filterCutoffMod = y
+            voice.lfoDepthMod     = y
+        }
+    }
+
     func updateTouch(touchID: Int, x: Float, y: Float) {
-        // Y → brightness + modulation (see spawnVoice); X is note-only.
+        // Y → brightness + modulation, or wave morph (see applyY); X is note-only.
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
-                let v = liveVoice(controlID: touchID * 1000 + presetIdx)
-                v?.filterCutoffMod = y; v?.lfoDepthMod = y
+                if let v = liveVoice(controlID: touchID * 1000 + presetIdx) { applyY(y, to: v) }
             }
-        } else {
-            let v = liveVoice(controlID: touchID)
-            v?.filterCutoffMod = y
-            v?.lfoDepthMod     = y
+        } else if let v = liveVoice(controlID: touchID) {
+            applyY(y, to: v)
         }
     }
 
@@ -839,15 +855,13 @@ final class AudioEngine {
         }
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
-                let v = liveVoice(controlID: touchID * 1000 + presetIdx)
-                v?.pitchBendSemitones = semitones
-                v?.filterCutoffMod    = y; v?.lfoDepthMod = y
+                guard let v = liveVoice(controlID: touchID * 1000 + presetIdx) else { continue }
+                v.pitchBendSemitones = semitones
+                applyY(y, to: v)
             }
-        } else {
-            let v = liveVoice(controlID: touchID)
-            v?.pitchBendSemitones = semitones
-            v?.filterCutoffMod    = y
-            v?.lfoDepthMod        = y
+        } else if let v = liveVoice(controlID: touchID) {
+            v.pitchBendSemitones = semitones
+            applyY(y, to: v)
         }
     }
 

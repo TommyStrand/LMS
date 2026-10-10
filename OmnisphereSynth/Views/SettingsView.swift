@@ -76,6 +76,21 @@ struct SettingsView: View {
                             }
                         }
 
+                        // MARK: Vertical axis
+                        sectionHeader("VERTICAL AXIS", theme: theme)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                axisButton("Expression", morph: false, theme: theme)
+                                axisButton("Wave Morph", morph: true,  theme: theme)
+                            }
+                            Text(themeManager.yAxisMorph
+                                 ? "Slide up to morph the synth waveform: sine → triangle → saw → square. Organ, Hammond and Rhodes keep Expression."
+                                 : "Slide up for a brighter tone and deeper modulation.")
+                                .font(.system(size: 11, design: theme.fontDesign))
+                                .foregroundColor(theme.secondaryText)
+                        }
+
                         // MARK: Scale
                         sectionHeader("SCALE", theme: theme)
 
@@ -218,6 +233,28 @@ struct SettingsView: View {
             .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
             .foregroundColor(theme.secondaryText)
             .kerning(2.5)
+    }
+
+    /// One half of the Expression / Wave Morph choice (styled like the scale buttons).
+    private func axisButton(_ label: String, morph: Bool, theme: AppTheme) -> some View {
+        let isSelected = themeManager.yAxisMorph == morph
+        let accent: Color = theme.accentOverride ?? Color(hex: "#8B5CF6")
+        return Button {
+            themeManager.yAxisMorph = morph
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: isSelected ? .bold : .regular, design: theme.fontDesign))
+                .foregroundColor(isSelected ? .white : theme.primaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(isSelected ? accent : theme.panelBackground)
+                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7)
+                        .strokeBorder(isSelected ? accent : theme.panelBorder, lineWidth: 1)
+                )
+        }
     }
 
     private func infoRow(_ key: String, value: String, theme: AppTheme) -> some View {

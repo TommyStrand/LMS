@@ -179,7 +179,7 @@ struct XYPadView: View {
             Spacer()
             HStack {
                 Spacer()
-                Text("Brightness ↑")
+                Text(themeManager.yAxisMorph ? "Wave morph ↑" : "Brightness ↑")
                     .font(.system(size: 10, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText.opacity(0.35))
                     .rotationEffect(.degrees(-90))
