@@ -253,6 +253,46 @@ final class SuperNovaPadTests: XCTestCase {
         }
     }
 
+    // MARK: - Finger vibrato
+
+    func testFingerVibratoBendsAroundLockedTarget() {
+        // At the anchor: exactly the locked pitch.
+        XCTAssertEqual(FingerVibrato.bend(lockedTarget: 2, anchorX: 100, x: 100, keyWidth: 40)!, 2, accuracy: 1e-12)
+        // Small wiggle (0.1 key): 0.1 × 12/7 × 2.5 ≈ 0.4286 semitones, symmetric.
+        let up   = FingerVibrato.bend(lockedTarget: 2, anchorX: 100, x: 104, keyWidth: 40)!
+        let down = FingerVibrato.bend(lockedTarget: 2, anchorX: 100, x: 96,  keyWidth: 40)!
+        XCTAssertEqual(up - 2,   0.1 * 12.0 / 7.0 * 2.5, accuracy: 1e-12)
+        XCTAssertEqual(2 - down, 0.1 * 12.0 / 7.0 * 2.5, accuracy: 1e-12)
+    }
+
+    func testFingerVibratoDepthIsClamped() {
+        // 0.3 key → raw 1.29 semitones → clamped to maxDepth.
+        let b = FingerVibrato.bend(lockedTarget: 0, anchorX: 0, x: 12, keyWidth: 40)!
+        XCTAssertEqual(b, FingerVibrato.maxDepth, accuracy: 1e-12)
+    }
+
+    func testLeavingCaptureRadiusBreaksTheLock() {
+        // Radius is 0.4 keys = 16 pt on a 40 pt key.
+        XCTAssertNotNil(FingerVibrato.bend(lockedTarget: 0, anchorX: 0, x: 16,  keyWidth: 40))
+        XCTAssertNil(FingerVibrato.bend(lockedTarget: 0, anchorX: 0, x: 16.5, keyWidth: 40))
+        XCTAssertNil(FingerVibrato.bend(lockedTarget: 0, anchorX: 0, x: -17,  keyWidth: 40))
+        XCTAssertNil(FingerVibrato.bend(lockedTarget: 0, anchorX: 0, x: 1,    keyWidth: 0))
+    }
+
+    // MARK: - Pitch colour
+
+    func testPitchColorWalksTheWheelByPitchClass() {
+        XCTAssertEqual(PitchColor.hue(for: 60), 0, accuracy: 1e-12)            // C
+        XCTAssertEqual(PitchColor.hue(for: 72), 0, accuracy: 1e-12)            // C, next octave
+        XCTAssertEqual(PitchColor.hue(for: 61), 1.0 / 12, accuracy: 1e-12)     // C#
+        XCTAssertEqual(PitchColor.hue(for: 60.5), 0.5 / 12, accuracy: 1e-12)   // mid-glide
+        XCTAssertEqual(PitchColor.hue(for: -1), 11.0 / 12, accuracy: 1e-12)    // negative wraps
+        for p in stride(from: -24.0, through: 140.0, by: 0.37) {
+            let h = PitchColor.hue(for: p)
+            XCTAssertTrue(h >= 0 && h < 1, "hue \(h) out of range for pitch \(p)")
+        }
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {

@@ -37,9 +37,14 @@ struct PianoKeyboardView: View {
     /// Wall-clock time of each finger's last *significant* move — drives the
     /// "snap to the nearest scale note once the finger stops" behaviour.
     @State private var lastMoveTime:    [Int: Double]  = [:]
-    /// Fingers that have already settled onto a scale note (so we snap once, not
-    /// every timer tick, and resume gliding the moment they move again).
+    /// Fingers currently LOCKED onto a note — a fresh tap, or a slide that has
+    /// snapped to the scale. Locked fingers turn small wiggles into vibrato
+    /// (FingerVibrato) instead of sliding; they unlock past the capture radius.
     @State private var snappedTouches:  Set<Int>       = []
+    /// Lock geometry: the x the vibrato oscillates around, and the locked pitch
+    /// (semitones relative to the origin note).
+    @State private var lockAnchorX:     [Int: CGFloat] = [:]
+    @State private var lockTarget:      [Int: Float]   = [:]
     /// Fingers that have actually slid (not just tapped). Only these snap to scale
     /// on rest — a plain tap on a black key must keep its exact chromatic pitch.
     @State private var slidTouches:     Set<Int>       = []
@@ -179,7 +184,11 @@ struct PianoKeyboardView: View {
                 touchOriginX[ev.id]    = loc.x
                 touchLocations[ev.id]  = loc
                 lastMoveTime[ev.id]    = Date().timeIntervalSinceReferenceDate
-                snappedTouches.remove(ev.id)
+                // A tap starts LOCKED on its exact (chromatic) key, so wiggling it
+                // gives vibrato straight away and black keys keep their pitch.
+                snappedTouches.insert(ev.id)
+                lockAnchorX[ev.id]     = loc.x
+                lockTarget[ev.id]      = 0
                 slidTouches.remove(ev.id)
                 engine.noteOn(touchID: ev.id, note: note,
                               velocity: 0.65 + y * 0.35, x: x, y: y)
@@ -195,6 +204,21 @@ struct PianoKeyboardView: View {
                     abs(loc.x - $0.x) > 1.5 || abs(loc.y - $0.y) > 1.5
                 } ?? true
                 touchLocations[ev.id] = loc
+
+                // Locked note: small wiggles are vibrato around the locked pitch.
+                if snappedTouches.contains(ev.id),
+                   let anchor = lockAnchorX[ev.id], let target = lockTarget[ev.id] {
+                    if let bend = FingerVibrato.bend(lockedTarget: Double(target),
+                                                     anchorX: Double(anchor),
+                                                     x: Double(loc.x),
+                                                     keyWidth: Double(dims.keyW)) {
+                        if movedEnough { lastMoveTime[ev.id] = Date().timeIntervalSinceReferenceDate }
+                        engine.updateGlissando(touchID: ev.id, semitones: Float(bend), x: x, y: y)
+                        break
+                    }
+                    // Left the capture radius → unlock and fall through to a free slide.
+                    snappedTouches.remove(ev.id)
+                }
 
                 if movedEnough {
                     // Sliding: glide pitch continuously and reset the settle clock so
@@ -224,6 +248,8 @@ struct PianoKeyboardView: View {
                 touchLocations.removeValue(forKey: ev.id)
                 lastMoveTime.removeValue(forKey: ev.id)
                 snappedTouches.remove(ev.id)
+                lockAnchorX.removeValue(forKey: ev.id)
+                lockTarget.removeValue(forKey: ev.id)
                 slidTouches.remove(ev.id)
                 engine.noteOff(touchID: ev.id)
             }
@@ -240,8 +266,21 @@ struct PianoKeyboardView: View {
         guard !touchLocations.isEmpty else { return }
         let now = Date().timeIntervalSinceReferenceDate
         for (id, loc) in touchLocations {
+            // Locked finger that has come to rest: recentre the vibrato on where
+            // the finger now sits and return to the exact locked pitch, so a
+            // finger resting slightly off its anchor doesn't leave the note detuned.
+            if snappedTouches.contains(id) {
+                if let lastMove = lastMoveTime[id], now - lastMove >= settleDelay,
+                   let anchor = lockAnchorX[id], anchor != loc.x,
+                   let target = lockTarget[id] {
+                    lockAnchorX[id] = loc.x
+                    engine.updateGlissando(touchID: id, semitones: target,
+                                           x: Float(loc.x / geo.size.width),
+                                           y: Float(1 - loc.y / geo.size.height))
+                }
+                continue
+            }
             guard slidTouches.contains(id),          // only snap fingers that slid
-                  !snappedTouches.contains(id),
                   let originX    = touchOriginX[id],
                   let originNote = touchOriginNote[id],
                   let lastMove   = lastMoveTime[id],
@@ -260,6 +299,8 @@ struct PianoKeyboardView: View {
                                    x: Float(loc.x / geo.size.width), y: y)
             touchToKey[id] = snappedMidi
             snappedTouches.insert(id)
+            lockAnchorX[id] = loc.x
+            lockTarget[id]  = target
         }
     }
 

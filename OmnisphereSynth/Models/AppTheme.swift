@@ -125,6 +125,48 @@ enum PitchSnap {
     }
 }
 
+// MARK: - Finger vibrato (pure — unit-tested in SuperNovaPadTests)
+
+/// MorphWiz-style "Finger Vibrato Effect": while a note is locked (a tap, or a
+/// slide that has snapped to the scale), small side-to-side wiggles bend the
+/// pitch around the locked note instead of releasing it into a free slide.
+/// Moving further than `captureRadius` key-widths breaks the lock.
+enum FingerVibrato {
+    /// Lock radius in white-key widths. Equal to the keyboard's slide threshold,
+    /// so leaving the lock always counts as a real slide.
+    static let captureRadius = 0.4
+    /// The voices smooth pitch bend with a ~75 ms time constant, which passes only
+    /// about a third of a 5–6 Hz wiggle. This gain compensates for that.
+    static let gain = 2.5
+    /// Clamp on the requested bend (semitones, before voice smoothing). After
+    /// smoothing this lands around ±25 cents — a natural vibrato depth.
+    static let maxDepth = 0.75
+
+    /// Pitch-bend target (semitones relative to the touch's original note) for a
+    /// finger at `x` locked onto `lockedTarget` around `anchorX`, or nil when the
+    /// finger has left the capture radius and should become a free slide.
+    static func bend(lockedTarget: Double, anchorX: Double, x: Double, keyWidth: Double) -> Double? {
+        guard keyWidth > 0 else { return nil }
+        let dxKeys = (x - anchorX) / keyWidth
+        guard abs(dxKeys) <= captureRadius else { return nil }
+        let raw = dxKeys * PitchSnap.semitonesPerWhiteKey * gain
+        return lockedTarget + min(maxDepth, max(-maxDepth, raw))
+    }
+}
+
+// MARK: - Pitch colour (pure — unit-tested in SuperNovaPadTests)
+
+/// Maps a (possibly fractional) MIDI pitch onto a 0..<1 colour-wheel position by
+/// pitch class: every C is red, and the 12 semitones walk once round the wheel.
+/// Fractional pitches land between hues, so a glide sweeps colour smoothly.
+enum PitchColor {
+    static func hue(for pitch: Double) -> Double {
+        let pc = pitch.truncatingRemainder(dividingBy: 12)
+        let h  = (pc < 0 ? pc + 12 : pc) / 12
+        return h >= 1 ? 0 : h   // a tiny negative remainder can round up to exactly 1.0
+    }
+}
+
 // MARK: - Control style
 
 enum ControlStyle: String, CaseIterable, Identifiable {

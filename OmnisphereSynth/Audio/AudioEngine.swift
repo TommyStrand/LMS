@@ -149,6 +149,11 @@ final class AudioEngine {
     // every setLayerGain and read by layerGain(for:) to make gain edits visible.
     private(set) var layerGainRevision = 0
 
+    // Pitch of the most recently played/bent note (MIDI + bend), nil when nothing
+    // is held. Drives the pitch-reactive blob. Only views that read it re-render.
+    private(set) var soundingPitch: Double?
+    @ObservationIgnored private var touchPitches: [Int: (note: Int, bend: Double)] = [:]
+
     // Gain boxes keyed by preset index; shared with voiceGainBoxes entries for render.
     @ObservationIgnored private var layerGainBoxes:     [Int: GainBox] = [:]
     // Tracks which preset indices were layered at each noteOn, for correct noteOff cleanup.
@@ -652,6 +657,8 @@ final class AudioEngine {
         // use touchIDs >= 90000 so the looper can skip re-recording its own output).
         if touchID < 90000 { looper?.recordOn(touchID: touchID, note: note,
                                                velocity: velocity, x: x, y: y) }
+        touchPitches[touchID] = (note, 0)
+        soundingPitch = Double(note)
         if isLayeringMode && !activeLayerIndices.isEmpty {
             noteOnLayer(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
         } else {
@@ -761,6 +768,8 @@ final class AudioEngine {
 
     func noteOff(touchID: Int) {
         if touchID < 90000 { looper?.recordOff(touchID: touchID) }
+        touchPitches.removeValue(forKey: touchID)
+        soundingPitch = touchPitches.values.first.map { Double($0.note) + $0.bend }
         if isLayeringMode, let layerIndices = noteOnLayerIndices[touchID] {
             for presetIdx in layerIndices {
                 let cid    = touchID * 1000 + presetIdx
@@ -824,6 +833,10 @@ final class AudioEngine {
     }
 
     func updateGlissando(touchID: Int, semitones: Float, x: Float, y: Float) {
+        if let note = touchPitches[touchID]?.note {
+            touchPitches[touchID] = (note, Double(semitones))
+            soundingPitch = Double(note) + Double(semitones)
+        }
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
                 let v = liveVoice(controlID: touchID * 1000 + presetIdx)

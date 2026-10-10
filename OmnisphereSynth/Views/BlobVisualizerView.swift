@@ -10,8 +10,13 @@ import SwiftUI
 /// Used as a full-bleed background layer behind the play surface — the play
 /// surface remains fully interactive on top of it. Observes `engine` directly
 /// so only the canvas re-renders at ~30 Hz, not the whole ContentView.
+///
+/// Pitch-reactive (MorphWiz's particles "contain real-time pitch information"):
+/// the blob ROTATES to the sounding pitch class on every theme, and on themes
+/// without a fixed accent colour it is also TINTED by pitch class (C = red,
+/// walking once round the colour wheel per octave). A glide sweeps both smoothly.
 struct BlobVisualizerView: View {
-    var engine: AudioEngine   // @Observable: only `waveformSamples` reads are tracked
+    var engine: AudioEngine   // @Observable: only waveformSamples/soundingPitch reads are tracked
     let color:  Color
     let theme:  AppTheme
 
@@ -20,9 +25,18 @@ struct BlobVisualizerView: View {
     var body: some View {
         let samples = engine.waveformSamples
         let peak    = Float(samples.map { abs($0) }.max() ?? 0)
+        let pitch   = engine.soundingPitch
+        let hue     = pitch.map(PitchColor.hue(for:))
+        // Respect themes with a fixed accent (Radar, Cyber, …) — keep their colour
+        // and let rotation alone carry the pitch.
+        let tint    = (hue != nil && theme.accentOverride == nil)
+            ? Color(hue: hue!, saturation: 0.7, brightness: 0.95)
+            : color
+        let rotation = (hue ?? 0) * 2 * Double.pi
 
         Canvas { ctx, size in
-            drawBlob(ctx: ctx, size: size, samples: samples, peak: peak)
+            drawBlob(ctx: ctx, size: size, samples: samples, peak: peak,
+                     color: tint, rotation: rotation)
         }
         .onAppear {
             // Idle breathing animation when no audio is playing
@@ -35,7 +49,8 @@ struct BlobVisualizerView: View {
     // MARK: - Drawing
 
     private func drawBlob(ctx: GraphicsContext, size: CGSize,
-                          samples: [Float], peak: Float) {
+                          samples: [Float], peak: Float,
+                          color: Color, rotation: Double) {
         let n    = samples.count
         guard n > 1 else { return }
 
@@ -52,7 +67,7 @@ struct BlobVisualizerView: View {
         var path = Path()
         for i in 0...n {
             let idx   = i % n
-            let angle = (2 * Double.pi * Double(i)) / Double(n) - Double.pi / 2
+            let angle = (2 * Double.pi * Double(i)) / Double(n) - Double.pi / 2 + rotation
             let r     = baseR + CGFloat(samples[idx]) * waveR
             let px    = cx + r * CGFloat(cos(angle))
             let py    = cy + r * CGFloat(sin(angle))
