@@ -152,6 +152,10 @@ struct SamplerInstrument: Equatable, Hashable {
     var loops:   Bool   = false
     var attack:  Double = 0.004   // note-on volume fade (seconds), looping voices
     var release: Double = 0.20    // note-off volume fade (seconds), looping voices
+    /// true → SamplerEngine ignores `rootNotes` and loads whatever complete roots
+    /// it finds in the folder. For IMPORTED instruments, whose samples live only on
+    /// the machine that ran import_samples.py while this descriptor lives in git.
+    var discoversRoots = false
 
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
@@ -186,19 +190,19 @@ struct SamplerInstrument: Equatable, Hashable {
         loops: true, attack: 0.04, release: 0.18    // breath onset + gentle release
     )
     // Real recorded pipe organ (imported from an SFZ library via
-    // Scripts/import_samples.py --source sfz). rootNotes is rewritten by that
-    // script to exactly match the WAVs written, so SamplerEngine.load()'s
-    // loaded==expected assertion holds even when the library's key coverage is
-    // irregular. The placeholder below matches an empty/full grid; the importer
-    // trims it. Pipe organs aren't velocity-sensitive, so the importer writes
-    // the same recording into both velocity layers.
+    // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
+    // exist only where the importer ran — so roots are discovered from the folder
+    // at load time (`discoversRoots`). `rootNotes` below is informational only (the
+    // importer still rewrites it). Pipe organs aren't velocity-sensitive, so the
+    // importer writes the same recording into both velocity layers.
     static let pipeOrgan = SamplerInstrument(
         id: "pipe_organ", displayName: "Pipe Organ",
         rootNotes: Array(stride(from: 24, through: 96, by: 3)),
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
-        ]
+        ],
+        discoversRoots: true
     )
 }
 

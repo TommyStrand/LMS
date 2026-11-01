@@ -251,6 +251,10 @@ _ROOTS = {
     "pipe_organ":       list(range(24, 97, 3)),   # 25 roots (wide; trimmed to source)
 }
 
+# Instruments whose SamplerInstrument sets `discoversRoots: true` — the app finds
+# their roots on disk, so the descriptor is never patched.
+_DISCOVERS_ROOTS = {"pipe_organ"}
+
 # Maps an instrument id → the Swift static-let descriptor name to patch.
 _DESCRIPTOR_NAMES = {
     "grand_piano":     "grandPiano",
@@ -736,7 +740,13 @@ def main() -> None:
         print("ERROR: no complete roots written — nothing to wire up.", file=sys.stderr)
         sys.exit(1)
 
-    if args.no_patch:
+    if iid in _DISCOVERS_ROOTS:
+        # The app reads this instrument's roots straight from the folder, so the
+        # descriptor needs no patch — and patching it would leave a local change in
+        # a git-tracked file that conflicts with the next `git pull`.
+        print(f"  {iid}: roots are discovered from the folder at load time — "
+              f"SynthPreset.swift left unchanged.")
+    elif args.no_patch:
         _print_descriptor(iid, roots)
     else:
         patched = patch_descriptor(args.patch, iid, roots)

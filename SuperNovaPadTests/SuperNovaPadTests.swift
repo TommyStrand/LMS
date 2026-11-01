@@ -453,6 +453,39 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(Set(builtIn).count, builtIn.count, "favourites are keyed by name")
     }
 
+    // MARK: - Sampler root discovery (imported instruments)
+
+    func testDiscoverRootsKeepsOnlyCompleteRootsInTheRightFolder() {
+        let layers = SamplerInstrument.pipeOrgan.velocityLayers          // 64 + 110
+        let keys = [
+            "pipe_organ/36_64", "pipe_organ/36_110",                       // complete
+            "pipe_organ/48_110", "pipe_organ/48_64",                       // complete, unordered
+            "pipe_organ/60_64",                                            // missing 110 → dropped
+            "grand_piano/72_64", "grand_piano/72_110",                     // other folder
+            "pipe_organ/readme", "pipe_organ/x_64",                        // not {root}_{vel}
+        ]
+        XCTAssertEqual(SamplerSelection.discoverRoots(keys: keys, folder: "pipe_organ", layers: layers),
+                       [36, 48])
+    }
+
+    func testDiscoverRootsMatchesTheUsersLocalOrganImport() {
+        // The reported crash: 46 organ files on disk (23 complete roots) vs a
+        // descriptor declaring 25 roots → "loaded 46/50" assert. With discovery,
+        // expected is derived from the files, so it is 46 by construction.
+        let layers = SamplerInstrument.pipeOrgan.velocityLayers
+        let roots  = Array(stride(from: 30, through: 96, by: 3))          // 23 roots
+        let keys   = roots.flatMap { ["pipe_organ/\($0)_64", "pipe_organ/\($0)_110"] }
+        let found  = SamplerSelection.discoverRoots(keys: keys, folder: "pipe_organ", layers: layers)
+        XCTAssertEqual(found.count * layers.count, 46)
+        XCTAssertTrue(SamplerInstrument.pipeOrgan.discoversRoots)
+        XCTAssertFalse(SamplerInstrument.grandPiano.discoversRoots, "generated instruments keep the strict check")
+    }
+
+    func testDiscoverRootsWithNoFilesIsEmpty() {
+        XCTAssertEqual(SamplerSelection.discoverRoots(keys: [], folder: "pipe_organ",
+                                                      layers: SamplerInstrument.pipeOrgan.velocityLayers), [])
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {

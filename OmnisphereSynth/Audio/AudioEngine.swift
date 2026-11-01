@@ -134,7 +134,8 @@ final class AudioEngine {
     // Sampler nodes (one per instrument, lazily created)
     @ObservationIgnored private var samplerEngines: [String: SamplerEngine] = [:]
     // touchID → (instrumentID, midiNote) for single mode; compound ID for layer mode
-    @ObservationIgnored private var samplerTouches: [Int: (instrumentID: String, note: Int)] = [:]
+    // `handle` lets a glide bend exactly this note (nil if the note-on was dropped).
+    @ObservationIgnored private var samplerTouches: [Int: (instrumentID: String, note: Int, handle: SamplerEngine.Handle?)] = [:]
 
     // MARK: - Observed (UI-facing) state — main-thread only
     var waveformSamples: [Float] = Array(repeating: 0, count: 128)
@@ -668,18 +669,16 @@ final class AudioEngine {
 
     private func noteOnSingle(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
         if case .sampler(let instrument) = currentPreset.voiceMode {
-            if let prev = samplerTouches[touchID] {
-                samplerEngines[prev.instrumentID]?.noteOff(UInt8(prev.note))
-            }
+            releaseSingle(touchID: touchID)
             let se = samplerEngine(for: instrument)
-            se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
-            samplerTouches[touchID] = (instrument.id, note)
+            let handle = se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
+            samplerTouches[touchID] = (instrument.id, note, handle)
             return
         }
-        // Retire any voice still sounding on this touch (e.g. a rapid re-tap that
+        // Retire any note still sounding on this touch (e.g. a rapid re-tap that
         // reuses a recycled UITouch id) by RELEASING it — letting its envelope fade
         // out — never by hard-removing it, which would click.
-        retireVoice(controlID: touchID, preset: currentPreset)
+        releaseSingle(touchID: touchID)
         spawnVoice(controlID: touchID, preset: currentPreset, note: note, velocity: velocity,
                    x: x, y: y, gainBox: nil)
     }
@@ -707,8 +706,8 @@ final class AudioEngine {
             let cid    = touchID * 1000 + presetIdx
             if case .sampler(let instrument) = preset.voiceMode {
                 let se = samplerEngine(for: instrument)
-                se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
-                samplerTouches[cid] = (instrument.id, note)
+                let handle = se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
+                samplerTouches[cid] = (instrument.id, note, handle)
             } else {
                 let gainBox = ensureGainBox(presetIdx)
                 spawnVoice(controlID: cid, preset: preset, note: note, velocity: velocity,
@@ -783,14 +782,21 @@ final class AudioEngine {
                 }
             }
             noteOnLayerIndices.removeValue(forKey: touchID)
-        } else if case .sampler = currentPreset.voiceMode {
-            if let info = samplerTouches[touchID] {
-                samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
-            }
-            samplerTouches.removeValue(forKey: touchID)
         } else {
-            retireVoice(controlID: touchID, preset: currentPreset)
+            releaseSingle(touchID: touchID)
         }
+    }
+
+    /// Releases whatever a single-mode touch started — sampler note and/or synth
+    /// voice — decided by how the note was STARTED, not by the current preset.
+    /// (Choosing by `currentPreset` left notes stuck forever when the preset was
+    /// switched while they were held: a synth note took the sampler path, found
+    /// nothing, and was never released — and vice versa.)
+    private func releaseSingle(touchID: Int) {
+        if let info = samplerTouches.removeValue(forKey: touchID) {
+            samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+        }
+        retireVoice(controlID: touchID, preset: currentPreset)   // no-op if no synth voice
     }
 
     /// Releases the voice currently bound to `controlID` (if any). Clears the
@@ -855,14 +861,26 @@ final class AudioEngine {
         }
         if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
-                guard let v = liveVoice(controlID: touchID * 1000 + presetIdx) else { continue }
+                let cid = touchID * 1000 + presetIdx
+                bendSampler(controlID: cid, semitones: semitones)
+                guard let v = liveVoice(controlID: cid) else { continue }
                 v.pitchBendSemitones = semitones
                 applyY(y, to: v)
             }
-        } else if let v = liveVoice(controlID: touchID) {
-            v.pitchBendSemitones = semitones
-            applyY(y, to: v)
+        } else {
+            bendSampler(controlID: touchID, semitones: semitones)
+            if let v = liveVoice(controlID: touchID) {
+                v.pitchBendSemitones = semitones
+                applyY(y, to: v)
+            }
         }
+    }
+
+    /// Sampler presets (piano, strings, flute, organ) bend by re-tuning the note's
+    /// varispeed — so glides, finger vibrato and glissando work on them too.
+    private func bendSampler(controlID: Int, semitones: Float) {
+        guard let info = samplerTouches[controlID], let handle = info.handle else { return }
+        samplerEngines[info.instrumentID]?.bend(handle, semitones: semitones)
     }
 
     /// The currently-bound (non-retired) voice for a control id, or nil.

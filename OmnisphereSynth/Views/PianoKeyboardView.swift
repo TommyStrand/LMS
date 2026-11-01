@@ -37,6 +37,10 @@ struct PianoKeyboardView: View {
     /// Wall-clock time of each finger's last *significant* move — drives the
     /// "snap to the nearest scale note once the finger stops" behaviour.
     @State private var lastMoveTime:    [Int: Double]  = [:]
+    /// Where each finger was when its movement last COUNTED (jitter threshold).
+    /// Measured from here — not from the previous touch event — so slow slides
+    /// accumulate past the threshold instead of being mistaken for a resting finger.
+    @State private var lastMovePoint:   [Int: CGPoint] = [:]
     /// Fingers currently LOCKED onto a note — a fresh tap, or a slide that has
     /// snapped to the scale. Locked fingers turn small wiggles into vibrato
     /// (FingerVibrato) instead of sliding; they unlock past the capture radius.
@@ -56,7 +60,9 @@ struct PianoKeyboardView: View {
     // seconds eases (via SynthVoice's smooth pitch glide) to the nearest scale
     // note — MorphWiz's "slide freely, land in tune" gesture.
     private let settleTimer = Timer.publish(every: 0.04, on: .main, in: .common).autoconnect()
-    private let settleDelay: Double = 0.08
+    // 150 ms: long enough that even a very slow slide (≥ 10 pt/s) never snaps
+    // mid-glide, short enough that landing on a note still feels immediate.
+    private let settleDelay: Double = 0.15
     private let pitchPerKey  = PitchSnap.semitonesPerWhiteKey   // semitones per white-key width
 
     // MARK: - Note layout
@@ -184,6 +190,7 @@ struct PianoKeyboardView: View {
                 touchOriginX[ev.id]    = loc.x
                 touchLocations[ev.id]  = loc
                 lastMoveTime[ev.id]    = Date().timeIntervalSinceReferenceDate
+                lastMovePoint[ev.id]   = loc
                 // A tap starts LOCKED on its exact (chromatic) key, so wiggling it
                 // gives vibrato straight away and black keys keep their pitch.
                 snappedTouches.insert(ev.id)
@@ -196,13 +203,17 @@ struct PianoKeyboardView: View {
             case .moved:
                 guard let originX = touchOriginX[ev.id] else { break }
 
-                // Did the finger actually travel, or is this sub-pixel jitter while
-                // it's effectively held still? We must not reset the settle clock on
-                // jitter, or a stationary finger would never snap.
-                let prev = touchLocations[ev.id]
-                let movedEnough = prev.map {
-                    abs(loc.x - $0.x) > 1.5 || abs(loc.y - $0.y) > 1.5
-                } ?? true
+                // Did the finger actually travel, or is it jitter while effectively
+                // held still? Measured from where movement last COUNTED, not from the
+                // previous event: touches arrive at 60–120 Hz, so a slow, deliberate
+                // slide moves < 1.5 pt per event and was being treated as "still" —
+                // the pitch didn't follow and the note snapped mid-slide.
+                let ref = lastMovePoint[ev.id] ?? loc
+                let movedEnough = abs(loc.x - ref.x) > 1.5 || abs(loc.y - ref.y) > 1.5
+                if movedEnough {
+                    lastMovePoint[ev.id] = loc
+                    lastMoveTime[ev.id]  = Date().timeIntervalSinceReferenceDate
+                }
                 touchLocations[ev.id] = loc
 
                 // Locked note: small wiggles are vibrato around the locked pitch.
@@ -212,7 +223,6 @@ struct PianoKeyboardView: View {
                                                      anchorX: Double(anchor),
                                                      x: Double(loc.x),
                                                      keyWidth: Double(dims.keyW)) {
-                        if movedEnough { lastMoveTime[ev.id] = Date().timeIntervalSinceReferenceDate }
                         engine.updateGlissando(touchID: ev.id, semitones: Float(bend), x: x, y: y)
                         break
                     }
@@ -220,26 +230,18 @@ struct PianoKeyboardView: View {
                     snappedTouches.remove(ev.id)
                 }
 
-                if movedEnough {
-                    // Sliding: glide pitch continuously and reset the settle clock so
-                    // we only snap once the finger comes to rest.
-                    lastMoveTime[ev.id] = Date().timeIntervalSinceReferenceDate
-                    snappedTouches.remove(ev.id)
-
-                    // 12/7 ≈ 1.714 semitones per white-key-width: 12 chromatic
-                    // semitones spread across 7 white keys per octave.
-                    let semitones = Float(loc.x - originX) / Float(dims.keyW) * Float(pitchPerKey)
-                    let currentKey = noteAt(loc, dims: dims)
-                    if currentKey != touchToKey[ev.id] { touchToKey[ev.id] = currentKey }
-                    // Mark as a real slide once the finger leaves its starting key by
-                    // ~half a key — only slides snap to scale on rest (taps don't).
-                    if abs(loc.x - originX) > dims.keyW * 0.4 { slidTouches.insert(ev.id) }
-                    engine.updateGlissando(touchID: ev.id, semitones: semitones, x: x, y: y)
-                } else {
-                    // Held still (incl. already snapped): keep expression (Y) live but
-                    // leave the pitch alone so the snapped note isn't dragged off-tune.
-                    engine.updateTouch(touchID: ev.id, x: x, y: y)
-                }
+                // Free slide: the pitch ALWAYS follows the finger, however slowly it
+                // moves. Only real movement (above) restarts the settle clock, so the
+                // note snaps to the scale once the finger actually comes to rest.
+                // 12/7 ≈ 1.714 semitones per white-key-width: 12 chromatic semitones
+                // spread across 7 white keys per octave.
+                let semitones = Float(loc.x - originX) / Float(dims.keyW) * Float(pitchPerKey)
+                let currentKey = noteAt(loc, dims: dims)
+                if currentKey != touchToKey[ev.id] { touchToKey[ev.id] = currentKey }
+                // Mark as a real slide once the finger leaves its starting key by
+                // ~half a key — only slides snap to scale on rest (taps don't).
+                if abs(loc.x - originX) > dims.keyW * 0.4 { slidTouches.insert(ev.id) }
+                engine.updateGlissando(touchID: ev.id, semitones: semitones, x: x, y: y)
 
             default:
                 touchToKey.removeValue(forKey: ev.id)
@@ -247,6 +249,7 @@ struct PianoKeyboardView: View {
                 touchOriginX.removeValue(forKey: ev.id)
                 touchLocations.removeValue(forKey: ev.id)
                 lastMoveTime.removeValue(forKey: ev.id)
+                lastMovePoint.removeValue(forKey: ev.id)
                 snappedTouches.remove(ev.id)
                 lockAnchorX.removeValue(forKey: ev.id)
                 lockTarget.removeValue(forKey: ev.id)

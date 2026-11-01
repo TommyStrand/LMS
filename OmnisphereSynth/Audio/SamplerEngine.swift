@@ -34,6 +34,13 @@ final class SamplerEngine {
     // tell when a newer note-on/note-off has superseded it and bail out.
     private var slotNote:  [Int: Int] = [:]
     private var slotToken: [Int: Int] = [:]
+    // Every sounding slot's played note + the root sample it was pitched from, so a
+    // glide can re-tune it (bend). Main-thread only.
+    private var slotPitch: [Int: (midi: Int, root: Int)] = [:]
+
+    /// Identifies one note-on, so the caller can bend exactly that note later. A
+    /// stale handle (its slot since reused by another note) is ignored by `bend`.
+    struct Handle: Equatable { let slot: Int; let token: Int }
 
     // rootNote → velocityMidiValue → buffer
     private var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
@@ -90,8 +97,19 @@ final class SamplerEngine {
         }
 
         var loaded = 0
+        // Generated instruments declare their roots; imported ones (pipe organ)
+        // discover them from the folder, because those samples live only on the
+        // machine that ran the importer while the descriptor lives in git — a
+        // pull/reset would otherwise put the two out of step and trip the assert.
+        let roots = instrument.discoversRoots
+            ? SamplerSelection.discoverRoots(keys: Array(wavMap.keys), folder: instrument.id,
+                                             layers: instrument.velocityLayers)
+            : instrument.rootNotes
+        if instrument.discoversRoots && roots.isEmpty {
+            Diagnostics.shared.log("SamplerEngine[\(instrument.id)]: no samples in bundle — run Scripts/import_samples.py")
+        }
         for layer in instrument.velocityLayers {
-            for root in instrument.rootNotes {
+            for root in roots {
                 let key = "\(instrument.id)/\(root)_\(layer.midiValue)"
                 guard let url  = wavMap[key],
                       let file = try? AVAudioFile(forReading: url),
@@ -119,7 +137,7 @@ final class SamplerEngine {
                 loaded += 1
             }
         }
-        let expected = instrument.rootNotes.count * instrument.velocityLayers.count
+        let expected = roots.count * instrument.velocityLayers.count
         let summary = "SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded"
         print(summary)
         Diagnostics.shared.log(summary)
@@ -131,18 +149,26 @@ final class SamplerEngine {
 
     // MARK: - Playback
 
-    func noteOn(_ note: UInt8, velocity: UInt8) {
+    @discardableResult
+    func noteOn(_ note: UInt8, velocity: UInt8) -> Handle? {
         let midi = Int(note)
         let vel  = Int(velocity)
-        guard let (root, buf) = findBuffer(midi: midi, vel: vel) else { return }
+        guard let (root, buf) = findBuffer(midi: midi, vel: vel) else { return nil }
 
         let idx  = nextSlotIndex()
         let slot = pool[idx]
+        // AVAudioPlayerNode.play() raises an exception (crash) if its engine isn't
+        // running — e.g. during an interruption (call/Siri) or a route-change restart.
+        guard slot.player.engine?.isRunning == true else {
+            Diagnostics.shared.log("Sampler[\(instrument.id)] note ignored — audio engine not running")
+            return nil
+        }
         if slot.player.isPlaying { slot.player.stop() }
 
         // Bump the slot's generation so any ramp still scheduled on it stops.
         let token = (slotToken[idx] ?? 0) + 1
         slotToken[idx] = token
+        slotPitch[idx] = (midi, root)
 
         // Rate = 2^(semitones/12), clamped to AVAudioUnitVarispeed valid range [0.25, 4.0].
         let rate = Float(pow(2.0, Double(midi - root) / 12.0))
@@ -166,6 +192,17 @@ final class SamplerEngine {
             slot.player.scheduleBuffer(buf, at: nil, options: options)
             slot.player.play()
         }
+        return Handle(slot: idx, token: token)
+    }
+
+    /// Pitch-bends one sounding note (keyboard glide, finger vibrato, glissando)
+    /// by re-tuning its varispeed. No-op if the slot has since been reused or the
+    /// note released (its token no longer matches).
+    func bend(_ handle: Handle, semitones: Float) {
+        guard slotToken[handle.slot] == handle.token,
+              let p = slotPitch[handle.slot] else { return }
+        let rate = Float(pow(2.0, (Double(p.midi - p.root) + Double(semitones)) / 12.0))
+        pool[handle.slot].varispeed.rate = max(0.25, min(4.0, rate))
     }
 
     func noteOff(_ note: UInt8) {
@@ -294,6 +331,22 @@ final class SamplerEngine {
 /// so they can be tested without loading any audio. Keeping them pure also makes
 /// the tie-breaking deterministic, which the old `Dictionary.keys` ordering was not.
 enum SamplerSelection {
+
+    /// Roots present in `folder` that have a sample for EVERY velocity layer, from
+    /// bundle keys of the form "<folder>/<root>_<velocity>". Incomplete roots are
+    /// dropped so velocity selection can never land on a missing layer.
+    static func discoverRoots(keys: [String], folder: String,
+                              layers: [SamplerInstrument.VelocityLayer]) -> [Int] {
+        let prefix = folder + "/"
+        var found: [Int: Set<Int>] = [:]
+        for key in keys where key.hasPrefix(prefix) {
+            let parts = key.dropFirst(prefix.count).split(separator: "_")
+            guard parts.count == 2, let root = Int(parts[0]), let vel = Int(parts[1]) else { continue }
+            found[root, default: []].insert(vel)
+        }
+        let needed = Set(layers.map(\.midiValue))
+        return found.filter { needed.isSubset(of: $0.value) }.keys.sorted()
+    }
 
     /// The recorded velocity layer (its file-suffix `midiValue`) that covers a
     /// given MIDI velocity. Falls back to the last layer if none matches.

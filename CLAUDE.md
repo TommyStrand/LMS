@@ -39,9 +39,14 @@ Folders produced by `generate_samples.py` (piano/strings/flute) are validated
 against a fixed `{note}_{velocity}.wav` grid. Folders imported by
 `import_samples.py` (e.g. `pipe_organ`) have no fixed grid — real libraries
 cover an irregular set of keys — so they are validated for format/content/naming
-only. Their `SamplerInstrument.rootNotes` is whatever the importer wrote, which
-is why the importer rewrites that line: `SamplerEngine.load()` asserts
-loaded == expected, so the descriptor and the files on disk must agree exactly.
+only. Imported-only instruments (`pipe_organ`) are NOT in git — their WAVs exist
+only on the machine that ran the importer — so their descriptor sets
+`discoversRoots: true` and `SamplerEngine.load()` derives the roots from the
+folder (`SamplerSelection.discoverRoots`, complete roots only). A hard-coded
+`rootNotes` list there would drift from the local files on every pull/reset and
+trip the loaded == expected assert (it did: "pipe_organ loaded 46/50"). The
+importer therefore skips patching their descriptor. Instruments whose samples ARE
+in git (piano/strings/flute) keep the strict declared-roots check.
 
 When you can't run on-device, prefer encoding an invariant (validator check or
 `assert`) over relying on someone hearing the problem.
