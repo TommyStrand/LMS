@@ -101,7 +101,8 @@ enum GrooveImporter {
             feel:         feel,
             loopTicks:    loopTicks,
             ticksPerBeat: Int32(targetTpb),
-            hits:         hits.sorted { $0.tick < $1.tick }
+            hits:         hits.sorted { $0.tick < $1.tick },
+            collection:   .imported
         )
     }
 

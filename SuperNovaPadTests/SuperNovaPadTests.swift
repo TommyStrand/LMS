@@ -386,6 +386,73 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(scheduled(hits, start: 0, tpf: 0.5, frames: 64, loop: 0),   [])
     }
 
+    // MARK: - Mood drum grooves
+
+    func testEveryMoodGridLineIsExactly32Steps() {
+        for spec in MoodGrooves.specs {
+            for (voice, line) in spec.lines {
+                XCTAssertEqual(MoodGrooves.cells(line).count, 32, "\(spec.name) \(voice) grid length")
+            }
+        }
+    }
+
+    func testMoodHitsStayInsideTheirOwnStep() {
+        // Swing + humanisation only ever push a hit LATER, and never past its 16th
+        // step — so the step sequencer lights the step you actually hear.
+        for spec in MoodGrooves.specs {
+            let pattern = MoodGrooves.build(spec, seed: 1)
+            var expected: [Int: Set<Int>] = [:]          // voice raw → steps
+            for (voice, line) in spec.lines {
+                for (step, v) in MoodGrooves.cells(line).enumerated() where v != nil {
+                    expected[voice.rawValue, default: []].insert(step)
+                }
+            }
+            var actual: [Int: Set<Int>] = [:]
+            for hit in pattern.hits {
+                XCTAssertTrue((0..<pattern.loopTicks).contains(hit.tick), "\(spec.name) tick out of loop")
+                actual[hit.voice.rawValue, default: []].insert(Int(hit.tick) / MoodGrooves.stepTicks)
+            }
+            XCTAssertEqual(actual, expected, "\(spec.name) hits drifted out of their steps")
+        }
+    }
+
+    func testMoodPatternsAreTwoBarsAtTheirOwnPlayableTempo() throws {
+        XCTAssertEqual(MoodGrooves.all.count, MoodGrooves.specs.count)
+        for p in MoodGrooves.all {
+            XCTAssertEqual(p.collection, .mood)
+            XCTAssertEqual(p.bars, 2, "\(p.name) must match the 32-step sequencer grid")
+            XCTAssertEqual(p.loopTicks, 76800)
+            let bpm = try XCTUnwrap(p.suggestedBPM)
+            XCTAssertTrue((50...180).contains(bpm), "\(p.name) BPM outside the slider range")
+            XCTAssertTrue(p.hits.allSatisfy { (0.05...1).contains($0.velocity) })
+        }
+    }
+
+    func testMoodBuildIsDeterministic() {
+        // Same seed → identical pattern on every launch (no Swift hashValue randomness).
+        let a = MoodGrooves.build(MoodGrooves.specs[5], seed: 6).hits
+        let b = MoodGrooves.build(MoodGrooves.specs[5], seed: 6).hits
+        XCTAssertEqual(a.map(\.tick), b.map(\.tick))
+        XCTAssertEqual(a.map(\.velocity), b.map(\.velocity))
+    }
+
+    func testSwingDelaysOnlyTheOffbeats() {
+        // 16th swing at 0.62 → odd steps 576 ticks late; even steps untouched.
+        XCTAssertEqual(MoodGrooves.swingTicks(step: 1, swing: 0.62, eighthSwing: false), 576)
+        XCTAssertEqual(MoodGrooves.swingTicks(step: 2, swing: 0.62, eighthSwing: false), 0)
+        // 8th swing at 0.6 → steps ≡ 2 (mod 4) 960 ticks late.
+        XCTAssertEqual(MoodGrooves.swingTicks(step: 2, swing: 0.6, eighthSwing: true), 960)
+        XCTAssertEqual(MoodGrooves.swingTicks(step: 1, swing: 0.6, eighthSwing: true), 0)
+        XCTAssertEqual(MoodGrooves.swingTicks(step: 3, swing: 0.5, eighthSwing: false), 0)
+    }
+
+    func testMoodCollectionComesFirstAndNamesAreUnique() {
+        // The default pattern (index 0) must be a calm one.
+        XCTAssertEqual(DrumPattern.all.first?.collection, .mood)
+        let builtIn = DrumPattern.all.filter { $0.collection != .imported }.map(\.name)
+        XCTAssertEqual(Set(builtIn).count, builtIn.count, "favourites are keyed by name")
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {

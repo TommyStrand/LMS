@@ -16,6 +16,10 @@ struct DrumMachineView: View {
 
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
+                collectionRow(theme: theme, ac: ac)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+
                 patternCard(pattern: pattern, theme: theme, ac: ac)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
@@ -49,10 +53,44 @@ struct DrumMachineView: View {
         }
     }
 
+    // MARK: - Collection filter
+
+    /// MOOD / POST-ROCK / ALL (+ IMPORTED when the bundle has .mid files). RANDOM
+    /// and the ‹ › buttons stay inside the selected collection.
+    private func collectionRow(theme: AppTheme, ac: Color) -> some View {
+        let hasImported = DrumPattern.all.contains { $0.collection == .imported }
+        let options: [(label: String, collection: DrumCollection?)] =
+            [("MOOD", .mood), ("POST-ROCK", .postRock)]
+            + (hasImported ? [("IMPORTED", .imported)] : [])
+            + [("ALL", nil)]
+        return HStack(spacing: 6) {
+            ForEach(options, id: \.label) { option in
+                let isOn = drum.collectionFilter == option.collection
+                Button {
+                    withAnimation(.spring(response: 0.25)) { drum.selectCollection(option.collection) }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Text(option.label)
+                        .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
+                        .kerning(1.2)
+                        .foregroundColor(isOn ? theme.appBackground : theme.secondaryText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(isOn ? ac : theme.panelBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7))
+                        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius * 0.7)
+                            .strokeBorder(isOn ? Color.clear : theme.panelBorder, lineWidth: 1))
+                }
+            }
+        }
+    }
+
     // MARK: - Pattern card
 
     private func patternCard(pattern: DrumPattern, theme: AppTheme, ac: Color) -> some View {
         HStack(spacing: 12) {
+            stepButton(systemName: "chevron.left", delta: -1, theme: theme)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(pattern.name)
                     .font(.system(size: 15, weight: .semibold, design: theme.fontDesign))
@@ -70,6 +108,14 @@ struct DrumMachineView: View {
                         .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
                         .foregroundColor(theme.secondaryText)
                         .kerning(1.2)
+                    if let bpm = pattern.suggestedBPM {
+                        Text("·")
+                            .foregroundColor(theme.secondaryText.opacity(0.4))
+                        Text("\(Int(bpm)) BPM")
+                            .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
+                            .foregroundColor(theme.secondaryText)
+                            .kerning(1.2)
+                    }
                 }
             }
 
@@ -83,6 +129,8 @@ struct DrumMachineView: View {
                     .font(.system(size: 22))
                     .foregroundColor(favorites.contains(pattern.name) ? .red : theme.secondaryText)
             }
+
+            stepButton(systemName: "chevron.right", delta: 1, theme: theme)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -93,6 +141,20 @@ struct DrumMachineView: View {
     }
 
     // MARK: - Action row
+
+    private func stepButton(systemName: String, delta: Int, theme: AppTheme) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.25)) { drum.stepPattern(by: delta) }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(theme.secondaryText)
+                .frame(width: 28, height: 36)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(delta < 0 ? "Previous pattern" : "Next pattern")
+    }
 
     private func actionRow(theme: AppTheme, ac: Color) -> some View {
         HStack(spacing: 12) {

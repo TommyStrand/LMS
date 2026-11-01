@@ -8,30 +8,48 @@ enum DrumFeel: String, CaseIterable {
     case toms   = "Toms"
     case hihat  = "HiHat"
     case build  = "Build"
+    // Mood collection
+    case ambient   = "Ambient"
+    case downtempo = "Downtempo"
+    case cinematic = "Cinematic"
 
     var emoji: String {
         switch self {
-        case .ghost:  return "○"
-        case .pulse:  return "◎"
-        case .ride:   return "◉"
-        case .crash:  return "✦"
-        case .toms:   return "▣"
-        case .hihat:  return "⊙"
-        case .build:  return "▲"
+        case .ghost:     return "○"
+        case .pulse:     return "◎"
+        case .ride:      return "◉"
+        case .crash:     return "✦"
+        case .toms:      return "▣"
+        case .hihat:     return "⊙"
+        case .build:     return "▲"
+        case .ambient:   return "◌"
+        case .downtempo: return "≈"
+        case .cinematic: return "◆"
         }
     }
 
     var description: String {
         switch self {
-        case .ghost:  return "Sparse / minimal"
-        case .pulse:  return "Half-time / slow"
-        case .ride:   return "Ride bell driven"
-        case .crash:  return "Crash accented"
-        case .toms:   return "Tom driven"
-        case .hihat:  return "Hi-hat groove"
-        case .build:  return "Dense / intense"
+        case .ghost:     return "Sparse / minimal"
+        case .pulse:     return "Half-time / slow"
+        case .ride:      return "Ride bell driven"
+        case .crash:     return "Crash accented"
+        case .toms:      return "Tom driven"
+        case .hihat:     return "Hi-hat groove"
+        case .build:     return "Dense / intense"
+        case .ambient:   return "Space to breathe"
+        case .downtempo: return "Lo-fi / trip-hop"
+        case .cinematic: return "Toms & distance"
         }
     }
+}
+
+/// Which library a pattern comes from — drives the MOOD / POST-ROCK / ALL filter.
+enum DrumCollection: String, CaseIterable, Identifiable {
+    case mood     = "Mood"
+    case postRock = "Post-Rock"
+    case imported = "Imported"     // .mid files found in the app bundle
+    var id: String { rawValue }
 }
 
 enum DrumVoiceID: Int, CaseIterable {
@@ -64,13 +82,17 @@ struct DrumPattern {
     let loopTicks: Int32
     let ticksPerBeat: Int32
     let hits: [DrumHit]
+    var collection: DrumCollection = .postRock
+    /// Tempo the pattern was written for; applied when it's selected. nil = keep tempo.
+    var suggestedBPM: Double? = nil
 
     var bars: Int { Int(loopTicks / (ticksPerBeat * 4)) }
 }
 
 extension DrumPattern {
-    /// All available patterns: 30 hardcoded grooves + any MIDI files found in the app bundle.
-    /// MIDI files are discovered by GrooveImporter at first access (lazy, runs once).
+    /// All available patterns: the Mood collection first (so the default pattern is
+    /// a calm one), then the 30 post-rock grooves, then any MIDI files found in the
+    /// app bundle. MIDI files are discovered by GrooveImporter at first access.
     static let all: [DrumPattern] = {
         let hardcoded = drumPatternRaw.map { raw in
             DrumPattern(
@@ -85,12 +107,167 @@ extension DrumPattern {
             )
         }
         let imported = GrooveImporter.importFromBundle()
-        return hardcoded + imported
+        return MoodGrooves.all + hardcoded + imported
     }()
 
     static func patterns(for feel: DrumFeel) -> [DrumPattern] {
         all.filter { $0.feel == feel }
     }
+}
+
+// MARK: - Mood collection (original patterns, written for this app)
+
+/// Slow, spacious grooves meant to sit under a pad rather than drive a band.
+/// Written as 32-step grids (2 bars of 16ths, the same grid the step sequencer
+/// shows), one line per drum: '.' = rest, '1'…'9' = velocity in ninths. Spaces
+/// are ignored and only separate the two bars.
+///
+/// The builder adds swing and a small, always-LATE humanisation (a laid-back
+/// feel), so every hit stays inside its own 16th step and the step grid still
+/// lines up with what you hear. The offsets come from a fixed seed, so a
+/// pattern sounds identical on every launch.
+enum MoodGrooves {
+    static let ticksPerBeat = 9600
+    static let stepTicks    = ticksPerBeat / 4      // one 16th
+    static let stepCount    = 32                    // 2 bars of 4/4
+    static let maxLateTicks = 40                    // humanisation, ≈ 4 ms at 70 BPM
+
+    struct Spec {
+        let name: String
+        let feel: DrumFeel
+        let bpm: Double
+        /// 0.5 = straight. Applied to 8th off-beats if `eighthSwing`, else to odd 16ths.
+        var swing: Double = 0.5
+        var eighthSwing = false
+        let lines: [(DrumVoiceID, String)]
+    }
+
+    /// Velocity per step (nil = rest) for one grid line.
+    static func cells(_ line: String) -> [Float?] {
+        line.filter { $0 != " " }.map { c in
+            guard let d = c.wholeNumberValue, (1...9).contains(d) else { return nil }
+            return Float(d) / 9
+        }
+    }
+
+    /// Swing delay in ticks for a given step. Rounded, not truncated: 0.62 − 0.5 is
+    /// 0.11999… in binary floating point, which would otherwise lose a tick.
+    static func swingTicks(step: Int, swing: Double, eighthSwing: Bool) -> Int {
+        let amount = max(0, swing - 0.5)
+        if eighthSwing { return step % 4 == 2 ? Int((amount * Double(stepTicks * 4)).rounded()) : 0 }
+        return step % 2 == 1 ? Int((amount * Double(stepTicks * 2)).rounded()) : 0
+    }
+
+    static func build(_ spec: Spec, seed: UInt32) -> DrumPattern {
+        var rng = seed &* 2_654_435_761 | 1
+        func next() -> UInt32 { rng = rng &* 1_664_525 &+ 1_013_904_223; return rng >> 8 }
+
+        var hits: [DrumHit] = []
+        for (voice, line) in spec.lines {
+            for (step, vel) in cells(line).enumerated() {
+                guard let vel else { continue }
+                let tick = step * stepTicks
+                    + swingTicks(step: step, swing: spec.swing, eighthSwing: spec.eighthSwing)
+                    + Int(next() % UInt32(maxLateTicks + 1))
+                let jitter = (Float(next() % 61) - 30) / 1000          // ±0.03
+                hits.append(DrumHit(tick: Int32(tick), voice: voice,
+                                    velocity: min(1, max(0.05, vel + jitter))))
+            }
+        }
+        return DrumPattern(name: spec.name, feel: spec.feel,
+                           loopTicks: Int32(stepTicks * stepCount),
+                           ticksPerBeat: Int32(ticksPerBeat),
+                           hits: hits.sorted { $0.tick < $1.tick },
+                           collection: .mood, suggestedBPM: spec.bpm)
+    }
+
+    static let all: [DrumPattern] = specs.enumerated().map { build($1, seed: UInt32($0 + 1)) }
+
+    static let specs: [Spec] = [
+
+        // MARK: Ambient — space to breathe
+        Spec(name: "Still Water", feel: .ambient, bpm: 72, lines: [
+            (.kick,      "6............... 5..............."),
+            (.rideBell,  "4...3...4...3... 4...3...5...3..."),
+            (.hihatOpen, "................ ............2..."),
+        ]),
+        Spec(name: "Breath", feel: .ambient, bpm: 68, lines: [
+            (.kick,      "7............... ................"),
+            (.rideBell,  "3.......3....... 3.......3......."),
+            (.snare,     "................ ......3........."),
+            (.hihatOpen, "................ ............3..."),
+        ]),
+        Spec(name: "Heartbeat", feel: .ambient, bpm: 66, lines: [
+            (.kick,      "93......93...... 93......93......"),
+            (.tomLo,     "................ ..............4."),
+        ]),
+        Spec(name: "Glacier", feel: .ambient, bpm: 60, lines: [
+            (.kick,      "6............... ................"),
+            (.rideBell,  "........3....... ................"),
+            (.tomLo,     "................ ....3..........."),
+        ]),
+        Spec(name: "Pulse Hat", feel: .ambient, bpm: 76, lines: [
+            (.hihat,     "4.2.3.2.4.2.3.2. 4.2.3.2.4.2.3.2."),
+            (.kick,      "7............... 6.........4....."),
+        ]),
+
+        // MARK: Downtempo — lo-fi / trip-hop
+        Spec(name: "Lo-fi Nod", feel: .downtempo, bpm: 82, swing: 0.6, eighthSwing: true, lines: [
+            (.kick,      "8......5..8..... 8......5........"),
+            (.snare,     "....6.......6... ....6.......6..2"),
+            (.hihat,     "3.2.3.2.3.2.3.2. 3.2.3.2.3.2.3.2."),
+        ]),
+        Spec(name: "Trip Hop", feel: .downtempo, bpm: 76, swing: 0.55, lines: [
+            (.kick,      "9.....6...8..... 9.....6........."),
+            (.snare,     "........8....... ........8......."),
+            (.hihat,     "2121212121212121 2121212121212121"),
+            (.hihatOpen, "..............4. ................"),
+        ]),
+        Spec(name: "Dusty Brush", feel: .downtempo, bpm: 74, swing: 0.62, lines: [
+            (.snare,     "2121512121215121 2121512121215122"),
+            (.kick,      "5.........5..... 5.........5....."),
+        ]),
+        Spec(name: "Half-time Dream", feel: .downtempo, bpm: 70, lines: [
+            (.kick,      "8.....4......... 8.....4...3....."),
+            (.snare,     "........7....... ........7......."),
+            (.rideBell,  "3.3.3.3.3.3.3.3. 3.3.3.3.4.3.3.3."),
+        ]),
+        Spec(name: "Dub Drop", feel: .downtempo, bpm: 74, swing: 0.56, eighthSwing: true, lines: [
+            (.kick,      "........8....... ........8......."),
+            (.snare,     "........7....... ........7......."),
+            (.hihat,     "..3...3...3...3. ..3...3...3...3."),
+            (.hihatOpen, "................ ..............3."),
+        ]),
+        Spec(name: "Slow Shuffle", feel: .downtempo, bpm: 84, swing: 0.66, eighthSwing: true, lines: [
+            (.hihat,     "3.2.3.2.3.2.3.2. 3.2.3.2.3.2.3.2."),
+            (.kick,      "7.........6..... 7.........6...4."),
+            (.snare,     "....5.......5... ....5.......5..."),
+        ]),
+
+        // MARK: Cinematic — toms & distance
+        Spec(name: "Ritual", feel: .cinematic, bpm: 72, lines: [
+            (.kick,      "8............... 8..............."),
+            (.tomLo,     "6...4...5...4... 6...4...5...4..."),
+            (.tomMid,    "......4......... ......4.......3."),
+            (.crash,     "3............... ................"),
+        ]),
+        Spec(name: "Horizon", feel: .cinematic, bpm: 68, lines: [
+            (.crash,     "4............... ................"),
+            (.rideBell,  "3...3...3...3... 3...3...3...3..."),
+            (.kick,      "6.......6....... 6.......6......."),
+            (.tomLo,     "................ ............4.4."),
+        ]),
+        Spec(name: "Distant Toms", feel: .cinematic, bpm: 64, lines: [
+            (.tomLo,     "6.........4..... 6.........4....."),
+            (.tomMid,    "..............3. ..............3."),
+            (.kick,      "5............... ................"),
+        ]),
+        Spec(name: "Tidal", feel: .cinematic, bpm: 64, lines: [
+            (.kick,      "8..4............ 8..4............"),
+            (.tomLo,     "........5....... ........5......."),
+            (.hihatOpen, "............3... ............3..."),
+        ]),
+    ]
 }
 
 // MARK: - Embedded pattern data

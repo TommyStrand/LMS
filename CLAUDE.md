@@ -52,10 +52,14 @@ plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
 `SamplerSelection` (note/velocity → sample), `PitchSnap` (keyboard glide + snap-
 to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
-drum hits land on which frame of a buffer), `RenderParams` (preset →
+drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
+patterns stay on the 32-step grid at a playable tempo), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- Drum patterns: the Mood collection (`MoodGrooves`, original, written as 32-step text grids
+  in Models/DrumPatterns.swift) comes first in `DrumPattern.all`; the 30 post-rock grooves and
+  any bundled .mid files follow. New patterns must be 2 bars of 4/4 to match the step grid
 - Single master AVAudioSourceNode (not per-voice) to share the effects chain across all voices
 - SamplerEngine uses AVAudioPlayerNode + AVAudioUnitVarispeed pool (not AVAudioUnitSampler)
 - Bundle WAV lookup via FileManager.enumerator, not Bundle.url(forResource:subdirectory:)

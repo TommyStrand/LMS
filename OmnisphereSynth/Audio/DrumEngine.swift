@@ -112,7 +112,16 @@ final class DrumEngine {
             if patternIndex != idx { patternIndex = idx }
             resetGeneration &+= 1          // render thread restarts the loop
             customHits = nil               // publishes via customHits.didSet
+            // Mood patterns are written for a tempo (a heartbeat at 120 BPM isn't
+            // calm). Post-rock / imported patterns have none and keep the tempo.
+            if let suggested = DrumPattern.all[idx].suggestedBPM, suggested != bpm {
+                bpm = suggested            // publishes via bpm.didSet
+            }
         }
+    }
+    /// Which collection RANDOM and ‹ › browse within. nil = all patterns.
+    var collectionFilter: DrumCollection? = .mood {
+        didSet { shuffleBag = [] }         // bag was built for the old filter
     }
     var delayMix: Float = 0.22 {
         didSet { delayNode.wetDryMix = delayMix * 100 }
@@ -180,6 +189,8 @@ final class DrumEngine {
     // MARK: Init
 
     init() {
+        // Start on the first pattern at its own tempo (didSet doesn't fire in init).
+        if let suggested = DrumPattern.all.first?.suggestedBPM { bpm = suggested }
         loadSamples()
         publishRenderState()   // didSet doesn't fire during init
         setupAudio()
@@ -233,10 +244,35 @@ final class DrumEngine {
 
     func togglePlay() { isPlaying ? stop() : play() }
 
+    /// Pattern indices in the current collection filter (all patterns if the
+    /// filter is nil or the filtered collection is empty, e.g. no imported MIDI).
+    var browsableIndices: [Int] {
+        let all = Array(DrumPattern.all.indices)
+        guard let filter = collectionFilter else { return all }
+        let filtered = all.filter { DrumPattern.all[$0].collection == filter }
+        return filtered.isEmpty ? all : filtered
+    }
+
+    /// Select a collection; jumps to its first pattern if the current one isn't in it.
+    func selectCollection(_ collection: DrumCollection?) {
+        collectionFilter = collection
+        let pool = browsableIndices
+        if !pool.contains(patternIndex), let first = pool.first { patternIndex = first }
+    }
+
+    /// Step to the previous (-1) / next (+1) pattern within the current filter, wrapping.
+    func stepPattern(by delta: Int) {
+        let pool = browsableIndices
+        guard !pool.isEmpty else { return }
+        let pos = pool.firstIndex(of: patternIndex) ?? (delta > 0 ? -1 : 0)
+        patternIndex = pool[((pos + delta) % pool.count + pool.count) % pool.count]
+    }
+
     func randomize() {
-        // Shuffle-bag: refill when empty so every pattern plays before any repeats
-        if shuffleBag.isEmpty {
-            shuffleBag = Array(0..<DrumPattern.all.count).shuffled()
+        // Shuffle-bag within the current filter: every pattern plays before any repeats.
+        let pool = browsableIndices
+        if shuffleBag.isEmpty || !shuffleBag.allSatisfy(pool.contains) {
+            shuffleBag = pool.shuffled()
         }
         // Skip the current pattern if it happens to be next in the bag
         if shuffleBag.count > 1 && shuffleBag.last == patternIndex {
@@ -244,8 +280,8 @@ final class DrumEngine {
             let next = shuffleBag.removeLast()
             shuffleBag.append(last)
             patternIndex = next
-        } else {
-            patternIndex = shuffleBag.removeLast()
+        } else if let next = shuffleBag.popLast() {
+            patternIndex = next
         }
     }
 
@@ -256,8 +292,12 @@ final class DrumEngine {
         var hits = customHits ?? Array(pat.hits)
         let ticksPerStep = Int(pat.ticksPerBeat) / 4   // 16th-note grid
         let tick = Int32(step * ticksPerStep)
-        if let idx = hits.firstIndex(where: { $0.voice == voice && $0.tick == tick }) {
-            hits.remove(at: idx)
+        // Match by STEP, not exact tick: humanised hits sit slightly late inside
+        // their step, so an exact-tick match never found them and tapping a lit
+        // cell added a duplicate instead of removing the hit.
+        let inStep = { (h: DrumHit) in h.voice == voice && Int(h.tick) / ticksPerStep == step }
+        if hits.contains(where: inStep) {
+            hits.removeAll(where: inStep)
         } else {
             hits.append(DrumHit(tick: tick, voice: voice, velocity: 0.85))
             hits.sort { $0.tick < $1.tick }
