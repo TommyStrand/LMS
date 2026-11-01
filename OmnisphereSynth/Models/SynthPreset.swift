@@ -227,15 +227,7 @@ extension SynthPreset {
 
     /// True if the app bundle contains at least one WAV inside a folder named `folder`.
     private static func bundleHasSamples(folder: String) -> Bool {
-        guard let en = FileManager.default.enumerator(at: Bundle.main.bundleURL,
-                                                      includingPropertiesForKeys: nil,
-                                                      options: [.skipsHiddenFiles]) else { return false }
-        for case let url as URL in en
-        where url.pathExtension.lowercased() == "wav"
-            && url.deletingLastPathComponent().lastPathComponent == folder {
-            return true
-        }
-        return false
+        BundleIndex.shared.foldersWithWavs.contains(folder)
     }
 
     private static let catalog: [SynthPreset] = [

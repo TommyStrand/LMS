@@ -39,16 +39,8 @@ enum GrooveImporter {
     /// Files may be at the bundle root (added individually) or in subdirectories
     /// (added as a folder reference). The recursive enumerator handles both.
     static func importFromBundle() -> [DrumPattern] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: Bundle.main.bundleURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
         var patterns: [DrumPattern] = []
-
-        for case let url as URL in enumerator
-        where url.pathExtension.lowercased() == "mid" || url.pathExtension.lowercased() == "midi" {
+        for url in BundleIndex.shared.midiFiles {
             guard let data    = try? Data(contentsOf: url),
                   let midi    = MidiParser.parse(data),
                   let pattern = convert(midi, url: url)

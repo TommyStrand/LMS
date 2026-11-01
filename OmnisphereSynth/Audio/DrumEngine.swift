@@ -68,6 +68,10 @@ enum DrumSchedule {
 /// Everything the drum render thread reads, published as one immutable value by
 /// the main thread (same try-lock pattern as AudioEngine's RenderSnapshot).
 private struct DrumRenderState {
+    /// Sample buffers per voice (index = DrumVoiceID.rawValue). Empty until the
+    /// background load finishes; then published like any other render state, so
+    /// the render thread never reads a bank that is still being filled in.
+    var bank: [[AVAudioPCMBuffer]] = []
     var hits: [DrumHit] = []
     var loopTicks: Double = 1
     var ticksPerBeat: Double = 1
@@ -152,13 +156,11 @@ final class DrumEngine {
 
     // MARK: Sample bank (main-thread write before engine start, audio-thread read only)
 
-    // Buffers are retained here for the engine's lifetime so SampleVoice raw pointers stay valid
-    @ObservationIgnored private var sampleBuffers: [DrumVoiceID: [AVAudioPCMBuffer]] = [:]
+    // Main-thread copy of the loaded bank. Buffers are retained for the engine's
+    // lifetime so SampleVoice's raw pointers into them stay valid.
+    @ObservationIgnored private var sampleBank: [[AVAudioPCMBuffer]] = []
+    // Round-robin position per voice — render thread only.
     @ObservationIgnored private var rrIndex: [Int] = Array(repeating: 0, count: DrumVoiceID.allCases.count)
-
-    // Lowercased filename (no extension) → URL, built by scanning the entire bundle tree.
-    // Handles both flat resources and folder-reference subdirectories added in Xcode.
-    @ObservationIgnored private var bundleWavMap: [String: URL] = [:]
 
     // MARK: Render hand-off
 
@@ -192,8 +194,8 @@ final class DrumEngine {
     init() {
         // Start on the first pattern at its own tempo (didSet doesn't fire in init).
         if let suggested = DrumPattern.all.first?.suggestedBPM { bpm = suggested }
-        loadSamples()
         publishRenderState()   // didSet doesn't fire during init
+        loadSamplesInBackground()
         setupAudio()
     }
 
@@ -208,6 +210,7 @@ final class DrumEngine {
     private func publishRenderState() {
         let pat = DrumPattern.all[max(0, min(patternIndex, DrumPattern.all.count - 1))]
         let state = DrumRenderState(
+            bank:            sampleBank,
             hits:            customHits ?? pat.hits,
             loopTicks:       Double(max(1, pat.loopTicks)),
             ticksPerBeat:    Double(pat.ticksPerBeat),
@@ -324,25 +327,27 @@ final class DrumEngine {
 
     // MARK: Sample loading
 
-    private func buildBundleWavMap() {
-        guard let enumerator = FileManager.default.enumerator(
-            at: Bundle.main.bundleURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return }
-
-        for case let url as URL in enumerator where url.pathExtension.lowercased() == "wav" {
-            bundleWavMap[url.deletingPathExtension().lastPathComponent.lowercased()] = url
-        }
-
-        print("DrumEngine: \(bundleWavMap.count) .wav files found in bundle")
-        if bundleWavMap.isEmpty {
-            print("DrumEngine: ⚠️  no WAV files found — add MusicRadar samples to the Xcode target")
+    /// Reads and converts the kit on a background queue (it used to block the main
+    /// thread at launch), then hands the bank to the render thread via the state
+    /// snapshot. Until then the drums simply render silence.
+    private func loadSamplesInBackground() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let bank = DrumEngine.loadBank()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.sampleBank = bank
+                self.publishRenderState()
+            }
         }
     }
 
-    private func loadSamples() {
-        buildBundleWavMap()
+    /// Thread-safe: touches only the immutable BundleIndex and local values.
+    private static func loadBank() -> [[AVAudioPCMBuffer]] {
+        let index = BundleIndex.shared
+        print("DrumEngine: \(index.wavByLowercasedName.count) .wav files found in bundle")
+        if index.wavByLowercasedName.isEmpty {
+            print("DrumEngine: ⚠️  no WAV files found — add MusicRadar samples to the Xcode target")
+        }
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
 
         // Each tuple: (voice, [bundle resource names without extension])
@@ -376,16 +381,17 @@ final class DrumEngine {
              ["CYCdh_K5-Tom03a", "CYCdh_K5-Tom03b", "CYCdh_K5-Tom03c"]),
         ]
 
+        var bank = [[AVAudioPCMBuffer]](repeating: [], count: DrumVoiceID.allCases.count)
         for (voice, names) in specs {
-            sampleBuffers[voice] = names.compactMap { loadSample(name: $0, targetFormat: fmt) }
-            if let loaded = sampleBuffers[voice] {
-                print("DrumEngine: \(voice) – \(loaded.count)/\(names.count) samples loaded")
-            }
+            let loaded = names.compactMap { loadSample(name: $0, targetFormat: fmt) }
+            bank[voice.rawValue] = loaded
+            print("DrumEngine: \(voice) – \(loaded.count)/\(names.count) samples loaded")
         }
+        return bank
     }
 
-    private func loadSample(name: String, targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
-        guard let url = bundleWavMap[name.lowercased()] else {
+    private static func loadSample(name: String, targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let url = BundleIndex.shared.wavByLowercasedName[name.lowercased()] else {
             print("DrumEngine: missing \(name).wav")
             return nil
         }
@@ -544,7 +550,7 @@ final class DrumEngine {
         // sample). Each voice is delayed to start on its exact frame.
         DrumSchedule.forEachHit(st.hits, startTick: tickPosition, ticksPerFrame: ticksPerFrame,
                                 frameCount: frameCount, loopTicks: loopTicks) { i, frame in
-            spawnVoice(type: st.hits[i].voice, velocity: st.hits[i].velocity, delay: frame)
+            spawnVoice(type: st.hits[i].voice, velocity: st.hits[i].velocity, delay: frame, bank: st.bank)
         }
         tickPosition = (tickPosition + ticksPerFrame * Double(frameCount))
             .truncatingRemainder(dividingBy: loopTicks)
@@ -573,8 +579,10 @@ final class DrumEngine {
 
     // MARK: Voice pool (render thread only)
 
-    private func spawnVoice(type: DrumVoiceID, velocity: Float, delay: Int) {
-        guard let bufs = sampleBuffers[type], !bufs.isEmpty else { return }
+    private func spawnVoice(type: DrumVoiceID, velocity: Float, delay: Int, bank: [[AVAudioPCMBuffer]]) {
+        guard type.rawValue < bank.count else { return }      // bank still loading
+        let bufs = bank[type.rawValue]
+        guard !bufs.isEmpty else { return }
         let idx = rrIndex[type.rawValue] % bufs.count
         rrIndex[type.rawValue] = idx + 1
         let voice = SampleVoice(buffer: bufs[idx], velocity: velocity, delay: delay)

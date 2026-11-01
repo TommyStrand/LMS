@@ -556,6 +556,10 @@ final class AudioEngine {
 
     func applyPreset(_ preset: SynthPreset) {
         currentPreset = preset   // observed — callers must invoke this on main
+        // Start decoding a sampler instrument as soon as it is SELECTED (decoding
+        // runs in the background), so it's ready by the first note instead of the
+        // first note triggering the load.
+        if case .sampler(let instrument) = preset.voiceMode { samplerEngine(for: instrument) }
         Diagnostics.shared.log("Preset → \(preset.name)")
         applyPresetToNodes(preset)
     }

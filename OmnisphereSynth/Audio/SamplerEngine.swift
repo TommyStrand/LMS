@@ -79,33 +79,49 @@ final class SamplerEngine {
 
     // MARK: - Sample loading
 
-    /// Scans the bundle tree for WAV files and loads matching samples into memory.
-    /// Uses FileManager enumeration (same technique as DrumEngine) which works
-    /// reliably with Xcode folder references, unlike Bundle.url(forResource:subdirectory:).
-    func load() {
-        // Key by "<folder>/<filename>" — NOT the bare filename. All three sampler
-        // instruments name their files identically (e.g. grand_piano/60_64.wav,
-        // string_ensemble/60_64.wav, concert_flute/60_64.wav). Keying on the bare
-        // filename let the last-enumerated folder overwrite the others, so every
-        // instrument ended up playing whichever folder won the collision (flute,
-        // in practice) for any note present in more than one folder. Including the
-        // parent folder makes each sample unique. Relies on the Samples directory
-        // being added to Xcode as a folder reference (structure preserved in bundle).
-        var wavMap: [String: URL] = [:]
-        if let en = FileManager.default.enumerator(
-            at: Bundle.main.bundleURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) {
-            for case let url as URL in en where url.pathExtension.lowercased() == "wav" {
-                let folder = url.deletingLastPathComponent().lastPathComponent
-                let name   = url.deletingPathExtension().lastPathComponent
-                wavMap["\(folder)/\(name)"] = url
-            }
-        }
+    /// Decoded sample set, built off the main thread and installed on it.
+    private struct Decoded {
+        var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
+        var parts:   [Int: [Int: (head: AVAudioPCMBuffer, body: AVAudioPCMBuffer)]] = [:]
+        var loaded = 0, expected = 0, sustainLooped = 0
+    }
 
-        var loaded = 0
-        var sustainLooped = 0
+    /// Loads the instrument's samples. Reading, stereo conversion and sustain-loop
+    /// analysis run on a background queue (they used to block the main thread —
+    /// a hitch the first time a sampler preset was played); the result is installed
+    /// on the main thread, where `buffers` / `sustainParts` are read. Notes played
+    /// before it lands are skipped, which is why AudioEngine starts loading as
+    /// soon as a sampler preset is SELECTED rather than on its first note.
+    func load() {
+        let instrument = self.instrument
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let decoded = SamplerEngine.decode(instrument)
+            DispatchQueue.main.async { self?.install(decoded) }
+        }
+    }
+
+    private func install(_ d: Decoded) {
+        buffers      = d.buffers
+        sustainParts = d.parts
+        let summary = "SamplerEngine[\(instrument.id)]: \(d.loaded)/\(d.expected) samples loaded"
+            + (instrument.sustainLoop && !instrument.loops ? ", \(d.sustainLooped) with a sustain loop" : "")
+        print(summary)
+        Diagnostics.shared.log(summary)
+        // Catch missing/corrupt samples in debug builds rather than as a silent gap
+        // heard later. Allows 0 (bundle not present in some test contexts).
+        assert(d.loaded == d.expected || d.loaded == 0,
+               "SamplerEngine[\(instrument.id)] loaded \(d.loaded)/\(d.expected) samples")
+    }
+
+    /// Thread-safe: reads only the immutable BundleIndex and builds new buffers.
+    private static func decode(_ instrument: SamplerInstrument) -> Decoded {
+        // Keyed by "<folder>/<filename>" — NOT the bare filename. All sampler
+        // instruments name their files identically (e.g. grand_piano/60_64.wav,
+        // string_ensemble/60_64.wav); keying on the bare filename let the
+        // last-enumerated folder overwrite the others, so every instrument played
+        // whichever folder won. Relies on Samples being an Xcode folder reference.
+        let wavMap = BundleIndex.shared.wavByFolderAndName
+        var d = Decoded()
         // Generated instruments declare their roots; imported ones (pipe organ)
         // discover them from the folder, because those samples live only on the
         // machine that ran the importer while the descriptor lives in git — a
@@ -131,37 +147,24 @@ final class SamplerEngine {
                       // requires the buffer channel count to match exactly.
                       let buf  = makeStereo(mono)
                 else { continue }
-                // Identity guard: the resolved file MUST live in this instrument's
-                // folder. This is the invariant the old bare-filename lookup violated
-                // silently (loading flute samples for piano/strings). Cheap to check,
-                // and it turns that whole class of bug into an immediate debug crash.
+                // Identity guard: the resolved file MUST live in this instrument's folder.
                 assert(url.deletingLastPathComponent().lastPathComponent == instrument.id,
                        "SamplerEngine[\(instrument.id)] resolved \(key) to \(url.path) — wrong folder")
                 // Real recordings of sustaining instruments: find the steady part and
-                // loop it, so the note holds as long as the key does (a pipe organ
-                // used to stop when its recording ran out).
+                // loop it, so the note holds as long as the key does.
                 if !instrument.loops && instrument.sustainLoop, let parts = makeSustainParts(mono) {
-                    sustainParts[root, default: [:]][layer.midiValue] = parts
-                    sustainLooped += 1
+                    d.parts[root, default: [:]][layer.midiValue] = parts
+                    d.sustainLooped += 1
                 }
-                // One-shots get zero-crossing edge fades to declick note-on and
-                // slot recycling. Looping buffers must NOT — an edge fade would
-                // dip to silence at every loop wrap; they rely on their seamless
-                // crossfade (generator) and the engine's note-on/off volume ramps.
+                // One-shots get zero-crossing edge fades to declick note-on and slot
+                // recycling. Looping buffers must NOT — a fade would dip at every wrap.
                 if !instrument.loops { applyEdgeFades(buf) }
-                buffers[root, default: [:]][layer.midiValue] = buf
-                loaded += 1
+                d.buffers[root, default: [:]][layer.midiValue] = buf
+                d.loaded += 1
             }
         }
-        let expected = roots.count * instrument.velocityLayers.count
-        let summary = "SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded"
-            + (instrument.sustainLoop && !instrument.loops ? ", \(sustainLooped) with a sustain loop" : "")
-        print(summary)
-        Diagnostics.shared.log(summary)
-        // Catch missing/corrupt samples at launch in debug builds rather than as a
-        // silent gap heard later. Allows 0 (bundle not present in some test contexts).
-        assert(loaded == expected || loaded == 0,
-               "SamplerEngine[\(instrument.id)] loaded \(loaded)/\(expected) samples")
+        d.expected = roots.count * instrument.velocityLayers.count
+        return d
     }
 
     // MARK: - Playback
@@ -299,7 +302,7 @@ final class SamplerEngine {
 
     /// Splits a mono recording into attack (head) + seamless sustain loop (body),
     /// both promoted to stereo. nil if it has no steady part long enough to loop.
-    private func makeSustainParts(_ mono: AVAudioPCMBuffer)
+    private static func makeSustainParts(_ mono: AVAudioPCMBuffer)
         -> (head: AVAudioPCMBuffer, body: AVAudioPCMBuffer)? {
         guard mono.format.channelCount == 1, let src = mono.floatChannelData?[0] else { return nil }
         var x = Array(UnsafeBufferPointer(start: src, count: Int(mono.frameLength)))
@@ -313,7 +316,7 @@ final class SamplerEngine {
         return (headStereo, bodyStereo)
     }
 
-    private func monoBuffer(_ samples: ArraySlice<Float>, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+    private static func monoBuffer(_ samples: ArraySlice<Float>, format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard !samples.isEmpty,
               let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
               let d = b.floatChannelData?[0] else { return nil }
@@ -322,7 +325,7 @@ final class SamplerEngine {
         return b
     }
 
-    private func applyFadeIn(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
+    private static func applyFadeIn(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
         guard let ch = buf.floatChannelData else { return }
         let f = min(Int(buf.frameLength), Int(ms / 1000.0 * buf.format.sampleRate))
         guard f > 0 else { return }
@@ -337,7 +340,7 @@ final class SamplerEngine {
     /// buffer always begins and ends on a zero crossing. Without this, samples
     /// whose first/last frame is non-zero produce an audible click on note-on and
     /// when a slot is recycled mid-tail.
-    private func applyEdgeFades(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
+    private static func applyEdgeFades(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
         guard let ch = buf.floatChannelData else { return }
         let n = Int(buf.frameLength)
         let f = min(n / 2, Int(ms / 1000.0 * buf.format.sampleRate))
@@ -391,7 +394,7 @@ final class SamplerEngine {
     /// AVAudioPlayerNode requires buffer.format.channelCount == node output channelCount,
     /// so we must promote our synthesised mono WAVs to stereo before scheduling.
     /// Done manually to avoid the AVAudioConverter mono→stereo failure mode noted in DrumEngine.
-    private func makeStereo(_ src: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    private static func makeStereo(_ src: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard src.format.channelCount == 1,
               let srcData = src.floatChannelData?[0]
         else { return src }  // already stereo or non-float — return as-is
