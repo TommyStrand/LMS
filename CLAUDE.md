@@ -51,7 +51,8 @@ no audio hardware — so the pattern for anything testable is to factor it into 
 plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
 `SamplerSelection` (note/velocity → sample), `PitchSnap` (keyboard glide + snap-
 to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
-(wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `RenderParams` (preset →
+(wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
+drum hits land on which frame of a buffer), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
@@ -64,3 +65,8 @@ audio-thread scalars), plus descriptor and scale invariants.
 - **Real-time rule:** `@Observable` tracking accessors take a lock, so any property the audio
   render thread touches (AudioEngine, DrumEngine) MUST be `@ObservationIgnored`. Only
   main-thread, UI-facing properties may be tracked
+- Both engines hand state to the render thread the same way: main thread publishes an
+  immutable snapshot (AudioEngine `RenderSnapshot`, DrumEngine `DrumRenderState`) under an
+  `os_unfair_lock`; the render thread reads it with `os_unfair_lock_trylock` and keeps its
+  last copy if contended. Never take a blocking lock, allocate, or `DispatchQueue.async`
+  on the render thread

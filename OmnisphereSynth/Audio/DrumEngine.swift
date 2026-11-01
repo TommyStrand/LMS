@@ -2,6 +2,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 import Observation
+import os
 
 // MARK: - Sample voice (value type, pool-allocated, no ARC in hot path)
 
@@ -11,18 +12,23 @@ struct SampleVoice {
     private let frameLen:  Int
     let velocity: Float
     var position: Int = 0
+    /// Frames of silence before the sample starts. Lets a whole buffer's hits be
+    /// spawned up front, each starting on its exact frame (sample-accurate).
+    var delay: Int = 0
 
-    init(buffer: AVAudioPCMBuffer, velocity: Float) {
+    init(buffer: AVAudioPCMBuffer, velocity: Float, delay: Int = 0) {
         let ch    = buffer.floatChannelData!
         leftData  = ch[0]
         rightData = buffer.format.channelCount > 1 ? ch[1] : ch[0]
         frameLen  = Int(buffer.frameLength)
         self.velocity = velocity
+        self.delay    = max(0, delay)
     }
 
     var done: Bool { position >= frameLen }
 
     mutating func nextStereo() -> (Float, Float) {
+        if delay > 0 { delay -= 1; return (0, 0) }
         guard position < frameLen else { return (0, 0) }
         let l = leftData[position]  * velocity
         let r = rightData[position] * velocity
@@ -31,31 +37,81 @@ struct SampleVoice {
     }
 }
 
+// MARK: - Pure hit scheduling (no AVFoundation — unit-tested in SuperNovaPadTests)
+
+/// Finds which pattern hits fall inside one render buffer, and on which frame.
+/// Replaces a per-SAMPLE scan of every hit (44 100 × hits/sec) with one pass
+/// per buffer. A hit fires on frame f when its tick lies in
+/// [start + f·tpf, start + (f+1)·tpf) modulo the loop — the same rule the old
+/// per-sample loop applied, so timing is unchanged.
+enum DrumSchedule {
+    /// Calls `body(hitIndex, frame)` for every hit in this buffer. Non-escaping
+    /// closure, no allocation — safe on the render thread.
+    static func forEachHit(_ hits: [DrumHit], startTick: Double, ticksPerFrame: Double,
+                           frameCount: Int, loopTicks: Double,
+                           _ body: (Int, Int) -> Void) {
+        guard ticksPerFrame > 0, loopTicks > 0, frameCount > 0 else { return }
+        let span = ticksPerFrame * Double(frameCount)
+        var s = startTick.truncatingRemainder(dividingBy: loopTicks)
+        if s < 0 { s += loopTicks }
+        for i in hits.indices {
+            var off = (Double(hits[i].tick) - s).truncatingRemainder(dividingBy: loopTicks)
+            if off < 0 { off += loopTicks }
+            guard off < span else { continue }
+            body(i, min(frameCount - 1, Int(off / ticksPerFrame)))
+        }
+    }
+}
+
+// MARK: - Render state hand-off
+
+/// Everything the drum render thread reads, published as one immutable value by
+/// the main thread (same try-lock pattern as AudioEngine's RenderSnapshot).
+private struct DrumRenderState {
+    var hits: [DrumHit] = []
+    var loopTicks: Double = 1
+    var ticksPerBeat: Double = 1
+    var bpm: Double = 90
+    var grit: Float = 0
+    var masterVolume: Float = 0.8
+    var isPlaying = false
+    /// Bumped by the main thread to ask the render thread to restart the loop
+    /// (play, pattern change). The render thread owns tickPosition outright.
+    var resetGeneration = 0
+}
+
 // MARK: - DrumEngine
 
 // @Observable: the UI-facing properties below are tracked; everything the render
 // thread reads is @ObservationIgnored so the audio callback never enters the
 // observation registrar (see AudioEngine for the full rationale).
+//
+// THREADING: the observed properties are main-thread only. The render thread
+// never reads them — it reads a DrumRenderState snapshot through a non-blocking
+// try-lock, and owns tickPosition / the voice pool outright. Every setter below
+// republishes the snapshot.
 @Observable
 final class DrumEngine {
 
-    // MARK: Observed (UI-facing)
+    // MARK: Observed (UI-facing, main thread only)
 
-    var isPlaying   = false
+    var isPlaying   = false {
+        didSet { publishRenderState() }
+    }
     var bpm: Double = 90 {
-        didSet { renderBpm = bpm; updateDelayTime() }
+        didSet { updateDelayTime(); publishRenderState() }
     }
     var patternIndex: Int = 0 {
         didSet {
-            let idx  = max(0, min(patternIndex, DrumPattern.all.count - 1))
-            // Keep the stored value in range too, so views that read patternIndex
-            // directly (e.g. DrumPattern.all[patternIndex]) can't index out of bounds.
-            // Self-assignment inside didSet does not re-trigger the observer.
+            // Keep the stored value in range, so views that read patternIndex
+            // directly (e.g. DrumPattern.all[patternIndex]) can't index out of
+            // bounds. Whether this assignment re-enters didSet under @Observable
+            // doesn't matter: the work below is idempotent (an extra generation
+            // bump / publish is harmless).
+            let idx = max(0, min(patternIndex, DrumPattern.all.count - 1))
             if patternIndex != idx { patternIndex = idx }
-            _pattern         = DrumPattern.all[idx]
-            tickPosition     = 0
-            customHits = nil
-            customHitsLock.lock(); renderCustomHits = nil; customHitsLock.unlock()
+            resetGeneration &+= 1          // render thread restarts the loop
+            customHits = nil               // publishes via customHits.didSet
         }
     }
     var delayMix: Float = 0.22 {
@@ -65,13 +121,17 @@ final class DrumEngine {
         didSet { reverbNode.wetDryMix = shimmer * 100 }
     }
     var grit: Float = 0.0 {
-        didSet { renderGrit = grit }
+        didSet { publishRenderState() }
     }
     var masterVolume: Float = 0.8 {
-        didSet { renderMasterVolume = masterVolume }
+        didSet { publishRenderState() }
     }
+    /// Loop position 0..<1 for the step highlight. Copied from the render thread
+    /// by a main-thread display timer while playing (no audio-thread dispatch).
     var beatFraction: Double = 0
-    var customHits: [DrumHit]?
+    var customHits: [DrumHit]? = nil {
+        didSet { publishRenderState() }
+    }
 
     // MARK: Audio graph
 
@@ -91,43 +151,84 @@ final class DrumEngine {
     // Handles both flat resources and folder-reference subdirectories added in Xcode.
     @ObservationIgnored private var bundleWavMap: [String: URL] = [:]
 
-    // MARK: Render-thread state (all @ObservationIgnored — touched from the audio callback)
+    // MARK: Render hand-off
 
+    // Heap-allocated so the lock has a stable address (an os_unfair_lock must
+    // never be copied). Guards publishedState only.
+    private let stateLock: os_unfair_lock_t = {
+        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+        p.initialize(to: os_unfair_lock())
+        return p
+    }()
+    @ObservationIgnored private var publishedState = DrumRenderState()   // guarded by stateLock
+    @ObservationIgnored private var resetGeneration = 0                  // main thread only
+    @ObservationIgnored private var beatTimer: Timer?                    // main thread only
+
+    // MARK: Render-thread-only state (never touched by the main thread)
+
+    @ObservationIgnored private var cachedState      = DrumRenderState()
+    @ObservationIgnored private var seenGeneration   = 0
+    @ObservationIgnored private var wasPlaying       = false
     @ObservationIgnored private var voicePool:       [SampleVoice?] = Array(repeating: nil, count: 32)
     @ObservationIgnored private var tickPosition:    Double = 0
-    @ObservationIgnored private var renderBpm:       Double = 90
-    @ObservationIgnored private var renderGrit:      Float  = 0
-    @ObservationIgnored private var _pattern:        DrumPattern = DrumPattern.all[0]
-    @ObservationIgnored private var renderCustomHits: [DrumHit]?
-    private let customHitsLock = NSLock()
-    @ObservationIgnored private var renderIsPlaying:    Bool   = false
-    @ObservationIgnored private var renderMasterVolume: Float  = 0.8
-    @ObservationIgnored private var beatCounter:        Int    = 0
+    // Written by the render thread, read by the beat timer. A plain aligned
+    // Double: a torn read is impossible on arm64 and the worst case is a
+    // one-frame-stale step highlight.
+    @ObservationIgnored private var renderBeatFraction: Double = 0
     @ObservationIgnored private var shuffleBag:         [Int]  = []
 
     // MARK: Init
 
     init() {
-        renderBpm = bpm
-        _pattern  = DrumPattern.all[0]
         loadSamples()
+        publishRenderState()   // didSet doesn't fire during init
         setupAudio()
+    }
+
+    deinit {
+        beatTimer?.invalidate()
+        stateLock.deinitialize(count: 1)
+        stateLock.deallocate()
+    }
+
+    /// Rebuilds the render snapshot from the observed properties and swaps it in.
+    /// Main thread only; holds the lock just long enough to assign one struct.
+    private func publishRenderState() {
+        let pat = DrumPattern.all[max(0, min(patternIndex, DrumPattern.all.count - 1))]
+        let state = DrumRenderState(
+            hits:            customHits ?? pat.hits,
+            loopTicks:       Double(max(1, pat.loopTicks)),
+            ticksPerBeat:    Double(pat.ticksPerBeat),
+            bpm:             bpm,
+            grit:            grit,
+            masterVolume:    masterVolume,
+            isPlaying:       isPlaying,
+            resetGeneration: resetGeneration
+        )
+        os_unfair_lock_lock(stateLock)
+        publishedState = state
+        os_unfair_lock_unlock(stateLock)
     }
 
     // MARK: Playback
 
     func play() {
-        tickPosition    = 0
-        renderIsPlaying = true
-        DispatchQueue.main.async { self.isPlaying = true }
+        resetGeneration &+= 1      // render thread restarts the loop from tick 0
+        isPlaying = true           // publishes
+        beatTimer?.invalidate()
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.beatFraction = self.renderBeatFraction
+        }
+        RunLoop.main.add(t, forMode: .common)
+        beatTimer = t
     }
 
     func stop() {
-        renderIsPlaying = false
-        DispatchQueue.main.async {
-            self.isPlaying    = false
-            self.beatFraction = 0
-        }
+        isPlaying = false          // publishes
+        beatTimer?.invalidate()
+        beatTimer = nil
+        beatFraction = 0
     }
 
     func togglePlay() { isPlaying ? stop() : play() }
@@ -161,13 +262,11 @@ final class DrumEngine {
             hits.append(DrumHit(tick: tick, voice: voice, velocity: 0.85))
             hits.sort { $0.tick < $1.tick }
         }
-        customHits = hits
-        customHitsLock.lock(); renderCustomHits = hits; customHitsLock.unlock()
+        customHits = hits          // publishes
     }
 
     func resetPattern() {
-        customHits = nil
-        customHitsLock.lock(); renderCustomHits = nil; customHitsLock.unlock()
+        customHits = nil           // publishes
     }
 
     func activeSteps(for voice: DrumVoiceID) -> Set<Int> {
@@ -296,7 +395,7 @@ final class DrumEngine {
         audioEngine.connect(delayNode,  to: reverbNode,               format: fmt)
         audioEngine.connect(reverbNode, to: audioEngine.mainMixerNode, format: fmt)
 
-        delayNode.delayTime     = 60.0 / renderBpm * 0.75
+        delayNode.delayTime     = 60.0 / bpm * 0.75
         delayNode.feedback      = 28
         delayNode.lowPassCutoff = 5500
         delayNode.wetDryMix     = delayMix * 100
@@ -344,7 +443,7 @@ final class DrumEngine {
         do { try audioEngine.start() }
         catch { print("DrumEngine: restart failed – \(error)"); return }
         // Restore effect parameters cleared by reset()
-        delayNode.delayTime     = 60.0 / renderBpm * 0.75
+        delayNode.delayTime     = 60.0 / bpm * 0.75
         delayNode.feedback      = 28
         delayNode.lowPassCutoff = 5500
         delayNode.wetDryMix     = delayMix * 100
@@ -352,7 +451,7 @@ final class DrumEngine {
     }
 
     private func updateDelayTime() {
-        delayNode.delayTime = 60.0 / renderBpm * 0.75
+        delayNode.delayTime = 60.0 / bpm * 0.75
     }
 
     // MARK: Render block
@@ -360,38 +459,52 @@ final class DrumEngine {
     private func renderBlock(isSilence: UnsafeMutablePointer<ObjCBool>,
                              frameCount: Int,
                              abl: UnsafeMutablePointer<AudioBufferList>) {
+        // Non-blocking read of the published state; if the main thread is
+        // mid-publish, keep last buffer's copy. The audio thread never waits.
+        if os_unfair_lock_trylock(stateLock) {
+            cachedState = publishedState
+            os_unfair_lock_unlock(stateLock)
+        }
+        let st = cachedState
+
+        // Restart requests (play, pattern change) — the render thread is the only
+        // writer of tickPosition, so this can't race the main thread.
+        if st.resetGeneration != seenGeneration {
+            seenGeneration = st.resetGeneration
+            tickPosition   = 0
+        }
+        // Starting from stopped: drop any tail left over from the last run so it
+        // doesn't resume mid-sample. (A pattern change while playing keeps tails.)
+        if st.isPlaying && !wasPlaying {
+            for i in 0 ..< voicePool.count { voicePool[i] = nil }
+        }
+        wasPlaying = st.isPlaying
+
         let bufList = UnsafeMutableAudioBufferListPointer(abl)
         for buf in bufList { if let d = buf.mData { memset(d, 0, Int(buf.mDataByteSize)) } }
 
-        guard renderIsPlaying else { isSilence.pointee = true; return }
+        guard st.isPlaying else { isSilence.pointee = true; return }
         guard let lPtr = bufList[0].mData?.assumingMemoryBound(to: Float.self),
               let rPtr = (bufList.count > 1 ? bufList[1].mData : bufList[0].mData)?
                 .assumingMemoryBound(to: Float.self)
         else { return }
 
-        let loopTicks      = Double(_pattern.loopTicks)
-        let tpb            = Double(_pattern.ticksPerBeat)
-        let ticksPerSample = (renderBpm / 60.0) * tpb / 44100.0
-        let grit           = renderGrit
-        customHitsLock.lock()
-        let hitsThisBuffer = renderCustomHits
-        customHitsLock.unlock()
+        let loopTicks     = st.loopTicks
+        let ticksPerFrame = (st.bpm / 60.0) * st.ticksPerBeat / 44100.0
+        let grit          = st.grit
+        let volume        = st.masterVolume
+
+        // Schedule this whole buffer's hits ONCE (was: scan every hit every
+        // sample). Each voice is delayed to start on its exact frame.
+        DrumSchedule.forEachHit(st.hits, startTick: tickPosition, ticksPerFrame: ticksPerFrame,
+                                frameCount: frameCount, loopTicks: loopTicks) { i, frame in
+            spawnVoice(type: st.hits[i].voice, velocity: st.hits[i].velocity, delay: frame)
+        }
+        tickPosition = (tickPosition + ticksPerFrame * Double(frameCount))
+            .truncatingRemainder(dividingBy: loopTicks)
+        renderBeatFraction = tickPosition / loopTicks
 
         for frame in 0 ..< frameCount {
-            let prev = tickPosition
-            tickPosition += ticksPerSample
-
-            let prevMod = prev.truncatingRemainder(dividingBy: loopTicks)
-            let currMod = tickPosition.truncatingRemainder(dividingBy: loopTicks)
-
-            for hit in hitsThisBuffer ?? _pattern.hits {
-                let ht    = Double(hit.tick)
-                let fired = currMod > prevMod
-                    ? (ht >= prevMod && ht < currMod)
-                    : (ht >= prevMod || ht < currMod)
-                if fired { spawnVoice(type: hit.voice, velocity: hit.velocity) }
-            }
-
             var l: Float = 0
             var r: Float = 0
             for i in 0 ..< voicePool.count {
@@ -407,25 +520,18 @@ final class DrumEngine {
                 r = tanh(r * d) / d
             }
 
-            lPtr[frame] = l * renderMasterVolume
-            rPtr[frame] = r * renderMasterVolume
-        }
-
-        beatCounter += frameCount
-        if beatCounter >= 512 {
-            beatCounter = 0
-            let frac = tickPosition.truncatingRemainder(dividingBy: loopTicks) / loopTicks
-            DispatchQueue.main.async { [weak self] in self?.beatFraction = frac }
+            lPtr[frame] = l * volume
+            rPtr[frame] = r * volume
         }
     }
 
     // MARK: Voice pool (render thread only)
 
-    private func spawnVoice(type: DrumVoiceID, velocity: Float) {
+    private func spawnVoice(type: DrumVoiceID, velocity: Float, delay: Int) {
         guard let bufs = sampleBuffers[type], !bufs.isEmpty else { return }
         let idx = rrIndex[type.rawValue] % bufs.count
         rrIndex[type.rawValue] = idx + 1
-        let voice = SampleVoice(buffer: bufs[idx], velocity: velocity)
+        let voice = SampleVoice(buffer: bufs[idx], velocity: velocity, delay: delay)
         for i in 0 ..< voicePool.count {
             if voicePool[i] == nil || voicePool[i]!.done { voicePool[i] = voice; return }
         }

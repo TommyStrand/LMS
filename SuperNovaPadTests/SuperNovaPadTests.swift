@@ -320,6 +320,72 @@ final class SuperNovaPadTests: XCTestCase {
         }
     }
 
+    // MARK: - Drum scheduling (DrumSchedule)
+
+    private func scheduled(_ hits: [DrumHit], start: Double, tpf: Double,
+                           frames: Int, loop: Double) -> [[Int]] {
+        var out: [[Int]] = []
+        DrumSchedule.forEachHit(hits, startTick: start, ticksPerFrame: tpf,
+                                frameCount: frames, loopTicks: loop) { out.append([$0, $1]) }
+        return out
+    }
+
+    func testDrumHitLandsOnItsExactFrame() {
+        let hits = [DrumHit(tick: 0, voice: .kick, velocity: 1),
+                    DrumHit(tick: 10, voice: .snare, velocity: 1)]
+        // 0.5 ticks/frame: tick 0 → frame 0, tick 10 → frame 20.
+        XCTAssertEqual(scheduled(hits, start: 0, tpf: 0.5, frames: 64, loop: 480), [[0, 0], [1, 20]])
+    }
+
+    func testDrumHitOutsideBufferDoesNotFire() {
+        let hits = [DrumHit(tick: 100, voice: .kick, velocity: 1)]
+        XCTAssertEqual(scheduled(hits, start: 0, tpf: 0.5, frames: 64, loop: 480), [])   // span 0..<32
+        // The hit exactly at the buffer's end belongs to the NEXT buffer.
+        XCTAssertEqual(scheduled([DrumHit(tick: 32, voice: .kick, velocity: 1)],
+                                 start: 0, tpf: 0.5, frames: 64, loop: 480), [])
+    }
+
+    func testDrumHitAcrossLoopWrap() {
+        // Buffer starts 5 ticks before the loop end; tick 0 is 5 ticks in → frame 10.
+        let hits = [DrumHit(tick: 0, voice: .kick, velocity: 1)]
+        XCTAssertEqual(scheduled(hits, start: 475, tpf: 0.5, frames: 64, loop: 480), [[0, 10]])
+        // A start beyond one loop is normalised the same way.
+        XCTAssertEqual(scheduled(hits, start: 475 + 480 * 3, tpf: 0.5, frames: 64, loop: 480), [[0, 10]])
+    }
+
+    func testDrumScheduleMatchesThePerSampleRule() {
+        // Parity with the old per-sample scan: hit fires on frame f when its tick is
+        // in [start + f·tpf, start + (f+1)·tpf) modulo the loop. Brute-force check
+        // every frame of many buffers across a loop wrap, at an awkward tempo.
+        let loop = 1920.0                                  // 1 bar at 480 tpb
+        let tpf  = (97.0 / 60.0) * 480.0 / 44100.0         // 97 BPM
+        let hits = (0..<64).map { DrumHit(tick: Int32($0 * 30 + 7), voice: .hihat, velocity: 1) }
+        var start = 1700.0
+        for _ in 0..<40 {
+            var expected: [[Int]] = []
+            for f in 0..<441 {
+                let a = (start + Double(f) * tpf).truncatingRemainder(dividingBy: loop)
+                let b = a + tpf
+                for (i, h) in hits.enumerated() {
+                    let t = Double(h.tick)
+                    if (t >= a && t < b) || (b > loop && t < b - loop) { expected.append([i, f]) }
+                }
+            }
+            let got = scheduled(hits, start: start, tpf: tpf, frames: 441, loop: loop)
+            XCTAssertEqual(got.sorted { ($0[1], $0[0]) < ($1[1], $1[0]) },
+                           expected.sorted { ($0[1], $0[0]) < ($1[1], $1[0]) },
+                           "mismatch for buffer starting at tick \(start)")
+            start = (start + tpf * 441).truncatingRemainder(dividingBy: loop)
+        }
+    }
+
+    func testDrumScheduleRejectsDegenerateInput() {
+        let hits = [DrumHit(tick: 0, voice: .kick, velocity: 1)]
+        XCTAssertEqual(scheduled(hits, start: 0, tpf: 0,   frames: 64, loop: 480), [])
+        XCTAssertEqual(scheduled(hits, start: 0, tpf: 0.5, frames: 0,  loop: 480), [])
+        XCTAssertEqual(scheduled(hits, start: 0, tpf: 0.5, frames: 64, loop: 0),   [])
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {
