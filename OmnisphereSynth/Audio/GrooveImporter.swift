@@ -73,27 +73,34 @@ enum GrooveImporter {
         }()
         guard !drumNotes.isEmpty else { return nil }
 
-        // Round up to the nearest 1/2/4/8-bar loop boundary
+        // Round up to the nearest 1/2/4/8-bar loop boundary (assumes 4/4).
         let tpb         = midi.ticksPerBeat
         let ticksPerBar = tpb * 4
         let rawBars     = Double(midi.durationTicks) / Double(ticksPerBar)
-        let bars        = rawBars <= 1 ? 1 : rawBars <= 2 ? 2 : rawBars <= 4 ? 4 : 8
-        let loopMidi    = ticksPerBar * bars
+        let fileBars    = rawBars <= 1 ? 1 : rawBars <= 2 ? 2 : rawBars <= 4 ? 4 : 8
+        let fileLoop    = ticksPerBar * fileBars
 
         // Normalise to the app's internal resolution (9600 tpb)
         let targetTpb = 9600
         let scale     = Double(targetTpb) / Double(tpb)
 
-        let hits: [DrumHit] = drumNotes.compactMap { n in
-            guard let voice = noteMap[n.note] else { return nil }
-            let scaledTick = Int32(Double(n.tick % loopMidi) * scale)
-            return DrumHit(tick: scaledTick, voice: voice,
+        // Hits past the loop end are DROPPED. (They used to be folded back in with
+        // `tick % loop`, so a 16-bar file played bars 9–16 on top of bars 1–8.)
+        var hits: [DrumHit] = drumNotes.compactMap { n in
+            guard n.tick < fileLoop, let voice = noteMap[n.note] else { return nil }
+            return DrumHit(tick: Int32(Double(n.tick) * scale), voice: voice,
                            velocity: Float(n.velocity) / 127.0)
         }
         guard !hits.isEmpty else { return nil }
 
+        // The step sequencer is a 2-bar grid; play a 1-bar groove twice to fill it.
+        var loopTicks = Int32(Double(fileLoop) * scale)
+        if fileBars == 1 {
+            hits += hits.map { DrumHit(tick: $0.tick + loopTicks, voice: $0.voice, velocity: $0.velocity) }
+            loopTicks *= 2
+        }
+
         let name      = url.deletingPathExtension().lastPathComponent
-        let loopTicks = Int32(Double(loopMidi) * scale)
         let feel      = classifyFeel(name: name, pathHint: url.path, hits: hits)
 
         return DrumPattern(

@@ -9,7 +9,10 @@ struct MidiNote {
 
 struct ParsedMidi {
     let ticksPerBeat:  Int
-    let durationTicks: Int  // length of longest track (raw MIDI ticks)
+    /// Loop length in raw MIDI ticks: the latest End-of-Track marker, or the last
+    /// note-on if that's later. (The last note alone made a 2-bar groove with an
+    /// empty or sparse second bar import as a 1-bar loop.)
+    let durationTicks: Int
     let notes:         [MidiNote]
 }
 
@@ -55,24 +58,27 @@ enum MidiParser {
         // MARK: Header
 
         guard readTag() == "MThd",
-              readU32() == 6,
+              let hlen = readU32(), hlen >= 6,
               let _   = readU16(),              // format (0/1/2 — we accept all)
               let nTrk = readU16(),
               let div  = readU16(),
               div & 0x8000 == 0                 // ticks-per-beat mode (not SMPTE)
         else { return nil }
+        skip(Int(hlen) - 6)                     // tolerate an extended header
 
         let tpb = Int(div)
         var allNotes: [MidiNote] = []
         var maxTick = 0
+        var endTick = 0
 
         // MARK: Tracks
 
-        for _ in 0..<nTrk {
-            guard readTag() == "MTrk",
-                  let tlen = readU32() else { break }
-
+        var tracksRead = 0
+        while tracksRead < Int(nTrk), let tag = readTag(), let tlen = readU32() {
             let trackEnd = data.index(pos, offsetBy: Int(tlen), limitedBy: data.endIndex) ?? data.endIndex
+            // Skip non-track chunks (e.g. Yamaha XF data) instead of aborting the file.
+            guard tag == "MTrk" else { pos = trackEnd; continue }
+            tracksRead += 1
             var absTick  = 0
             var running: UInt8 = 0
 
@@ -119,7 +125,10 @@ enum MidiParser {
                     if status == 0xFF {             // Meta event
                         let metaType = readByte() ?? 0
                         if let mlen = readVLQ() { skip(mlen) }
-                        if metaType == 0x2F { pos = trackEnd } // end-of-track
+                        if metaType == 0x2F {           // end-of-track: marks the length
+                            endTick = max(endTick, absTick)
+                            pos = trackEnd
+                        }
                     } else {                        // SysEx
                         if let slen = readVLQ() { skip(slen) }
                     }
@@ -133,6 +142,6 @@ enum MidiParser {
         }
 
         guard !allNotes.isEmpty else { return nil }
-        return ParsedMidi(ticksPerBeat: tpb, durationTicks: maxTick, notes: allNotes)
+        return ParsedMidi(ticksPerBeat: tpb, durationTicks: max(maxTick, endTick), notes: allNotes)
     }
 }

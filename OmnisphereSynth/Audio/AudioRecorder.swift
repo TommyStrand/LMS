@@ -32,20 +32,31 @@ final class AudioRecorder {
         let drumURL  = FileManager.default.temporaryDirectory
             .appendingPathComponent("jam_drum_\(stamp).caf")
 
+        // The tap delivers buffers in the mixer's output format, whose sample rate
+        // follows the HARDWARE (often 48 kHz, e.g. many Bluetooth routes).
+        // AVAudioFile.write(from:) requires the buffer to match the file's
+        // processingFormat, so a file fixed at 44.1 kHz rejected every buffer on a
+        // 48 kHz route — silently (try?) — and the recording came out empty.
+        // Create each file at its own tap's rate and channel count.
+        let synthFmt = synthEngine.mainMixerNode.outputFormat(forBus: 0)
+        let drumFmt  = drumEngine.mainMixerNode.outputFormat(forBus: 0)
+
         // CAF with 16-bit PCM — readable by AVMutableComposition on all OS versions
-        let recSettings: [String: Any] = [
-            AVFormatIDKey:              Int(kAudioFormatLinearPCM),
-            AVSampleRateKey:            44100.0,
-            AVNumberOfChannelsKey:      2,
-            AVLinearPCMBitDepthKey:     16,
-            AVLinearPCMIsFloatKey:      false,
-            AVLinearPCMIsBigEndianKey:  false,
-            AVLinearPCMIsNonInterleaved: false
-        ]
+        func recSettings(_ fmt: AVAudioFormat) -> [String: Any] {
+            [
+                AVFormatIDKey:               Int(kAudioFormatLinearPCM),
+                AVSampleRateKey:             fmt.sampleRate,
+                AVNumberOfChannelsKey:       Int(fmt.channelCount),
+                AVLinearPCMBitDepthKey:      16,
+                AVLinearPCMIsFloatKey:       false,
+                AVLinearPCMIsBigEndianKey:   false,
+                AVLinearPCMIsNonInterleaved: false
+            ]
+        }
 
         do {
-            synthFile = try AVAudioFile(forWriting: synthURL, settings: recSettings)
-            drumFile  = try AVAudioFile(forWriting: drumURL,  settings: recSettings)
+            synthFile = try AVAudioFile(forWriting: synthURL, settings: recSettings(synthFmt))
+            drumFile  = try AVAudioFile(forWriting: drumURL,  settings: recSettings(drumFmt))
         } catch {
             print("AudioRecorder: file creation failed – \(error)")
             DispatchQueue.main.async { self.failed = true }
@@ -56,9 +67,6 @@ final class AudioRecorder {
         drumTempURL        = drumURL
         self.synthAVEngine = synthEngine
         self.drumAVEngine  = drumEngine
-
-        let synthFmt = synthEngine.mainMixerNode.outputFormat(forBus: 0)
-        let drumFmt  = drumEngine.mainMixerNode.outputFormat(forBus: 0)
 
         synthEngine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: synthFmt) { [weak self] buf, _ in
             self?.writeQueue.async { try? self?.synthFile?.write(from: buf) }

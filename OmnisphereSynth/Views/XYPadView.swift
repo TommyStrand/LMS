@@ -240,6 +240,9 @@ struct SimultaneousTouchGesture: UIViewRepresentable {
 
 final class TouchView: UIView {
     var handler: (([TouchEvent]) -> Void)?
+    /// Touches currently down on this view (id → last location).
+    private var active: [Int: CGPoint] = [:]
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
@@ -248,10 +251,27 @@ final class TouchView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func send(_ touches: Set<UITouch>, phase: UITouch.Phase) {
-        handler?(touches.map { TouchEvent(id: $0.hash, location: $0.location(in: self), phase: phase) })
+        let events = touches.map { TouchEvent(id: $0.hash, location: $0.location(in: self), phase: phase) }
+        for e in events {
+            if phase == .ended || phase == .cancelled { active.removeValue(forKey: e.id) }
+            else { active[e.id] = e.location }
+        }
+        handler?(events)
     }
     override func touchesBegan(_ t: Set<UITouch>, with e: UIEvent?)    { send(t, phase: .began) }
     override func touchesMoved(_ t: Set<UITouch>, with e: UIEvent?)    { send(t, phase: .moved) }
     override func touchesEnded(_ t: Set<UITouch>, with e: UIEvent?)    { send(t, phase: .ended) }
     override func touchesCancelled(_ t: Set<UITouch>, with e: UIEvent?) { send(t, phase: .cancelled) }
+
+    /// The play surface can be torn down while a finger is still down (switching
+    /// play mode, tapping DRUMS, rotating across the iPad/iPhone layout width).
+    /// UIKit doesn't reliably deliver touchesEnded to a view that has left the
+    /// window, so those notes were never released and hung. Cancel them here.
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        guard newWindow == nil, !active.isEmpty else { return }
+        let events = active.map { TouchEvent(id: $0.key, location: $0.value, phase: .cancelled) }
+        active.removeAll()
+        handler?(events)
+    }
 }

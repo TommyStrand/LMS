@@ -193,6 +193,25 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 1.60).fire, [1])
     }
 
+    func testLateTickAtLoopEndStillFiresTheOldTail() {
+        // Event at t=0.995 in a 1 s loop; ticks at 0.99 and then 1.001 (8 ms late).
+        // The 0.995 event belongs to pass 0 and must fire as the TAIL of that pass,
+        // not be skipped because the cursor resets for pass 1.
+        var s = LoopSchedule.State()
+        let times = [0.10, 0.995]
+        XCTAssertEqual(LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 0.99).fire, [0])
+        let step = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 1.001)
+        XCTAssertEqual(step.tail, [1])
+        XCTAssertTrue(step.wrapped)
+        XCTAssertEqual(step.fire, [])
+        XCTAssertEqual(LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 1.15).fire, [0])
+    }
+
+    func testFirstPassHasNoTail() {
+        var s = LoopSchedule.State()
+        XCTAssertEqual(LoopSchedule.advance(&s, eventTimes: [0.5], loopDuration: 1, elapsed: 0.2).tail, [])
+    }
+
     func testEventsMissedByASlowTickStillFireOnNextTick() {
         // A tick stall (e.g. 400 ms) must not drop events; all events whose time
         // has passed fire together, in order, on the next tick.
@@ -484,6 +503,38 @@ final class SuperNovaPadTests: XCTestCase {
     func testDiscoverRootsWithNoFilesIsEmpty() {
         XCTAssertEqual(SamplerSelection.discoverRoots(keys: [], folder: "pipe_organ",
                                                       layers: SamplerInstrument.pipeOrgan.velocityLayers), [])
+    }
+
+    // MARK: - MIDI parsing (groove length)
+
+    private func be(_ v: UInt32, bytes: Int) -> Data {
+        Data((0..<bytes).reversed().map { UInt8(truncatingIfNeeded: v >> (8 * UInt32($0))) })
+    }
+
+    /// Minimal format-1 MIDI file, 480 tpb: one kick on beat 1, End-of-Track at
+    /// 2 bars (3840 ticks = VLQ 0x9E 0x00). Optionally a non-track chunk first.
+    private func twoBarKickFile(withForeignChunk: Bool = false) -> Data {
+        let track: [UInt8] = [0x00, 0x99, 36, 100,          // note-on ch10, kick
+                              0x9E, 0x00, 0xFF, 0x2F, 0x00] // +3840 ticks: end of track
+        var d = Data("MThd".utf8) + be(6, bytes: 4) + be(1, bytes: 2) + be(1, bytes: 2) + be(480, bytes: 2)
+        if withForeignChunk { d += Data("XFIH".utf8) + be(3, bytes: 4) + Data([1, 2, 3]) }
+        d += Data("MTrk".utf8) + be(UInt32(track.count), bytes: 4) + Data(track)
+        return d
+    }
+
+    func testMidiLengthComesFromEndOfTrackNotTheLastNote() throws {
+        // The only note is at tick 0; the groove is 2 bars long. Using the last
+        // note as the length imported this as a 1-bar loop.
+        let midi = try XCTUnwrap(MidiParser.parse(twoBarKickFile()))
+        XCTAssertEqual(midi.ticksPerBeat, 480)
+        XCTAssertEqual(midi.durationTicks, 3840)
+        XCTAssertEqual(midi.notes.count, 1)
+    }
+
+    func testMidiParserSkipsUnknownChunks() throws {
+        let midi = try XCTUnwrap(MidiParser.parse(twoBarKickFile(withForeignChunk: true)))
+        XCTAssertEqual(midi.notes.map(\.note), [36])
+        XCTAssertEqual(midi.durationTicks, 3840)
     }
 
     // MARK: - Looper touch-ID isolation

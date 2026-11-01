@@ -395,18 +395,31 @@ def scan_sfz(sfz_path: Path, octave_offset: int) -> dict[int, list]:
     blocks = _tokenize_sfz(text)
 
     out: dict[int, list] = {}
-    inherited: dict[str, str] = {}   # from <global>/<master>/<group>
+    # SFZ scoping: a new <global> replaces the global level and clears master and
+    # group; a new <master> clears group; a new <group> replaces only the group
+    # level. (Accumulating everything into one dict leaked e.g. a previous group's
+    # pitch_keycenter / lovel / hivel into every later group's regions.)
+    control: dict[str, str] = {}
+    global_ops: dict[str, str] = {}
+    master_ops: dict[str, str] = {}
+    group_ops:  dict[str, str] = {}
     for header, op in blocks:
-        if header in ("global", "master", "group", "control"):
-            if header == "control" and "default_path" in op:
-                inherited["default_path"] = op["default_path"]
-            else:
-                inherited.update(op)
+        if header == "control":
+            control.update(op)
+            continue
+        if header == "global":
+            global_ops, master_ops, group_ops = dict(op), {}, {}
+            continue
+        if header == "master":
+            master_ops, group_ops = dict(op), {}
+            continue
+        if header == "group":
+            group_ops = dict(op)
             continue
         if header != "region":
             continue
 
-        merged = {**inherited, **op}
+        merged = {**control, **global_ops, **master_ops, **group_ops, **op}
         sample = merged.get("sample")
         if not sample:
             continue
@@ -448,7 +461,9 @@ def _pick_sfz(regions: list, want: str) -> Path | None:
     # Widest coverage (organs typically have a single 0–127 region per key).
     return max(regions, key=lambda r: r[1] - r[0])[2]
 
-_MIDI_IN_NAME_RE = re.compile(r"\b(\d{1,3})\b")
+# A 1–3 digit number not part of a longer number. (Was \b…\b, but "_" is a word
+# character, so "organ_36" never matched and --note-style midi found nothing.)
+_MIDI_IN_NAME_RE = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 # A note-name token: letter + optional accidental (#, s=sharp, b=flat) + octave.
 _NAME_TOKEN_RE = re.compile(r"^([A-Ga-g])([#sb]?)(-?\d{1,2})$")
 
@@ -500,13 +515,19 @@ def _note_from_filename(stem: str, note_style: str) -> int | None:
     return None
 
 def _dynamic_rank(name_lc: str) -> int:
-    tokens = re.split(r"[ _\-.]+", name_lc)
-    for tok in tokens:                       # exact token match first (precise)
-        if tok in _DYNAMIC_RANK:
-            return _DYNAMIC_RANK[tok]
+    """Loudness rank from a filename. The FIRST token is the instrument name in
+    every library this supports, and "piano" is both an instrument and a dynamic,
+    so it is ignored — otherwise "piano_C4_ff" ranked as soft (piano) and both
+    velocity layers got the same take. If several dynamics remain, the last wins."""
+    tokens = [t for t in re.split(r"[ _\-.]+", name_lc) if t]
+    rest   = tokens[1:] if len(tokens) > 1 else tokens
+    exact  = [_DYNAMIC_RANK[t] for t in rest if t in _DYNAMIC_RANK]
+    if exact:
+        return exact[-1]
+    rest_lc = "_".join(rest)
     for word in ("fortissimo", "mezzo-forte", "forte",
                  "pianissimo", "mezzo-piano", "piano"):   # longest-first substring
-        if word in name_lc:
+        if word in rest_lc:
             return _DYNAMIC_RANK[word]
     return _DEFAULT_RANK
 

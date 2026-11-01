@@ -82,7 +82,19 @@ final class MIDIController {
                 names.append("MIDI Source \(i + 1)")
             }
         }
+        // A device went away: any note it was holding will never get its note-off,
+        // and a sustain pedal it held down will never come up. Release everything
+        // so nothing hangs, and clear the pedal so later note-offs aren't deferred.
+        if names.count < connectedDeviceNames.count { releaseAllNotes() }
         connectedDeviceNames = names
+    }
+
+    /// Releases every MIDI-held note and resets the sustain pedal. Main thread.
+    private func releaseAllNotes() {
+        for id in midiNoteIDs.values { engine?.noteOff(touchID: id) }
+        midiNoteIDs.removeAll()
+        sustainedNotes.removeAll()
+        sustainHeld = false
     }
 
     // MARK: - Event parsing
@@ -185,6 +197,9 @@ final class MIDIController {
                 engine.noteOff(touchID: prev)
             }
             let id = self.touchIDBase + note
+            // A re-struck key is held again: it must no longer be released when the
+            // sustain pedal comes up (it was, cutting off a key still held down).
+            self.sustainedNotes.remove(note)
             engine.noteOn(touchID: id, note: note, velocity: max(0.05, velocity),
                           x: 0.5, y: 0.5)
             self.midiNoteIDs[note]    = id

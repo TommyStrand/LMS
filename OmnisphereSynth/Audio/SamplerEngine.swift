@@ -37,6 +37,11 @@ final class SamplerEngine {
     // Every sounding slot's played note + the root sample it was pitched from, so a
     // glide can re-tune it (bend). Main-thread only.
     private var slotPitch: [Int: (midi: Int, root: Int)] = [:]
+    // One-shot slots: when their buffer will have finished (seconds, uptime clock).
+    // AVAudioPlayerNode.isPlaying stays TRUE after a non-looping buffer ends (only
+    // stop() clears it), so without this every slot looked busy forever after the
+    // first 12 notes and every new note stole a slot — often one still ringing.
+    private var slotBusyUntil: [Int: TimeInterval] = [:]
 
     /// Identifies one note-on, so the caller can bend exactly that note later. A
     /// stale handle (its slot since reused by another note) is ignored by `bend`.
@@ -188,6 +193,8 @@ final class SamplerEngine {
         } else {
             // One-shot: play once at full level and let the tail ring out.
             slotNote.removeValue(forKey: idx)
+            let seconds = Double(buf.frameLength) / buf.format.sampleRate / Double(max(0.25, min(4.0, rate)))
+            slotBusyUntil[idx] = ProcessInfo.processInfo.systemUptime + seconds + 0.05
             slot.player.volume = target
             slot.player.scheduleBuffer(buf, at: nil, options: options)
             slot.player.play()
@@ -201,8 +208,33 @@ final class SamplerEngine {
     func bend(_ handle: Handle, semitones: Float) {
         guard slotToken[handle.slot] == handle.token,
               let p = slotPitch[handle.slot] else { return }
-        let rate = Float(pow(2.0, (Double(p.midi - p.root) + Double(semitones)) / 12.0))
-        pool[handle.slot].varispeed.rate = max(0.25, min(4.0, rate))
+        let rate = max(0.25, min(4.0, Float(pow(2.0, (Double(p.midi - p.root) + Double(semitones)) / 12.0))))
+        let varispeed = pool[handle.slot].varispeed
+        // A one-shot played slower lasts longer: stretch its remaining busy time so
+        // a note bent down isn't treated as finished (and stolen) while still ringing.
+        let now = ProcessInfo.processInfo.systemUptime
+        if let until = slotBusyUntil[handle.slot], until > now, varispeed.rate > 0 {
+            slotBusyUntil[handle.slot] = now + (until - now) * Double(varispeed.rate / rate)
+        }
+        varispeed.rate = rate
+    }
+
+    /// Releases exactly the note started with `handle` (looping instruments only).
+    /// Preferred over noteOff(_ note:), which releases EVERY slot playing that MIDI
+    /// note — so the looper and a finger on the same key would silence each other.
+    func noteOff(_ handle: Handle) {
+        guard instrument.loops,
+              slotToken[handle.slot] == handle.token,     // not reused / not already released
+              slotNote[handle.slot] != nil else { return }
+        let idx   = handle.slot
+        let token = handle.token + 1
+        slotToken[idx] = token
+        slotNote.removeValue(forKey: idx)
+        let player = pool[idx].player
+        rampVolume(idx: idx, token: token, to: 0, duration: instrument.release) { [weak self] in
+            guard let self = self, self.slotToken[idx] == token else { return }
+            player.stop()
+        }
     }
 
     func noteOff(_ note: UInt8) {
@@ -228,7 +260,14 @@ final class SamplerEngine {
 
     /// Number of pool slots currently producing audio — surfaced for diagnostics.
     var activeVoiceCount: Int {
-        pool.reduce(0) { $0 + ($1.player.isPlaying ? 1 : 0) }
+        pool.indices.reduce(0) { $0 + (isBusy($1) ? 1 : 0) }
+    }
+
+    /// A slot is busy if it's playing AND (for one-shots) its buffer hasn't ended.
+    private func isBusy(_ idx: Int) -> Bool {
+        guard pool[idx].player.isPlaying else { return false }
+        if instrument.loops { return true }
+        return ProcessInfo.processInfo.systemUptime < (slotBusyUntil[idx] ?? 0)
     }
 
     // MARK: - Helpers
@@ -254,7 +293,7 @@ final class SamplerEngine {
 
     private func nextSlotIndex() -> Int {
         // Prefer an idle slot to avoid cutting release tails on busy pools.
-        if let idle = pool.firstIndex(where: { !$0.player.isPlaying }) { return idle }
+        if let idle = pool.indices.first(where: { !isBusy($0) }) { return idle }
         // All slots busy — steal round-robin. Stealing truncates a still-ringing
         // note and can click, so surface it (throttled) as a likely culprit when
         // troubleshooting audio artefacts during dense playing.

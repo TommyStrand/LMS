@@ -129,6 +129,7 @@ final class LooperEngine {
         let elapsed = Date().timeIntervalSince(start)
         let step = LoopSchedule.advance(&schedule, eventTimes: events.map(\.t),
                                         loopDuration: loopDuration, elapsed: elapsed)
+        for i in step.tail { fire(events[i]) }      // end of the previous pass, late
         if step.wrapped {
             // Loop wrapped — silence any notes still held from the previous pass.
             let ids = Set(events.filter { $0.noteOn }.map { $0.touchID })
@@ -166,6 +167,10 @@ enum LoopSchedule {
     }
 
     struct Step {
+        /// Events left over from the PREVIOUS pass that a late tick skipped past
+        /// (fire these before handling the wrap). Without this, a tick landing just
+        /// after the loop boundary silently dropped every event in the old tail.
+        let tail: [Int]
         let fire: [Int]     // indices into eventTimes to fire now, in order
         let wrapped: Bool   // true when a NEW pass began on a loop boundary (pass ≥ 1)
     }
@@ -173,13 +178,17 @@ enum LoopSchedule {
     /// `eventTimes` must be ascending (they're recorded in time order).
     static func advance(_ s: inout State, eventTimes: [Double],
                         loopDuration: Double, elapsed: Double) -> Step {
-        guard loopDuration > 0 else { return Step(fire: [], wrapped: false) }
+        guard loopDuration > 0 else { return Step(tail: [], fire: [], wrapped: false) }
         let pass  = Int(elapsed / loopDuration)
         let phase = elapsed.truncatingRemainder(dividingBy: loopDuration)
 
+        var tail: [Int] = []
         var wrapped = false
         if pass > s.lastPass {
-            wrapped    = s.lastPass >= 0      // first pass is a start, not a wrap
+            wrapped = s.lastPass >= 0          // first pass is a start, not a wrap
+            if wrapped {
+                tail = Array(s.cursor..<eventTimes.count)
+            }
             s.lastPass = pass
             s.cursor   = 0
         }
@@ -189,6 +198,6 @@ enum LoopSchedule {
             fire.append(s.cursor)
             s.cursor += 1
         }
-        return Step(fire: fire, wrapped: wrapped)
+        return Step(tail: tail, fire: fire, wrapped: wrapped)
     }
 }

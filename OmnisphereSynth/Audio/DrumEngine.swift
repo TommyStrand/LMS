@@ -170,6 +170,7 @@ final class DrumEngine {
         return p
     }()
     @ObservationIgnored private var publishedState = DrumRenderState()   // guarded by stateLock
+    @ObservationIgnored private var retiredStates: [DrumRenderState] = []  // main thread only
     @ObservationIgnored private var resetGeneration = 0                  // main thread only
     @ObservationIgnored private var beatTimer: Timer?                    // main thread only
 
@@ -217,8 +218,13 @@ final class DrumEngine {
             resetGeneration: resetGeneration
         )
         os_unfair_lock_lock(stateLock)
+        let previous = publishedState
         publishedState = state
         os_unfair_lock_unlock(stateLock)
+        // Keep recent states alive on the main thread so the render thread never
+        // performs the final release (free) of a hits array — see AudioEngine.retire.
+        retiredStates.append(previous)
+        if retiredStates.count > 8 { retiredStates.removeFirst() }
     }
 
     // MARK: Playback

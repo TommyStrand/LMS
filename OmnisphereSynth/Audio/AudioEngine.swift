@@ -114,6 +114,8 @@ final class AudioEngine {
     @ObservationIgnored private var publishedSnapshot = RenderSnapshot()
     // Render-thread-only cache of the last snapshot read; never touched off-render.
     @ObservationIgnored private var cachedSnapshot = RenderSnapshot()
+    // Main-thread only: recently replaced snapshots, released here (see retire()).
+    @ObservationIgnored private var retiredSnapshots: [RenderSnapshot] = []
 
     // Hard polyphony ceiling. Past this, the oldest voice is stolen so dense
     // playing (or a stuck note-on) can't grow the voice set without bound and
@@ -498,7 +500,7 @@ final class AudioEngine {
                 let preset = SynthPreset.presets[presetIdx]
                 if case .sampler = preset.voiceMode {
                     if let info = samplerTouches[cid] {
-                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                        releaseSampler(info)
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
@@ -695,7 +697,7 @@ final class AudioEngine {
                 let p   = SynthPreset.presets[presetIdx]
                 if case .sampler = p.voiceMode {
                     if let info = samplerTouches[cid] {
-                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                        releaseSampler(info)
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
@@ -705,7 +707,10 @@ final class AudioEngine {
         }
 
         for presetIdx in activeLayerIndices {
-            let preset = SynthPreset.presets[presetIdx]
+            // The voice/filter knobs edit `currentPreset`, which IS the primary
+            // layer's preset (the controls follow the primary). Using the stock
+            // preset here meant knob edits never reached any layered voice.
+            let preset = presetIdx == primaryLayerIndex ? currentPreset : SynthPreset.presets[presetIdx]
             let cid    = touchID * 1000 + presetIdx
             if case .sampler(let instrument) = preset.voiceMode {
                 let se = samplerEngine(for: instrument)
@@ -777,7 +782,7 @@ final class AudioEngine {
                 let preset = SynthPreset.presets[presetIdx]
                 if case .sampler = preset.voiceMode {
                     if let info = samplerTouches[cid] {
-                        samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+                        releaseSampler(info)
                     }
                     samplerTouches.removeValue(forKey: cid)
                 } else {
@@ -797,7 +802,7 @@ final class AudioEngine {
     /// nothing, and was never released — and vice versa.)
     private func releaseSingle(touchID: Int) {
         if let info = samplerTouches.removeValue(forKey: touchID) {
-            samplerEngines[info.instrumentID]?.noteOff(UInt8(info.note))
+            releaseSampler(info)
         }
         retireVoice(controlID: touchID, preset: currentPreset)   // no-op if no synth voice
     }
@@ -822,8 +827,21 @@ final class AudioEngine {
         for (id, v) in voices { entries.append((v, voiceGainBoxes[id])) }
         let params = RenderParams(currentPreset)
         os_unfair_lock_lock(snapshotLock)
+        let previous = publishedSnapshot
         publishedSnapshot = RenderSnapshot(entries: entries, params: params)
         os_unfair_lock_unlock(snapshotLock)
+        retire(previous)
+    }
+
+    /// Keeps the last few published snapshots alive HERE, on the main thread. When
+    /// the render thread swaps its cached copy it then only drops a reference; the
+    /// final release — which frees the entries array and any reaped voices (e.g.
+    /// HammondVoice's Leslie buffer) — happens when they fall off this ring, on the
+    /// main thread, never on the audio thread. 8 publishes ≫ the one render buffer
+    /// (~10 ms) the render thread can lag behind.
+    private func retire(_ snapshot: RenderSnapshot) {
+        retiredSnapshots.append(snapshot)
+        if retiredSnapshots.count > 8 { retiredSnapshots.removeFirst() }
     }
 
     /// When true the pad's vertical axis morphs the synth waveform (MorphWiz
@@ -877,6 +895,13 @@ final class AudioEngine {
                 applyY(y, to: v)
             }
         }
+    }
+
+    /// Releases one sampler note — by its handle when we have one, so only THIS
+    /// note is released (not every slot playing the same MIDI number).
+    private func releaseSampler(_ info: (instrumentID: String, note: Int, handle: SamplerEngine.Handle?)) {
+        guard let se = samplerEngines[info.instrumentID] else { return }
+        if let handle = info.handle { se.noteOff(handle) } else { se.noteOff(UInt8(info.note)) }
     }
 
     /// Sampler presets (piano, strings, flute, organ) bend by re-tuning the note's
