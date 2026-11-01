@@ -32,6 +32,9 @@ final class SpaceEchoProcessor {
     private var lpState:      Float  = 0
     private let sampleRate:   Float
     private let headSamples:  [Float]           // three head positions in samples
+    // Stored, not a local literal: a [Float] literal inside process() was a heap
+    // allocation per SAMPLE on the audio render thread.
+    private let headGains:    [Float] = [0.55, 0.38, 0.22]
 
     init(sampleRate: Double) {
         self.sampleRate = Float(sampleRate)
@@ -48,7 +51,6 @@ final class SpaceEchoProcessor {
                           + sin(flutterPhase * 2 * .pi) * 0.08) * amount
 
         var wet: Float = 0
-        let headGains: [Float] = [0.55, 0.38, 0.22]
         for (i, base) in headSamples.enumerated() {
             wet += readAt(Float(writePos) - (base + wobble * Float(i + 1) * 2.5))
                    * headGains[i]

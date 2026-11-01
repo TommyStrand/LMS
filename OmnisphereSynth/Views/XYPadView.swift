@@ -79,6 +79,12 @@ struct XYPadView: View {
                             if isGlissando {
                                 // Snap to the nearest scale note (column) — no chromatic in-between.
                                 // Portamento is handled by the per-sample smooth pitch bend in the voice.
+                                // A touch that began in Grid mode has no glissando root;
+                                // anchor it to the note it was playing, or the pitch
+                                // would never move (semitones always 0).
+                                if glissandoRootNotes[event.id] == nil {
+                                    glissandoRootNotes[event.id] = activeTouches[event.id]?.note ?? note
+                                }
                                 let rootNote   = glissandoRootNotes[event.id] ?? note
                                 let semitones  = Float(note) - Float(rootNote)
                                 activeTouches[event.id]?.note = note  // update label to current column

@@ -185,7 +185,10 @@ final class SynthVoice: AnyVoice {
         case .release:
             let r = max(Double(preset.release), minRelease)
             envValue = max(envValue - envValue * dt / r, 0.0)
-            if envValue <= 0.0001 { envStage = .idle }
+            // Finished at −60 dB (was −80 dB): the exponential release takes
+            // ln(1/level)·τ, so −80 dB kept every released voice alive ~9× its release
+            // time — filling the 32-voice limit with inaudible tails.
+            if envValue <= 0.001 { envStage = .idle }
         }
         return envValue
     }

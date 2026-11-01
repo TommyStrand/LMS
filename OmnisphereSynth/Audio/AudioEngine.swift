@@ -311,10 +311,10 @@ final class AudioEngine {
 
             // Push the live tremulant depth to organ voices ONCE per buffer rather
             // than re-casting every voice every sample (was 44.1k dynamic casts/sec).
-            if params.tremulant > 0.001 {
-                for (voice, _) in entries {
-                    (voice as? OrganVoice)?.tremulantDepth = params.tremulant
-                }
+            // Always push, including 0: skipping it when ≤ 0.001 meant turning the
+            // tremolo knob down to zero never reached organ notes already held.
+            for (voice, _) in entries {
+                (voice as? OrganVoice)?.tremulantDepth = params.tremulant
             }
 
             var widx = self.analysisWriteIndex
@@ -460,26 +460,32 @@ final class AudioEngine {
     }
 
     private func restartEngineIfNeeded() {
-        // All session + graph work runs on the serial session queue: setActive(_:)
-        // must stay off the main thread, and serialising prevents overlapping
-        // route-change restarts from racing each other.
+        // Session work (setActive can block) runs on the serial session queue, so
+        // overlapping route-change restarts still serialise. The GRAPH surgery then
+        // hops to the main thread: every other graph mutation (attaching sampler
+        // nodes) and every currentPreset access happen there, and doing them from
+        // the session queue raced both — AVAudioEngine isn't safe for concurrent
+        // graph changes, and reading the observed struct off-main could tear.
         sessionQueue.async { [weak self] in
             guard let self else { return }
             // Re-apply session settings — category/rate can drift after an AirPlay handoff.
             self.configureSession(bufferDuration: 0.01)
-            if self.engine.isRunning { self.engine.stop() }
-            // Detach old master node before reset so stale render callbacks are not called.
-            if let old = self.masterNode { self.engine.detach(old); self.masterNode = nil }
-            // Reset clears stale delay/reverb buffers accumulated during AirPlay;
-            // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
-            self.engine.reset()
-            self.setupMasterNode()
-            try? self.engine.start()
-            // Re-apply node parameters only — do NOT touch the observed currentPreset
-            // from a background thread.
-            self.applyPresetToNodes(self.currentPreset)
-            Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
+            DispatchQueue.main.async { self.rebuildGraphAndStart() }
         }
+    }
+
+    /// Main thread only.
+    private func rebuildGraphAndStart() {
+        if engine.isRunning { engine.stop() }
+        // Detach old master node before reset so stale render callbacks are not called.
+        if let old = masterNode { engine.detach(old); masterNode = nil }
+        // Reset clears stale delay/reverb buffers accumulated during AirPlay;
+        // without this the echo tail plays back corrupted and sounds 8-bit/crunchy.
+        engine.reset()
+        setupMasterNode()
+        try? engine.start()
+        applyPresetToNodes(currentPreset)
+        Diagnostics.shared.log("Audio engine restarted (route/interruption recovery)")
     }
 
     // MARK: - Layer management
@@ -760,12 +766,17 @@ final class AudioEngine {
         // hasn't begun generating samples yet.
         voice.start()
 
-        // Polyphony ceiling: steal the oldest (lowest voiceID) voice so the set
-        // can't grow without bound under dense playing or a stuck note.
-        if voices.count >= maxPolyphony, let oldest = voices.keys.min() {
-            voices.removeValue(forKey: oldest)
-            voiceGainBoxes.removeValue(forKey: oldest)
-            controlToVoiceID = controlToVoiceID.filter { $0.value != oldest }
+        // Polyphony ceiling, so the set can't grow without bound under dense playing
+        // or a stuck note. Steal the oldest RELEASED voice (a fading tail) first —
+        // only if every voice is still held, the oldest held one. Stealing the oldest
+        // voice regardless used to cut off notes the player was still holding.
+        if voices.count >= maxPolyphony {
+            let held = Set(controlToVoiceID.values)
+            if let victim = voices.keys.filter({ !held.contains($0) }).min() ?? voices.keys.min() {
+                voices.removeValue(forKey: victim)
+                voiceGainBoxes.removeValue(forKey: victim)
+                controlToVoiceID = controlToVoiceID.filter { $0.value != victim }
+            }
         }
 
         let voiceID = nextVoiceID

@@ -20,8 +20,6 @@ struct BlobVisualizerView: View {
     let color:  Color
     let theme:  AppTheme
 
-    @State private var idlePulse: CGFloat = 1.0
-
     var body: some View {
         let samples = engine.waveformSamples
         let peak    = Float(samples.map { abs($0) }.max() ?? 0)
@@ -34,14 +32,15 @@ struct BlobVisualizerView: View {
             : color
         let rotation = (hue ?? 0) * 2 * Double.pi
 
-        Canvas { ctx, size in
-            drawBlob(ctx: ctx, size: size, samples: samples, peak: peak,
-                     color: tint, rotation: rotation)
-        }
-        .onAppear {
-            // Idle breathing animation when no audio is playing
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                idlePulse = 1.08
+        // Idle "breathing": a Canvas doesn't interpolate animated @State values (the
+        // old withAnimation(repeatForever) just jumped to the end value once, so the
+        // silent blob sat still). Drive it from the clock instead: a 4.8 s cycle.
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let breath = CGFloat(0.5 - 0.5 * cos(2 * Double.pi * t / 4.8))   // 0…1
+            Canvas { ctx, size in
+                drawBlob(ctx: ctx, size: size, samples: samples, peak: peak,
+                         color: tint, rotation: rotation, breath: breath)
             }
         }
     }
@@ -50,7 +49,7 @@ struct BlobVisualizerView: View {
 
     private func drawBlob(ctx: GraphicsContext, size: CGSize,
                           samples: [Float], peak: Float,
-                          color: Color, rotation: Double) {
+                          color: Color, rotation: Double, breath: CGFloat) {
         let n    = samples.count
         guard n > 1 else { return }
 
@@ -60,7 +59,7 @@ struct BlobVisualizerView: View {
 
         // Idle scale breathes even with silence; audio overrides it
         let audioScale = CGFloat(peak)
-        let baseR  = minD * (0.22 + 0.06 * CGFloat(idlePulse - 1.0))
+        let baseR  = minD * 0.22 * (1 + 0.08 * breath)   // breathes up to 8 % larger
         let waveR  = minD * 0.22 * (audioScale + 0.04)   // 4% idle flutter
 
         // ── Build polar path ─────────────────────────────────────────────

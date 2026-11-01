@@ -26,6 +26,9 @@ final class MIDIController {
     @ObservationIgnored private var sustainedNotes: Set<Int> = []
     private let touchIDBase = 0x10000
 
+    /// Universal MIDI Packet size in 32-bit words, indexed by message type (0x0–0xF).
+    static let umpWordCount = [1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4]
+
     init() {
         setup()
     }
@@ -129,26 +132,23 @@ final class MIDIController {
             let word = words[i]
             let mt = (word >> 28) & 0xF
             switch mt {
-            case 0, 1:
-                i += 1
             case 2:
                 // MIDI 1.0 Channel Voice (1 word)
                 let status = UInt8((word >> 16) & 0xFF)
                 let d1     = UInt8((word >>  8) & 0xFF)
                 let d2     = UInt8( word        & 0xFF)
                 handleMIDI1(status: status, d1: d1, d2: d2)
-                i += 1
-            case 3, 5:
-                i += 2
             case 4:
                 // MIDI 2.0 CV (2 words) — translate the parts we care about
                 if i + 1 < count {
                     handleMIDI2(word0: word, word1: words[i + 1])
                 }
-                i += 2
             default:
-                i += 1
+                break
             }
+            // Skip by the message's true size. (MT 5 is 4 words and MT 8–F are 2–4,
+            // but were skipped as 2 / 1 — misreading the rest of the packet.)
+            i += MIDIController.umpWordCount[Int(mt)]
         }
     }
 

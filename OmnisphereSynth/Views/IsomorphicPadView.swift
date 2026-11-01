@@ -24,10 +24,15 @@ struct IsomorphicPadView: View {
     // ── Layout helpers ────────────────────────────────────────────────────
 
     private var baseNote: Int {
-        // Lowest row starts at root in the chosen octave, clamped so no row
-        // exceeds MIDI 127.
-        let root = themeManager.rootNote + themeManager.transposeOctave * 12
-        return max(24, min(75, root))   // 75 + 3*5 + 12 = 102 ≤ 127
+        // Lowest row starts at the root in the chosen octave. Out-of-range values
+        // move by whole OCTAVES, so the layout stays rooted on the root note. (The
+        // old clamp to 24…75 silently ignored part of the transpose range and could
+        // start the bottom row on a different note than the root.)
+        var base = themeManager.rootNote + themeManager.transposeOctave * 12
+        let span = (nRows - 1) * rowInterval + (nCols - 1)   // highest offset on the pad
+        while base + span > 127 { base -= 12 }
+        while base < 0 { base += 12 }
+        return base
     }
 
     private func midi(row: Int, col: Int) -> Int {

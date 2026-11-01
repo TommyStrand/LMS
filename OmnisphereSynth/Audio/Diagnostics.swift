@@ -68,7 +68,7 @@ final class Diagnostics {
 
     // MARK: - Sampling lifecycle
 
-    /// Begin sampling CPU/memory once per second. Call when the diagnostics panel
+    /// Begin sampling CPU/memory twice a second. Call when the diagnostics panel
     /// becomes visible; `stopSampling()` when it is dismissed so we don't burn a
     /// timer in the background.
     func startSampling() {
@@ -136,6 +136,9 @@ final class Diagnostics {
             if kr == KERN_SUCCESS, (info.flags & idleFlag) == 0 {
                 total += Double(info.cpu_usage) / usageScale * 100.0
             }
+            // task_threads hands us a send right per thread; release it, or every
+            // sample leaks one port reference per thread.
+            mach_port_deallocate(mach_task_self_, threads[i])
         }
         return total
     }

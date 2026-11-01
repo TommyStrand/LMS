@@ -591,6 +591,21 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertFalse(SamplerInstrument.grandPiano.sustainLoop, "a piano decays; it must not sustain-loop")
     }
 
+    // MARK: - MIDI 2.0 (UMP) message sizes
+
+    func testUMPWordCountsMatchTheSpec() {
+        // Message type → size in 32-bit words (UMP spec). A wrong size makes the
+        // parser read the rest of a packet out of step (stray note-ons).
+        let t = MIDIController.umpWordCount
+        XCTAssertEqual(t.count, 16)
+        XCTAssertEqual(t[0x2], 1, "MIDI 1.0 channel voice")
+        XCTAssertEqual(t[0x4], 2, "MIDI 2.0 channel voice")
+        XCTAssertEqual(t[0x3], 2, "SysEx 7-bit")
+        XCTAssertEqual(t[0x5], 4, "SysEx 8-bit / mixed data")
+        XCTAssertEqual(t[0xD], 4, "Flex data")
+        XCTAssertEqual(t[0xF], 4, "UMP stream")
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackIDsNeverCollideWithLiveTouches() {
