@@ -156,6 +156,11 @@ struct SamplerInstrument: Equatable, Hashable {
     /// it finds in the folder. For IMPORTED instruments, whose samples live only on
     /// the machine that ran import_samples.py while this descriptor lives in git.
     var discoversRoots = false
+    /// true → when `loops` is false (real recordings), SamplerEngine finds each
+    /// recording's steady part and loops it seamlessly after the attack, so the
+    /// note sustains while the key is held instead of stopping when the recording
+    /// ends. Ignored for synthesised `loops` instruments (they loop whole).
+    var sustainLoop = false
 
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
@@ -178,7 +183,8 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
-        loops: true, attack: 0.09, release: 0.35   // slow bow swell + smooth release
+        loops: true, attack: 0.09, release: 0.35,  // slow bow swell + smooth release
+        sustainLoop: true                           // if real recordings are imported
     )
     static let concertFlute = SamplerInstrument(
         id: "concert_flute", displayName: "Concert Flute",
@@ -187,7 +193,8 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
-        loops: true, attack: 0.04, release: 0.18    // breath onset + gentle release
+        loops: true, attack: 0.04, release: 0.18,   // breath onset + gentle release
+        sustainLoop: true                           // if real recordings are imported
     )
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
@@ -202,7 +209,9 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
-        discoversRoots: true
+        release: 0.3,          // pipe speech stops quickly; the reverb carries the tail
+        discoversRoots: true,
+        sustainLoop: true      // hold the pipe for as long as the key is down
     )
 }
 

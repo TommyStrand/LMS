@@ -49,6 +49,9 @@ final class SamplerEngine {
 
     // rootNote → velocityMidiValue → buffer
     private var buffers: [Int: [Int: AVAudioPCMBuffer]] = [:]
+    // Sustain-loop instruments (organ, real strings/flute): each recording split
+    // into its attack (`head`, played once) and a seamless sustain loop (`body`).
+    private var sustainParts: [Int: [Int: (head: AVAudioPCMBuffer, body: AVAudioPCMBuffer)]] = [:]
 
     // MARK: - Init
 
@@ -102,6 +105,7 @@ final class SamplerEngine {
         }
 
         var loaded = 0
+        var sustainLooped = 0
         // Generated instruments declare their roots; imported ones (pipe organ)
         // discover them from the folder, because those samples live only on the
         // machine that ran the importer while the descriptor lives in git — a
@@ -133,6 +137,13 @@ final class SamplerEngine {
                 // and it turns that whole class of bug into an immediate debug crash.
                 assert(url.deletingLastPathComponent().lastPathComponent == instrument.id,
                        "SamplerEngine[\(instrument.id)] resolved \(key) to \(url.path) — wrong folder")
+                // Real recordings of sustaining instruments: find the steady part and
+                // loop it, so the note holds as long as the key does (a pipe organ
+                // used to stop when its recording ran out).
+                if !instrument.loops && instrument.sustainLoop, let parts = makeSustainParts(mono) {
+                    sustainParts[root, default: [:]][layer.midiValue] = parts
+                    sustainLooped += 1
+                }
                 // One-shots get zero-crossing edge fades to declick note-on and
                 // slot recycling. Looping buffers must NOT — an edge fade would
                 // dip to silence at every loop wrap; they rely on their seamless
@@ -144,6 +155,7 @@ final class SamplerEngine {
         }
         let expected = roots.count * instrument.velocityLayers.count
         let summary = "SamplerEngine[\(instrument.id)]: \(loaded)/\(expected) samples loaded"
+            + (instrument.sustainLoop && !instrument.loops ? ", \(sustainLooped) with a sustain loop" : "")
         print(summary)
         Diagnostics.shared.log(summary)
         // Catch missing/corrupt samples at launch in debug builds rather than as a
@@ -158,7 +170,7 @@ final class SamplerEngine {
     func noteOn(_ note: UInt8, velocity: UInt8) -> Handle? {
         let midi = Int(note)
         let vel  = Int(velocity)
-        guard let (root, buf) = findBuffer(midi: midi, vel: vel) else { return nil }
+        guard let (root, velMidi, buf) = findBuffer(midi: midi, vel: vel) else { return nil }
 
         let idx  = nextSlotIndex()
         let slot = pool[idx]
@@ -180,14 +192,22 @@ final class SamplerEngine {
         slot.varispeed.rate = max(0.25, min(4.0, rate))
 
         let target = max(0.3, Float(vel) / 127.0)
-        let options: AVAudioPlayerNodeBufferOptions = instrument.loops ? [.loops] : []
+        let parts  = (!instrument.loops && instrument.sustainLoop) ? sustainParts[root]?[velMidi] : nil
 
-        if instrument.loops {
-            // Sustain by looping; ramp volume up so the (non-zero-crossing) loop
+        if instrument.loops || parts != nil {
+            // Sustaining note: held until noteOff. Ramp the volume up so a non-zero
             // start doesn't click, and remember the note so noteOff can release it.
             slotNote[idx]      = midi
+            slotBusyUntil.removeValue(forKey: idx)
             slot.player.volume = 0
-            slot.player.scheduleBuffer(buf, at: nil, options: options)
+            if let parts {
+                // The recording's own attack once, then its sustain loops until release.
+                slot.player.scheduleBuffer(parts.head, at: nil, options: [])
+                slot.player.scheduleBuffer(parts.body, at: nil, options: [.loops])
+            } else {
+                // Synthesised seamless loop: the whole buffer loops.
+                slot.player.scheduleBuffer(buf, at: nil, options: [.loops])
+            }
             slot.player.play()
             rampVolume(idx: idx, token: token, to: target, duration: instrument.attack)
         } else {
@@ -196,7 +216,7 @@ final class SamplerEngine {
             let seconds = Double(buf.frameLength) / buf.format.sampleRate / Double(max(0.25, min(4.0, rate)))
             slotBusyUntil[idx] = ProcessInfo.processInfo.systemUptime + seconds + 0.05
             slot.player.volume = target
-            slot.player.scheduleBuffer(buf, at: nil, options: options)
+            slot.player.scheduleBuffer(buf, at: nil, options: [])
             slot.player.play()
         }
         return Handle(slot: idx, token: token)
@@ -219,17 +239,18 @@ final class SamplerEngine {
         varispeed.rate = rate
     }
 
-    /// Releases exactly the note started with `handle` (looping instruments only).
+    /// Releases exactly the note started with `handle` (sustaining notes only —
+    /// one-shots ring out on their own).
     /// Preferred over noteOff(_ note:), which releases EVERY slot playing that MIDI
     /// note — so the looper and a finger on the same key would silence each other.
     func noteOff(_ handle: Handle) {
-        guard instrument.loops,
-              slotToken[handle.slot] == handle.token,     // not reused / not already released
-              slotNote[handle.slot] != nil else { return }
+        guard slotToken[handle.slot] == handle.token,     // not reused / not already released
+              slotNote[handle.slot] != nil else { return }   // only sustaining notes are held
         let idx   = handle.slot
         let token = handle.token + 1
         slotToken[idx] = token
         slotNote.removeValue(forKey: idx)
+        markReleasing(idx)
         let player = pool[idx].player
         rampVolume(idx: idx, token: token, to: 0, duration: instrument.release) { [weak self] in
             guard let self = self, self.slotToken[idx] == token else { return }
@@ -238,8 +259,7 @@ final class SamplerEngine {
     }
 
     func noteOff(_ note: UInt8) {
-        // One-shots carry their own decay tail — let them ring out.
-        guard instrument.loops else { return }
+        // Only sustaining notes are in slotNote; one-shots ring out on their own.
         let midi = Int(note)
         // Collect first — releasing mutates slotNote, which can't be done while
         // iterating it.
@@ -248,6 +268,7 @@ final class SamplerEngine {
             let token = (slotToken[idx] ?? 0) + 1
             slotToken[idx] = token
             slotNote.removeValue(forKey: idx)
+            markReleasing(idx)
             let player = pool[idx].player
             // Fade the looping note out, then stop it (unless a newer note-on has
             // already claimed the slot, in which case the token guard skips stop).
@@ -266,8 +287,48 @@ final class SamplerEngine {
     /// A slot is busy if it's playing AND (for one-shots) its buffer hasn't ended.
     private func isBusy(_ idx: Int) -> Bool {
         guard pool[idx].player.isPlaying else { return false }
-        if instrument.loops { return true }
+        if slotNote[idx] != nil { return true }                    // held (sustaining)
         return ProcessInfo.processInfo.systemUptime < (slotBusyUntil[idx] ?? 0)
+    }
+
+    /// A released sustaining note is still fading out; keep its slot busy until the
+    /// release ramp has finished so a new note doesn't steal it mid-fade.
+    private func markReleasing(_ idx: Int) {
+        slotBusyUntil[idx] = ProcessInfo.processInfo.systemUptime + instrument.release + 0.05
+    }
+
+    /// Splits a mono recording into attack (head) + seamless sustain loop (body),
+    /// both promoted to stereo. nil if it has no steady part long enough to loop.
+    private func makeSustainParts(_ mono: AVAudioPCMBuffer)
+        -> (head: AVAudioPCMBuffer, body: AVAudioPCMBuffer)? {
+        guard mono.format.channelCount == 1, let src = mono.floatChannelData?[0] else { return nil }
+        var x = Array(UnsafeBufferPointer(start: src, count: Int(mono.frameLength)))
+        guard let loop = SustainLoop.prepare(&x, sampleRate: mono.format.sampleRate),
+              let head = monoBuffer(x[0..<loop.lowerBound], format: mono.format),
+              let body = monoBuffer(x[loop], format: mono.format),
+              let headStereo = makeStereo(head),
+              let bodyStereo = makeStereo(body)
+        else { return nil }
+        applyFadeIn(headStereo)          // declick the note start; the loop seam is crossfaded
+        return (headStereo, bodyStereo)
+    }
+
+    private func monoBuffer(_ samples: ArraySlice<Float>, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty,
+              let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+              let d = b.floatChannelData?[0] else { return nil }
+        b.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { d.update(from: $0.baseAddress!, count: samples.count) }
+        return b
+    }
+
+    private func applyFadeIn(_ buf: AVAudioPCMBuffer, ms: Double = 5) {
+        guard let ch = buf.floatChannelData else { return }
+        let f = min(Int(buf.frameLength), Int(ms / 1000.0 * buf.format.sampleRate))
+        guard f > 0 else { return }
+        for c in 0..<Int(buf.format.channelCount) {
+            for i in 0..<f { ch[c][i] *= Float(i) / Float(f) }
+        }
     }
 
     // MARK: - Helpers
@@ -352,7 +413,7 @@ final class SamplerEngine {
         return dst
     }
 
-    private func findBuffer(midi: Int, vel: Int) -> (rootNote: Int, buf: AVAudioPCMBuffer)? {
+    private func findBuffer(midi: Int, vel: Int) -> (rootNote: Int, velMidi: Int, buf: AVAudioPCMBuffer)? {
         guard let velMidi = SamplerSelection.velocityMidiValue(
                 for: vel, layers: instrument.velocityLayers) else { return nil }
 
@@ -360,7 +421,7 @@ final class SamplerEngine {
         guard let root = SamplerSelection.nearestRoot(
                 to: midi, available: Array(roots)) else { return nil }
 
-        return (root, buffers[root]![velMidi]!)
+        return (root, velMidi, buffers[root]![velMidi]!)
     }
 }
 
@@ -402,6 +463,94 @@ enum SamplerSelection {
         return roots.min { a, b in
             let da = abs(a - midi), db = abs(b - midi)
             return da != db ? da < db : a < b
+        }
+    }
+}
+
+// MARK: - Sustain loop (pure — unit-tested in SuperNovaPadTests)
+
+/// Turns a real recording of a sustaining instrument (organ pipe, bowed string,
+/// flute) into attack + seamless loop:
+///  1. find: the steady region — from just after the attack settles (≥ 70 % of
+///     the loud reference level) to the last window still ≥ 90 % of it, before the
+///     release tail (50 ms RMS windows; reference = the 75th-percentile window);
+///  2. alignEnd: move the loop end back by up to 30 ms to where the waveform best
+///     matches the waveform just before the loop start, so the two ends are in phase;
+///  3. makeSeamless: LINEAR crossfade (80 ms) of the loop's end into the material
+///     just before its start — linear because the aligned ends are correlated.
+/// Prototyped in Python on synthetic organ tones (41 Hz – 1 kHz): seam jump well
+/// below a normal sample step, level change across the seam < 1 dB.
+enum SustainLoop {
+    static let window      = 0.05   // RMS window (s)
+    static let crossfade   = 0.08   // seam crossfade (s)
+    static let alignWindow = 0.01   // waveform compared when aligning the end (s)
+    static let alignSearch = 0.03   // how far the end may move (s)
+    static let minLoop     = 0.25   // shortest loop worth making (s)
+
+    /// Finds, phase-aligns and crossfades the loop IN PLACE. nil = nothing to loop.
+    static func prepare(_ x: inout [Float], sampleRate: Double) -> Range<Int>? {
+        guard let found = find(x, sampleRate: sampleRate) else { return nil }
+        let loop = found.lowerBound ..< alignEnd(x, loop: found, sampleRate: sampleRate)
+        makeSeamless(&x, loop: loop, crossfade: Int(sampleRate * crossfade))
+        return loop
+    }
+
+    static func find(_ x: [Float], sampleRate: Double) -> Range<Int>? {
+        let win = Int(sampleRate * window)
+        guard win > 0, x.count >= win * 12 else { return nil }
+        let nw = x.count / win
+        var rms = [Float](repeating: 0, count: nw)
+        x.withUnsafeBufferPointer { p in
+            for w in 0..<nw {
+                var sum: Float = 0
+                for i in (w * win)..<((w + 1) * win) { sum += p[i] * p[i] }
+                rms[w] = (sum / Float(win)).squareRoot()
+            }
+        }
+        let ref = rms.sorted()[nw * 3 / 4]
+        guard ref > 1e-4,
+              let a = rms.firstIndex(where: { $0 >= 0.7 * ref }),
+              // End threshold is stricter (90 %): at 70 % the loop reached ~110 ms
+              // into a decaying release, so every pass would dip in level.
+              let e = rms.lastIndex(where: { $0 >= 0.9 * ref }) else { return nil }
+        let start = (a + 2) * win
+        let end   = min(x.count, (e + 1) * win)
+        guard end - start >= max(2 * Int(sampleRate * crossfade), Int(sampleRate * minLoop)) else { return nil }
+        return start..<end
+    }
+
+    static func alignEnd(_ x: [Float], loop: Range<Int>, sampleRate: Double) -> Int {
+        let len = Int(sampleRate * alignWindow)
+        let search = Int(sampleRate * alignSearch)
+        let lo = loop.lowerBound, hi = loop.upperBound
+        guard len > 0, lo >= len else { return hi }
+        var best = hi
+        var bestD = Float.infinity
+        x.withUnsafeBufferPointer { p in
+            var c = hi - search
+            while c <= hi {
+                if c - len >= lo {
+                    var d: Float = 0
+                    for k in 0..<len {
+                        let diff = p[c - len + k] - p[lo - len + k]
+                        d += diff * diff
+                    }
+                    if d < bestD { bestD = d; best = c }
+                }
+                c += 1
+            }
+        }
+        return best
+    }
+
+    static func makeSeamless(_ x: inout [Float], loop: Range<Int>, crossfade: Int) {
+        let xf = min(crossfade, loop.lowerBound, loop.count / 2)
+        guard xf > 0 else { return }
+        for k in 0..<xf {
+            let a = Float(k + 1) / Float(xf + 1)
+            let i = loop.upperBound - xf + k
+            let j = loop.lowerBound - xf + k
+            x[i] = x[i] * (1 - a) + x[j] * a
         }
     }
 }

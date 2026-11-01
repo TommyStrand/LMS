@@ -58,7 +58,8 @@ plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
 to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
-patterns stay on the 32-step grid at a playable tempo), `RenderParams` (preset →
+patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
+sustain loop found in real recordings), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
@@ -69,6 +70,11 @@ audio-thread scalars), plus descriptor and scale invariants.
 - SamplerEngine uses AVAudioPlayerNode + AVAudioUnitVarispeed pool (not AVAudioUnitSampler)
 - Bundle WAV lookup via FileManager.enumerator, not Bundle.url(forResource:subdirectory:)
 - Mono WAV buffers are promoted to stereo in makeStereo() before scheduling
+- Sampler playback modes: `loops` (synthesised seamless loops, whole buffer loops),
+  `sustainLoop` with `loops: false` (real recordings of sustaining instruments — organ,
+  imported strings/flute: attack plays once, then `SustainLoop` finds the steady part,
+  phase-aligns its end and crossfades it so it holds while the key is down), or one-shot
+  (piano). Sustaining notes are tracked in `slotNote` and released with a ramp
 - Deployment target is iOS 17. Model classes use `@Observable` (not ObservableObject);
   app-lifetime objects are created once in `SuperNovaPadApp` and injected via `.environment()`
 - **Real-time rule:** `@Observable` tracking accessors take a lock, so any property the audio

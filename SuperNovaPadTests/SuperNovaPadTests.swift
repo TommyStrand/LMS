@@ -537,6 +537,60 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(midi.durationTicks, 3840)
     }
 
+    // MARK: - Sustain loop (real organ / strings / flute recordings)
+
+    /// Synthetic organ pipe: 60 ms attack, steady tone with harmonics and a slight
+    /// tremulant, then an exponential reverb-like release tail.
+    private func organTone(freq: Double, attack: Double = 0.06, sustain: Double = 2.5,
+                           release: Double = 1.2, sr: Double = 44100) -> [Float] {
+        let n = Int((attack + sustain + release) * sr)
+        return (0..<n).map { i in
+            let t = Double(i) / sr
+            let env = t < attack + sustain ? min(1, t / attack) : exp(-(t - attack - sustain) / 0.35)
+            let s = [1.0, 2, 3, 4, 6, 8].reduce(0.0) { $0 + sin(2 * .pi * freq * $1 * t + 0.3 * $1) / $1 }
+            return Float(0.3 * env * s * (1 + 0.01 * sin(2 * .pi * 5 * t)))
+        }
+    }
+
+    private func rms(_ x: [Float], _ r: Range<Int>) -> Float {
+        (x[r].reduce(Float(0)) { $0 + $1 * $1 } / Float(r.count)).squareRoot()
+    }
+
+    func testSustainLoopIsInsideTheSteadyPartAndSeamless() throws {
+        let sr = 44100.0
+        for f in [41.2, 65.4, 130.81, 523.25, 1046.5] {
+            var x = organTone(freq: f)
+            let loop = try XCTUnwrap(SustainLoop.prepare(&x, sampleRate: sr), "\(f) Hz: no loop found")
+            // Starts after the 60 ms attack, ends before the release tail (2.56 s).
+            XCTAssertGreaterThan(loop.lowerBound, Int(0.06 * sr), "\(f) Hz loop starts inside the attack")
+            XCTAssertLessThanOrEqual(loop.upperBound, Int(2.62 * sr), "\(f) Hz loop runs into the release tail")
+            // The wrap (last loop sample → first loop sample) is no bigger than a
+            // normal step of the waveform inside the loop — no click.
+            var maxStep: Float = 0
+            for i in loop.lowerBound..<(loop.upperBound - 1) { maxStep = max(maxStep, abs(x[i + 1] - x[i])) }
+            XCTAssertLessThanOrEqual(abs(x[loop.lowerBound] - x[loop.upperBound - 1]), maxStep,
+                                     "\(f) Hz: audible jump at the loop seam")
+            // No pump at the seam: crossfade level within 1.5 dB of the sustain level.
+            let xf = Int(SustainLoop.crossfade * sr)
+            let dB = 20 * log10(rms(x, (loop.upperBound - xf)..<loop.upperBound)
+                                / rms(x, loop.lowerBound..<(loop.upperBound - xf)))
+            XCTAssertLessThan(abs(dB), 1.5, "\(f) Hz: level changes \(dB) dB across the seam")
+        }
+    }
+
+    func testSustainLoopRejectsShortOrSilentRecordings() {
+        var short = organTone(freq: 130.81, sustain: 0.2, release: 0.15)     // ~0.4 s
+        XCTAssertNil(SustainLoop.prepare(&short, sampleRate: 44100))
+        var silence = [Float](repeating: 0, count: 88200)
+        XCTAssertNil(SustainLoop.prepare(&silence, sampleRate: 44100))
+    }
+
+    func testSustainLoopFlags() {
+        XCTAssertTrue(SamplerInstrument.pipeOrgan.sustainLoop)
+        XCTAssertFalse(SamplerInstrument.pipeOrgan.loops, "organ recordings play attack → sustain loop")
+        XCTAssertFalse(SamplerInstrument.grandPiano.sustainLoop, "a piano decays; it must not sustain-loop")
+    }
+
     // MARK: - Looper touch-ID isolation
 
     func testLooperPlaybackIDsNeverCollideWithLiveTouches() {
