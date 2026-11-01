@@ -95,6 +95,8 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
+NAME_RE = re.compile(r"\d{1,3}_\d{1,3}\.wav")   # the app's {note}_{velocity}.wav
+
 TARGET_SR   = 44100
 TARGET_BITS = 16
 TARGET_CHAN  = 1  # mono
@@ -548,18 +550,33 @@ def import_instrument(
     out_dir: Path,
     instrument_id: str,
 ) -> list[int]:
-    """Writes the WAV grid. Returns the sorted list of roots that ended up with
-    a complete set of velocity layers (the set the descriptor must declare)."""
+    """Writes the sample set and returns the sorted roots that ended up with a
+    complete set of velocity layers (the set the descriptor must declare).
+
+    `roots` is the coverage we WANT (e.g. every 3 semitones). For each wanted root
+    the nearest source note (≤ 6 semitones away) is chosen, and it is written under
+    THAT SOURCE NOTE'S OWN MIDI number. Writing it under the wanted root's number
+    (as this function used to) made the app believe e.g. a C2 recording was D#2
+    and play every key near it 3 semitones flat — up to a tritone off. The app's
+    varispeed does the pitch-shifting from the true root at play time.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     available = sorted(file_map)
     if not available:
         print(f"ERROR: no samples found for {instrument_id}", file=sys.stderr)
         sys.exit(1)
 
-    wrote        = 0
-    skipped      = []
-    complete     = []   # roots with ALL velocity layers written
+    # Replace, don't merge: stale {note}_{vel}.wav files from a previous import (or
+    # the synthesised set) would otherwise leave two instruments mixed in one folder.
+    # Synthesised folders are in git, so `git checkout -- <folder>` restores them.
+    stale = [f for f in out_dir.glob("*.wav") if NAME_RE.fullmatch(f.name)]
+    for f in stale:
+        f.unlink()
+    if stale:
+        print(f"Cleared {len(stale)} existing samples from {out_dir}")
 
+    skipped: list[int] = []
+    sources: list[int] = []          # distinct source notes to write, in order
     for root in roots:
         near = nearest(root, available)
         if abs(root - near) > 6:
@@ -567,14 +584,21 @@ def import_instrument(
             print(f"  [WARN] MIDI {root}: nearest source is {near} "
                   f"({abs(root-near)} semitones away — skipping)")
             continue
+        if near not in sources:
+            sources.append(near)
 
+    wrote    = 0
+    complete = []   # source notes with ALL velocity layers written
+    for note in sorted(sources):
+        if not 0 <= note <= 127:
+            continue
         layers_written = 0
         for vel_midi, vel_label in _LAYERS:
-            src_path = pick_fn(file_map[near], vel_label)
+            src_path = pick_fn(file_map[note], vel_label)
             if src_path is None:
-                print(f"  [WARN] MIDI {root}: no {vel_label} sample")
+                print(f"  [WARN] MIDI {note}: no {vel_label} sample")
                 continue
-            out_path = out_dir / f"{root}_{vel_midi}.wav"
+            out_path = out_dir / f"{note}_{vel_midi}.wav"
             try:
                 pcm = convert_wav(src_path)
                 write_wav(out_path, pcm)
@@ -588,12 +612,12 @@ def import_instrument(
         # SamplerEngine requires every declared root to have every velocity layer;
         # only count a root as usable if all layers landed.
         if layers_written == len(_LAYERS):
-            complete.append(root)
+            complete.append(note)
         elif layers_written > 0:
             # Remove the partial set so the folder stays consistent with the descriptor.
             for vel_midi, _ in _LAYERS:
-                (out_dir / f"{root}_{vel_midi}.wav").unlink(missing_ok=True)
-            skipped.append(root)
+                (out_dir / f"{note}_{vel_midi}.wav").unlink(missing_ok=True)
+            skipped.append(note)
 
     print(f"\nWrote {wrote} files to {out_dir}")
     if skipped:
@@ -652,6 +676,18 @@ def patch_descriptor(swift_path: Path, iid: str, roots: list[int]) -> bool:
 
     new_line = m.group(1) + _swift_roots_literal(roots) + m.group(2)
     text = text[:m.start()] + new_line + text[m.end():]
+
+    # Real recordings have their own attack and decay. The synthesised strings /
+    # flute are seamless loops (`loops: true`); a real take looped whole would
+    # restart its bow/breath attack every few seconds. Make the instrument
+    # one-shot within ITS OWN descriptor block only.
+    block_end = text.find("\n    )", start)
+    if block_end > 0:
+        block = text[start:block_end]
+        if "loops: true" in block:
+            text = text[:start] + block.replace("loops: true", "loops: false") + text[block_end:]
+            print(f"  Patched {swift_path.name}: {name}.loops = false (real recordings are one-shot)")
+
     swift_path.write_text(text)
     print(f"  Patched {swift_path.name}: {name}.rootNotes = "
           f"{len(roots)} notes {_swift_roots_literal(roots)}")

@@ -488,10 +488,20 @@ final class SuperNovaPadTests: XCTestCase {
 
     // MARK: - Looper touch-ID isolation
 
-    func testLooperPlaybackTouchIDsAreAboveTheRecordingCutoff() {
-        // AudioEngine.noteOn only records into the looper when touchID < 90000;
-        // playback IDs are offset by +90000 so a loop can never re-record itself.
-        // UITouch hashes and MIDI IDs (0x10000 + note ≤ 65663) all sit below 90000.
-        XCTAssertLessThan(0x10000 + 127, 90000)
+    func testLooperPlaybackIDsNeverCollideWithLiveTouches() {
+        // Looper playback is flagged with `fromLooper: true` (never re-recorded) and
+        // uses its own NEGATIVE ID space. On-screen IDs are UITouch hashes (heap
+        // addresses, huge and positive) and MIDI IDs are 0x10000 + note, so a looped
+        // note can never collide with — or release — a note someone is holding.
+        // (The old rule "record only if touchID < 90000" silently dropped every
+        // on-screen touch, because heap addresses are always above 90000.)
+        let liveIDs = [0x10000, 0x10000 + 127, 0x1_0A3C_5F10, Int.max / 2]
+        let mapped  = liveIDs.map(LooperEngine.playbackID(for:))
+        XCTAssertTrue(mapped.allSatisfy { $0 < 0 }, "playback IDs must be negative")
+        XCTAssertEqual(Set(mapped).count, liveIDs.count, "distinct touches → distinct playback IDs")
+        XCTAssertTrue(Set(mapped).isDisjoint(with: Set(liveIDs)))
+        // Layer mode builds touchID*1000 + presetIndex; must not overflow for real hashes.
+        XCTAssertFalse(LooperEngine.playbackID(for: 0x7FFF_FFFF_FFF0)
+                           .multipliedReportingOverflow(by: 1000).overflow)
     }
 }

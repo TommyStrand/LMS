@@ -7,8 +7,10 @@ import Observation
 ///   looper.audioEngine = engine
 ///   engine.looper      = looper   ← engine calls recordOn/Off from noteOn/Off
 ///
-/// Looper-originated playback uses touchIDs ≥ 90000 so noteOn/Off skips
-/// re-recording those events (preventing exponential note accumulation).
+/// Looper playback calls noteOn/Off with `fromLooper: true`, so its own output is
+/// never re-recorded (which would accumulate notes exponentially). Playback uses
+/// its own touch-ID space (`playbackID`, always negative) so a looped note can
+/// never collide with a live finger or MIDI note.
 @Observable
 final class LooperEngine {
 
@@ -22,7 +24,7 @@ final class LooperEngine {
 
     struct Event {
         let t: Double        // seconds from loop start
-        let touchID: Int     // already offset by +90000 for playback
+        let touchID: Int     // already mapped to the looper's ID space (playbackID)
         let noteOn: Bool
         let note: Int
         let velocity: Float
@@ -41,10 +43,15 @@ final class LooperEngine {
 
     // MARK: - Recording (called from AudioEngine.noteOn/Off)
 
+    /// The looper's touch-ID space: always NEGATIVE. Live IDs are positive (UITouch
+    /// hashes, MIDI 0x10000+note), so playback can't collide with — and release — a
+    /// note someone is holding. Distinct inputs map to distinct outputs.
+    static func playbackID(for touchID: Int) -> Int { -(touchID & Int.max) - 1 }
+
     func recordOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
         guard isRecording, let start = recordStart else { return }
         events.append(Event(t: Date().timeIntervalSince(start),
-                            touchID: touchID + 90000,
+                            touchID: Self.playbackID(for: touchID),
                             noteOn: true, note: note,
                             velocity: velocity, x: x, y: y))
     }
@@ -52,7 +59,7 @@ final class LooperEngine {
     func recordOff(touchID: Int) {
         guard isRecording, let start = recordStart else { return }
         events.append(Event(t: Date().timeIntervalSince(start),
-                            touchID: touchID + 90000,
+                            touchID: Self.playbackID(for: touchID),
                             noteOn: false, note: 0,
                             velocity: 0, x: 0, y: 0))
     }
@@ -114,7 +121,7 @@ final class LooperEngine {
         playbackStart = nil
         // Release any looper-held notes
         let ids = Set(events.filter { $0.noteOn }.map { $0.touchID })
-        ids.forEach { audioEngine?.noteOff(touchID: $0) }
+        ids.forEach { audioEngine?.noteOff(touchID: $0, fromLooper: true) }
     }
 
     private func tick() {
@@ -125,7 +132,7 @@ final class LooperEngine {
         if step.wrapped {
             // Loop wrapped — silence any notes still held from the previous pass.
             let ids = Set(events.filter { $0.noteOn }.map { $0.touchID })
-            ids.forEach { audioEngine?.noteOff(touchID: $0) }
+            ids.forEach { audioEngine?.noteOff(touchID: $0, fromLooper: true) }
         }
         for i in step.fire { fire(events[i]) }
     }
@@ -134,9 +141,9 @@ final class LooperEngine {
         guard let eng = audioEngine else { return }
         if ev.noteOn {
             eng.noteOn(touchID: ev.touchID, note: ev.note,
-                       velocity: ev.velocity, x: ev.x, y: ev.y)
+                       velocity: ev.velocity, x: ev.x, y: ev.y, fromLooper: true)
         } else {
-            eng.noteOff(touchID: ev.touchID)
+            eng.noteOff(touchID: ev.touchID, fromLooper: true)
         }
     }
 

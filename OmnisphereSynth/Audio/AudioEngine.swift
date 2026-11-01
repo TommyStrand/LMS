@@ -653,11 +653,14 @@ final class AudioEngine {
 
     // MARK: - Touch Events
 
-    func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
-        // Don't capture playback-originating events back into the looper (they
-        // use touchIDs >= 90000 so the looper can skip re-recording its own output).
-        if touchID < 90000 { looper?.recordOn(touchID: touchID, note: note,
-                                               velocity: velocity, x: x, y: y) }
+    /// `fromLooper` marks the looper's own playback so it is never re-recorded into
+    /// the loop. (This used to be inferred from `touchID < 90000`, but on-screen
+    /// touch IDs are UITouch hashes — heap addresses, always far above 90000 — so
+    /// nothing played on screen was ever recorded; only MIDI was.)
+    func noteOn(touchID: Int, note: Int, velocity: Float, x: Float, y: Float,
+                fromLooper: Bool = false) {
+        if !fromLooper { looper?.recordOn(touchID: touchID, note: note,
+                                          velocity: velocity, x: x, y: y) }
         touchPitches[touchID] = (note, 0)
         soundingPitch = Double(note)
         if isLayeringMode && !activeLayerIndices.isEmpty {
@@ -764,8 +767,8 @@ final class AudioEngine {
         publishSnapshot()
     }
 
-    func noteOff(touchID: Int) {
-        if touchID < 90000 { looper?.recordOff(touchID: touchID) }
+    func noteOff(touchID: Int, fromLooper: Bool = false) {
+        if !fromLooper { looper?.recordOff(touchID: touchID) }
         touchPitches.removeValue(forKey: touchID)
         soundingPitch = touchPitches.values.first.map { Double($0.note) + $0.bend }
         if isLayeringMode, let layerIndices = noteOnLayerIndices[touchID] {

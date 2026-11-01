@@ -17,7 +17,7 @@ git pull origin claude/ios-music-creation-app-1Bpf8
 - `OmnisphereSynth/Models/` — SynthPreset, SamplerInstrument
 - `OmnisphereSynth/Resources/Samples/` — WAV samples (folder reference in Xcode; subfolders are bundled automatically). Some folders hold synthesised WAVs (generate_samples.py); others hold real recordings (import_samples.py).
 - `Scripts/generate_samples.py` — regenerates the synthesised WAV samples (piano/strings/flute)
-- `Scripts/import_samples.py` — converts free sample libraries (Salamander piano, VSCO2 strings/flute, SFZ organ, or generic) to the app's mono 16-bit 44.1 kHz `{note}_{velocity}.wav` layout, and patches the matching `SamplerInstrument.rootNotes` in SynthPreset.swift so it exactly matches the files written
+- `Scripts/import_samples.py` — converts free sample libraries (Salamander piano, VSCO2 strings/flute, SFZ organ, or generic) to the app's mono 16-bit 44.1 kHz `{note}_{velocity}.wav` layout. Each recording is written under its OWN source note (never a target grid note — that played it out of tune), the target folder is cleared first, and for git-tracked instruments the descriptor's `rootNotes` is patched to the notes written and `loops` set to false (real recordings are one-shot). `validate_samples.py` checks folders against those declared `rootNotes`
 - `Scripts/validate_samples.py` — validates the sample library (run in QA / CI)
 
 ## Testing & QA

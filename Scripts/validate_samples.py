@@ -38,6 +38,42 @@ def expected_files(start, end, step):
             for n in range(start, end + 1, step)
             for v in VELOCITIES}
 
+SYNTH_PRESET = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "OmnisphereSynth", "Models", "SynthPreset.swift")
+
+def descriptor_roots(folder):
+    """The rootNotes the APP declares for `folder` in SynthPreset.swift — the set
+    SamplerEngine.load() asserts against. Handles the literal list the importer
+    writes and the Array(stride(...)) form. None if not found / unparsable."""
+    try:
+        text = open(SYNTH_PRESET).read()
+    except OSError:
+        return None
+    i = text.find(f'id: "{folder}"')
+    if i < 0:
+        return None
+    m = re.search(r"rootNotes:\s*(.+?),[ \t]*\n", text[i:])
+    if not m:
+        return None
+    expr = m.group(1).strip()
+    if expr.startswith("["):
+        return [int(x) for x in re.findall(r"-?\d+", expr)]
+    st = re.match(r"Array\(stride\(from:\s*(\d+),\s*through:\s*(\d+),\s*by:\s*(\d+)\)\)", expr)
+    if st:
+        a, b, c = map(int, st.groups())
+        return list(range(a, b + 1, c))
+    return None
+
+def discovers_roots(folder):
+    """True if the descriptor sets discoversRoots (roots read from disk at load)."""
+    try:
+        text = open(SYNTH_PRESET).read()
+    except OSError:
+        return False
+    i = text.find(f'id: "{folder}"')
+    j = text.find("\n    )", i)
+    return i >= 0 and "discoversRoots: true" in text[i:j]
+
 def check_wav(path):
     """Returns a list of problem strings for one WAV file (empty == OK)."""
     problems = []
@@ -75,7 +111,13 @@ def main():
             continue
 
         actual   = {f for f in os.listdir(out_dir) if f.endswith(".wav")}
-        expected = expected_files(start, end, step)
+        # Validate against what the APP declares (SynthPreset.swift), which is what
+        # SamplerEngine asserts at load. After import_samples.py replaces a folder
+        # with real recordings, the generator's fixed grid no longer applies — the
+        # importer patched rootNotes to the notes it actually wrote.
+        roots = descriptor_roots(folder)
+        expected = ({f"{n}_{v}.wav" for n in roots for v in VELOCITIES}
+                    if roots is not None else expected_files(start, end, step))
 
         for name in sorted(expected - actual):
             fail(f"{folder}/{name}: missing")
@@ -119,6 +161,15 @@ def main():
                     fail(f"{folder}/{name}: " + ", ".join(problems))
                     bad += 1
             print(f"  {folder:16} {len(wavs)-bad}/{len(wavs)} files OK (imported)")
+
+    # Imported-only instruments declared in the app but absent here (not in git, not
+    # imported on this machine). The app hides such presets, so this is a warning.
+    for folder in ("pipe_organ",):
+        out_dir = os.path.join(OUT_ROOT, folder)
+        has_wavs = os.path.isdir(out_dir) and any(f.endswith(".wav") for f in os.listdir(out_dir))
+        if discovers_roots(folder) and not has_wavs:
+            warn(f"{folder}: not imported on this machine — its preset is hidden in the app "
+                 f"(run Scripts/import_samples.py --source sfz ...)")
 
     # Cross-folder filename collisions. This is EXPECTED here (all instruments use
     # the same {note}_{velocity}.wav scheme) — the point is to make the hazard

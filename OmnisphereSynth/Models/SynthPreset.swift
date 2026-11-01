@@ -207,7 +207,29 @@ struct SamplerInstrument: Equatable, Hashable {
 }
 
 extension SynthPreset {
-    static let presets: [SynthPreset] = [
+    /// Presets shown in the app. Imported-only sampler instruments (pipe organ) are
+    /// hidden when their samples aren't in this build — their WAVs aren't in git, so
+    /// on any machine that hasn't run import_samples.py the preset would be silent.
+    static let presets: [SynthPreset] = catalog.filter { preset in
+        guard case .sampler(let instrument) = preset.voiceMode,
+              instrument.discoversRoots else { return true }
+        return bundleHasSamples(folder: instrument.id)
+    }
+
+    /// True if the app bundle contains at least one WAV inside a folder named `folder`.
+    private static func bundleHasSamples(folder: String) -> Bool {
+        guard let en = FileManager.default.enumerator(at: Bundle.main.bundleURL,
+                                                      includingPropertiesForKeys: nil,
+                                                      options: [.skipsHiddenFiles]) else { return false }
+        for case let url as URL in en
+        where url.pathExtension.lowercased() == "wav"
+            && url.deletingLastPathComponent().lastPathComponent == folder {
+            return true
+        }
+        return false
+    }
+
+    private static let catalog: [SynthPreset] = [
         SynthPreset(
             name: "Hammond B3",
             color: "#B45309",
