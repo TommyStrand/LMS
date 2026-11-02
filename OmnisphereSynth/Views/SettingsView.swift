@@ -6,7 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let theme = themeManager.current
+        let theme = themeManager.base
         NavigationView {
             ZStack {
                 theme.appBackground.ignoresSafeArea()
@@ -31,6 +31,10 @@ struct SettingsView: View {
                                     }
                             }
                         }
+
+                        // MARK: Instrument backdrop
+                        sectionHeader("INSTRUMENT BACKDROP", theme: theme)
+                        backdropSection(theme: theme)
 
                         // MARK: Control style
                         sectionHeader("CONTROLS", theme: theme)
@@ -233,6 +237,45 @@ struct SettingsView: View {
             .font(.system(size: 10, weight: .bold, design: theme.fontDesign))
             .foregroundColor(theme.secondaryText)
             .kerning(2.5)
+    }
+
+    private func backdropSection(theme: AppTheme) -> some View {
+        @Bindable var tm = themeManager
+        let accent: Color = theme.accentOverride ?? Color(hex: "#8B5CF6")
+        return VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: $tm.backdropEnabled) {
+                Text("Show the instrument's scene behind the play surface")
+                    .font(.system(size: 13, weight: .medium, design: theme.fontDesign))
+                    .foregroundColor(theme.primaryText)
+            }
+            .tint(accent)
+            .disabled(theme.colorScheme != .dark)
+
+            HStack(spacing: 10) {
+                Text("Dim")
+                    .font(.system(size: 12, weight: .medium, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText)
+                Slider(value: $tm.backdropDim, in: 0...0.8)
+                    .tint(accent)
+                Text("\(Int((themeManager.backdropDim * 100).rounded())) %")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(theme.secondaryText)
+                    .frame(width: 40, alignment: .trailing)
+            }
+            .disabled(!themeManager.backdropEnabled || theme.colorScheme != .dark)
+            .opacity(themeManager.backdropEnabled ? 1 : 0.4)
+
+            Text(theme.colorScheme == .dark
+                 ? "\(Backdrop.library.count) scenes so far. Presets without a scene keep the plain background."
+                 : "Backdrops are available with the dark themes.")
+                .font(.system(size: 11, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
+        }
+        .padding(16)
+        .background(theme.panelBackground)
+        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius)
+            .strokeBorder(theme.panelBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
     }
 
     /// One half of the Expression / Wave Morph choice (styled like the scale buttons).

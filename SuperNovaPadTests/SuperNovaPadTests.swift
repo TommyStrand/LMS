@@ -624,4 +624,21 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertFalse(LooperEngine.playbackID(for: 0x7FFF_FFFF_FFF0)
                            .multipliedReportingOverflow(by: 1000).overflow)
     }
+
+    // MARK: - Instrument backdrops
+
+    func testBackdropSlugMatchesImageFileNames() {
+        XCTAssertEqual(Backdrop.slug(for: "Pipe Organ"),      "pipe_organ")
+        XCTAssertEqual(Backdrop.slug(for: "Suitcase '73"),    "suitcase_73")
+        XCTAssertEqual(Backdrop.slug(for: "Str. Ensemble"),   "str_ensemble")
+        XCTAssertEqual(Backdrop.slug(for: "Hurdy-Gurdy"),     "hurdy_gurdy")
+        XCTAssertEqual(Backdrop.slug(for: "Rhodes Mk1"),      "rhodes_mk1")
+        XCTAssertEqual(Backdrop.slug(for: "  Hammond B3  "),  "hammond_b3")
+    }
+
+    func testEveryPresetHasADistinctBackdropSlug() {
+        let slugs = SynthPreset.presets.map { Backdrop.slug(for: $0.name) }
+        XCTAssertFalse(slugs.contains(""))
+        XCTAssertEqual(Set(slugs).count, slugs.count, "two presets would share one backdrop file name")
+    }
 }

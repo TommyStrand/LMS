@@ -303,6 +303,74 @@ struct AppTheme: Identifiable {
     )
 
     static let all: [AppTheme] = [.cosmos, .radio, .radar, .cyber, .ivory]
+
+    /// The same theme with see-through surfaces, used while an instrument backdrop
+    /// is showing behind the UI. Panels keep their tint but let the scene through;
+    /// borders and text are untouched so everything stays legible.
+    func glass() -> AppTheme {
+        AppTheme(id: id, name: name, icon: icon,
+                 appBackground: appBackground.opacity(0.30),
+                 panelBackground: panelBackground.opacity(0.55),
+                 panelBorder: panelBorder,
+                 knobBody: knobBody.opacity(0.75),
+                 knobTrackBg: knobTrackBg,
+                 accentOverride: accentOverride,
+                 primaryText: primaryText,
+                 secondaryText: secondaryText,
+                 fontDesign: fontDesign,
+                 colorScheme: colorScheme,
+                 scanlines: scanlines,
+                 cornerRadius: cornerRadius)
+    }
+}
+
+// MARK: - Instrument backdrops
+
+/// Per-preset background scenes. Images live in Resources/Backgrounds (a folder
+/// reference, bundled as "Backgrounds/") and are named after the preset:
+/// "Suitcase '73" → suitcase_73.webp, "Str. Ensemble" → str_ensemble.webp.
+/// A preset without a matching image simply shows the plain theme background.
+enum Backdrop {
+    /// File-name slug for a preset name (pure — unit-tested): lowercase ASCII
+    /// letters/digits, every other run of characters collapsed to one "_".
+    static func slug(for presetName: String) -> String {
+        var out = ""
+        var pendingSeparator = false
+        for ch in presetName.lowercased() {
+            if ch.isASCII && (ch.isLetter || ch.isNumber) {
+                if pendingSeparator && !out.isEmpty { out.append("_") }
+                pendingSeparator = false
+                out.append(ch)
+            } else {
+                pendingSeparator = true
+            }
+        }
+        return out
+    }
+
+    static let imageExtensions: Set<String> = ["webp", "png", "jpg", "jpeg", "heic"]
+
+    /// slug → image URL. One shallow directory listing (no whole-bundle walk), so
+    /// it is cheap enough to build on the main thread on first use.
+    static let library: [String: URL] = {
+        let fm   = FileManager.default
+        let root = Bundle.main.bundleURL
+        for dir in [root.appendingPathComponent("Backgrounds"),
+                    root.appendingPathComponent("Resources/Backgrounds")] {
+            guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            else { continue }
+            var map: [String: URL] = [:]
+            for url in files where imageExtensions.contains(url.pathExtension.lowercased()) {
+                map[url.deletingPathExtension().lastPathComponent.lowercased()] = url
+            }
+            return map
+        }
+        return [:]
+    }()
+
+    static func url(for presetName: String) -> URL? {
+        library[slug(for: presetName)]
+    }
 }
 
 // MARK: - Manager
@@ -340,6 +408,16 @@ final class ThemeManager {
     var yAxisMorph: Bool {
         didSet { defaults.set(yAxisMorph, forKey: "yAxisMorph") }
     }
+    /// Show the playing instrument's scene behind the UI (dark themes only).
+    var backdropEnabled: Bool {
+        didSet { defaults.set(backdropEnabled, forKey: "backdropEnabled") }
+    }
+    /// 0 = scene at full brightness, 0.8 = barely visible.
+    var backdropDim: Double {
+        didSet { defaults.set(backdropDim, forKey: "backdropDim") }
+    }
+    /// Name of the preset on the play surface — set by ContentView. Not persisted.
+    var activePresetName: String = ""
 
     init() {
         let d = UserDefaults.standard
@@ -352,10 +430,26 @@ final class ThemeManager {
         rootNote        = d.object(forKey: "rootNote") == nil ? 48 : d.integer(forKey: "rootNote")
         transposeOctave = d.integer(forKey: "transposeOctave")
         yAxisMorph      = d.bool(forKey: "yAxisMorph")      // missing key → false
+        backdropEnabled = d.object(forKey: "backdropEnabled") == nil ? true : d.bool(forKey: "backdropEnabled")
+        backdropDim     = d.object(forKey: "backdropDim") == nil ? 0.35 : d.double(forKey: "backdropDim")
     }
 
-    var current: AppTheme {
+    /// The selected theme as designed (opaque surfaces). Use for screens that sit
+    /// on their own background, e.g. the Settings sheet.
+    var base: AppTheme {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
+    }
+
+    /// Scene image to show behind the main screen, or nil (backdrops off, a light
+    /// theme, or no image for this preset yet).
+    var backdropURL: URL? {
+        guard backdropEnabled, base.colorScheme == .dark else { return nil }
+        return Backdrop.url(for: activePresetName)
+    }
+
+    /// The theme the main screen draws with: glass surfaces while a backdrop shows.
+    var current: AppTheme {
+        backdropURL == nil ? base : base.glass()
     }
 
     var controlStyle: ControlStyle {

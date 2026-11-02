@@ -35,7 +35,13 @@ struct ContentView: View {
         let theme = themeManager.current
         GeometryReader { geo in
             ZStack {
-                theme.appBackground.ignoresSafeArea()
+                themeManager.base.appBackground.ignoresSafeArea()
+
+                // Instrument scene (Settings → Instrument backdrop). Decorative only.
+                if let url = themeManager.backdropURL {
+                    BackdropView(url: url, dim: themeManager.backdropDim)
+                        .transition(.opacity)
+                }
 
                 // Scanline overlay (Radar theme)
                 if theme.scanlines {
@@ -56,6 +62,7 @@ struct ContentView: View {
             looper.audioEngine = engine
             engine.looper      = looper
             engine.yAxisMorph  = themeManager.yAxisMorph
+            themeManager.activePresetName = currentPreset.name
         }
         .onChange(of: themeManager.yAxisMorph) { _, morph in
             engine.yAxisMorph = morph
@@ -88,6 +95,9 @@ struct ContentView: View {
         }
         // MARK: - AirPlay 2 / Now Playing updates
         .onChange(of: selectedPresetIndex) { _, idx in
+            withAnimation(.easeInOut(duration: 0.4)) {
+                themeManager.activePresetName = SynthPreset.presets[idx].name
+            }
             nowPlaying.update(presetName: SynthPreset.presets[idx].name,
                               isLiveInstrument: true, isPlaying: false)
         }
@@ -597,6 +607,47 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
     func updateUIViewController(_ uivc: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Instrument backdrop
+
+/// Full-screen scene behind the main UI. The image is decoded off the main thread
+/// (preparingForDisplay) so switching presets never stalls touch handling, and
+/// cross-fades when the preset changes.
+struct BackdropView: View {
+    let url: URL
+    let dim: Double
+    @State private var image: UIImage?
+
+    var body: some View {
+        Color.black
+            .overlay {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .transition(.opacity)
+                        .id(ObjectIdentifier(image))
+                }
+            }
+            .overlay {
+                // Uniform dim plus a slightly darker floor, so labels on the
+                // lower play surface stay readable whatever the scene.
+                LinearGradient(colors: [.black.opacity(dim * 0.8), .black.opacity(min(0.95, dim + 0.25))],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .clipped()
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .task(id: url) {
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+                }.value
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.45)) { image = loaded }
+            }
+    }
 }
 
 // MARK: - Scanlines
