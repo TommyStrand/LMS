@@ -412,10 +412,12 @@ final class ThemeManager {
     var backdropEnabled: Bool {
         didSet { defaults.set(backdropEnabled, forKey: "backdropEnabled") }
     }
-    /// 0 = scene at full brightness, 0.8 = barely visible.
+    /// How dark the scene is drawn: 0.6 = clearly visible, 0.95 = a faint hint.
+    /// iPad play-testing showed anything under ~80 % is too busy behind the grid.
     var backdropDim: Double {
-        didSet { defaults.set(backdropDim, forKey: "backdropDim") }
+        didSet { defaults.set(backdropDim, forKey: "backdropDimV2") }
     }
+    static let backdropDimRange: ClosedRange<Double> = 0.6...0.95
     /// Name of the preset on the play surface — set by ContentView. Not persisted.
     var activePresetName: String = ""
 
@@ -431,7 +433,10 @@ final class ThemeManager {
         transposeOctave = d.integer(forKey: "transposeOctave")
         yAxisMorph      = d.bool(forKey: "yAxisMorph")      // missing key → false
         backdropEnabled = d.object(forKey: "backdropEnabled") == nil ? true : d.bool(forKey: "backdropEnabled")
-        backdropDim     = d.object(forKey: "backdropDim") == nil ? 0.35 : d.double(forKey: "backdropDim")
+        // New key: the first build defaulted to 35 %, far too bright — start everyone at 80 %.
+        backdropDim     = d.object(forKey: "backdropDimV2") == nil ? 0.8
+                        : min(Self.backdropDimRange.upperBound,
+                              max(Self.backdropDimRange.lowerBound, d.double(forKey: "backdropDimV2")))
     }
 
     /// The selected theme as designed (opaque surfaces). Use for screens that sit

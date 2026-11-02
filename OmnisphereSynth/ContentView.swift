@@ -39,7 +39,8 @@ struct ContentView: View {
 
                 // Instrument scene (Settings → Instrument backdrop). Decorative only.
                 if let url = themeManager.backdropURL {
-                    BackdropView(url: url, dim: themeManager.backdropDim)
+                    BackdropView(url: url, dim: themeManager.backdropDim,
+                                 trailingFraction: geo.size.width > 680 ? 0.66 : 1)
                         .transition(.opacity)
                 }
 
@@ -617,9 +618,40 @@ struct ShareSheet: UIViewControllerRepresentable {
 struct BackdropView: View {
     let url: URL
     let dim: Double
+    /// Share of the screen width the scene occupies, anchored to the trailing
+    /// edge. On iPad (0.66) it sits behind the play surface and feathers out
+    /// before the preset list and controls on the left; 1 = full screen.
+    var trailingFraction: CGFloat = 1
     @State private var image: UIImage?
 
     var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width * trailingFraction
+            scene
+                .frame(width: width, height: geo.size.height)
+                .clipped()
+                .mask {
+                    // Soft left edge so the scene melts into the plain background.
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: trailingFraction < 1 ? 0.22 : 0)
+                    ], startPoint: .leading, endPoint: .trailing)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .task(id: url) {
+            let loaded = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+            }.value
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { image = loaded }
+        }
+    }
+
+    private var scene: some View {
         Color.black
             .overlay {
                 if let image {
@@ -631,21 +663,10 @@ struct BackdropView: View {
                 }
             }
             .overlay {
-                // Uniform dim plus a slightly darker floor, so labels on the
-                // lower play surface stay readable whatever the scene.
-                LinearGradient(colors: [.black.opacity(dim * 0.8), .black.opacity(min(0.95, dim + 0.25))],
+                // Dim, a little lighter at the top where the instrument sits and
+                // darker towards the floor so grid labels stay readable.
+                LinearGradient(colors: [.black.opacity(dim * 0.9), .black.opacity(min(0.97, dim + 0.1))],
                                startPoint: .top, endPoint: .bottom)
-            }
-            .clipped()
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .task(id: url) {
-                let loaded = await Task.detached(priority: .userInitiated) {
-                    UIImage(contentsOfFile: url.path)?.preparingForDisplay()
-                }.value
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.45)) { image = loaded }
             }
     }
 }

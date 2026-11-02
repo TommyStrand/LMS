@@ -205,10 +205,13 @@ struct SettingsView: View {
                         // MARK: About
                         sectionHeader("ABOUT", theme: theme)
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            infoRow("App",     value: "SuperNovaPad 1.0",                theme: theme)
-                            infoRow("Voices",  value: "Synth · Hammond · Rhodes · Organ", theme: theme)
-                            infoRow("Effects", value: "Lo-Fi · S.Echo · B.Tape · Grit · Bloom · Phaser · A.Wah · Waver", theme: theme)
+                        VStack(alignment: .leading, spacing: 8) {
+                            infoRow("App",        value: appVersion, theme: theme)
+                            infoRow("Presets",    value: "\(SynthPreset.presets.count) instruments · \(Backdrop.library.count) scenes", theme: theme)
+                            infoRow("Engines",    value: "Synth · Hammond · Rhodes · Organ · Sampler", theme: theme)
+                            infoRow("Play modes", value: PlayMode.allCases.map(\.label).joined(separator: " · "), theme: theme)
+                            infoRow("Effects",    value: "Trem · Chorus · Drive · Phaser · A.Wah · Lo-Fi · Grit · Reverb · Delay · Shimmer · S.Echo · B.Tape · Bloom · Waver", theme: theme)
+                            infoRow("Also",       value: "Looper · Drum machine · MIDI in · Recording · AirPlay", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)
@@ -255,7 +258,7 @@ struct SettingsView: View {
                 Text("Dim")
                     .font(.system(size: 12, weight: .medium, design: theme.fontDesign))
                     .foregroundColor(theme.secondaryText)
-                Slider(value: $tm.backdropDim, in: 0...0.8)
+                Slider(value: $tm.backdropDim, in: ThemeManager.backdropDimRange)
                     .tint(accent)
                 Text("\(Int((themeManager.backdropDim * 100).rounded())) %")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -300,15 +303,24 @@ struct SettingsView: View {
         }
     }
 
+    private var appVersion: String {
+        let info    = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "–"
+        let build   = info?["CFBundleVersion"] as? String ?? "–"
+        return "SuperNova Pad \(version) (\(build))"
+    }
+
     private func infoRow(_ key: String, value: String, theme: AppTheme) -> some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(key)
                 .font(.system(size: 13, weight: .medium, design: theme.fontDesign))
                 .foregroundColor(theme.secondaryText)
-            Spacer()
+                .fixedSize()
+            Spacer(minLength: 8)
             Text(value)
                 .font(.system(size: 13, weight: .regular, design: theme.fontDesign))
                 .foregroundColor(theme.primaryText)
+                .multilineTextAlignment(.trailing)
         }
     }
 }
