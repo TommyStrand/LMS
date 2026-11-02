@@ -307,8 +307,28 @@ struct AppTheme: Identifiable {
     /// The same theme with see-through surfaces, used while an instrument backdrop
     /// is showing behind the UI. Panels keep their tint but let the scene through;
     /// borders and text are untouched so everything stays legible.
-    func glass() -> AppTheme {
-        AppTheme(id: id, name: name, icon: icon,
+    ///
+    /// With a `palette` (colours sampled from the scene) the whole UI is re-tinted
+    /// to match it: the scene's glow becomes the accent for every preset, and
+    /// panels take a dark version of its ambient colour — so a warm, vintage scene
+    /// doesn't sit next to cool neon chrome.
+    func glass(palette: BackdropPalette? = nil) -> AppTheme {
+        if let p = palette {
+            return AppTheme(id: id, name: name, icon: icon,
+                            appBackground: p.ambient.scaled(toMax: 0.10).color.opacity(0.30),
+                            panelBackground: p.ambient.scaled(toMax: 0.17).color.opacity(0.62),
+                            panelBorder: p.key.color.opacity(0.18),
+                            knobBody: p.ambient.scaled(toMax: 0.20).color.opacity(0.85),
+                            knobTrackBg: p.key.color.opacity(0.10),
+                            accentOverride: p.key.color,
+                            primaryText: primaryText,
+                            secondaryText: secondaryText,
+                            fontDesign: fontDesign,
+                            colorScheme: colorScheme,
+                            scanlines: scanlines,
+                            cornerRadius: cornerRadius)
+        }
+        return AppTheme(id: id, name: name, icon: icon,
                  appBackground: appBackground.opacity(0.30),
                  panelBackground: panelBackground.opacity(0.55),
                  panelBorder: panelBorder,
@@ -321,6 +341,94 @@ struct AppTheme: Identifiable {
                  colorScheme: colorScheme,
                  scanlines: scanlines,
                  cornerRadius: cornerRadius)
+    }
+}
+
+// MARK: - Backdrop palette (pure — unit-tested in SuperNovaPadTests)
+
+/// Two colours sampled from a backdrop scene: `ambient` (its overall cast) and
+/// `key` (its brightest saturated light — lamp glow, fire, moonlight).
+struct BackdropPalette: Equatable {
+    struct RGB: Equatable {
+        var r: Double, g: Double, b: Double
+
+        /// Same hue and saturation, brightness set so the largest channel is `v`.
+        func scaled(toMax v: Double) -> RGB {
+            let m = max(r, g, b)
+            guard m > 0.0001 else { return RGB(r: v, g: v, b: v) }
+            return RGB(r: r / m * v, g: g / m * v, b: b / m * v)
+        }
+        var color: Color { Color(red: r, green: g, blue: b) }
+    }
+
+    var ambient: RGB
+    var key: RGB
+
+    /// Hue on 0..<1 (0 = red), or nil for a grey.
+    static func hue(_ c: RGB) -> Double? {
+        let mx = max(c.r, c.g, c.b), mn = min(c.r, c.g, c.b), d = mx - mn
+        guard d > 0.0001 else { return nil }
+        var h: Double
+        if mx == c.r      { h = (c.g - c.b) / d }
+        else if mx == c.g { h = (c.b - c.r) / d + 2 }
+        else              { h = (c.r - c.g) / d + 4 }
+        h /= 6
+        return h < 0 ? h + 1 : h
+    }
+
+    /// Shortest distance between two hues on the colour wheel (0...0.5).
+    static func hueDistance(_ a: Double, _ b: Double) -> Double {
+        let d = abs(a - b).truncatingRemainder(dividingBy: 1)
+        return min(d, 1 - d)
+    }
+
+    /// `rgba`: 8-bit RGBA pixels of a small thumbnail of the scene.
+    /// Ambient = mean colour. Key = the scene's dominant light: pixels are ranked
+    /// by saturation × brightness; among the top 10 % the ±30° hue family with the
+    /// most total weight wins and is averaged (so two different lights — an orange
+    /// beam in a teal cave — never blend into a muddy in-between colour). It is then lifted to a bright accent and
+    /// softened 15 % toward white so it reads as warm light rather than neon.
+    /// A scene with no saturated light falls back to a lightened ambient.
+    static func extract(rgba: [UInt8]) -> BackdropPalette {
+        let n = rgba.count / 4
+        guard n > 0 else {
+            let grey = RGB(r: 0.5, g: 0.5, b: 0.5)
+            return BackdropPalette(ambient: grey, key: grey.scaled(toMax: 0.9))
+        }
+        var sum = (0.0, 0.0, 0.0)
+        var scored: [(score: Double, rgb: RGB)] = []
+        scored.reserveCapacity(n)
+        for i in 0..<n {
+            let c = RGB(r: Double(rgba[i * 4]) / 255,
+                        g: Double(rgba[i * 4 + 1]) / 255,
+                        b: Double(rgba[i * 4 + 2]) / 255)
+            sum.0 += c.r; sum.1 += c.g; sum.2 += c.b
+            let mx = max(c.r, c.g, c.b), mn = min(c.r, c.g, c.b)
+            let sat = mx > 0 ? (mx - mn) / mx : 0
+            scored.append((sat * mx, c))
+        }
+        let ambient = RGB(r: sum.0 / Double(n), g: sum.1 / Double(n), b: sum.2 / Double(n))
+        scored.sort { $0.score > $1.score }
+        let top = scored.prefix(max(1, n / 10)).filter { $0.score > 0.05 }
+        // Pick the hue family (±30°) carrying the most total score — the scene's
+        // dominant light, not just its single most saturated pixel.
+        let hued = top.compactMap { t in hue(t.rgb).map { (score: t.score, rgb: t.rgb, hue: $0) } }
+        func familyScore(_ h: Double) -> Double {
+            hued.reduce(0) { $0 + (hueDistance($1.hue, h) <= 1.0 / 12 ? $1.score : 0) }
+        }
+        guard let lead = hued.max(by: { familyScore($0.hue) < familyScore($1.hue) }) else {
+            return BackdropPalette(ambient: ambient, key: ambient.scaled(toMax: 0.9))
+        }
+        let family = hued.filter { hueDistance($0.hue, lead.hue) <= 1.0 / 12 }
+        var k = (0.0, 0.0, 0.0)
+        for t in family { k.0 += t.rgb.r; k.1 += t.rgb.g; k.2 += t.rgb.b }
+        let c = Double(family.count)
+        let bright = RGB(r: k.0 / c, g: k.1 / c, b: k.2 / c).scaled(toMax: 0.92)
+        let soft = 0.15
+        let key = RGB(r: bright.r + (0.92 - bright.r) * soft,
+                      g: bright.g + (0.92 - bright.g) * soft,
+                      b: bright.b + (0.92 - bright.b) * soft)
+        return BackdropPalette(ambient: ambient, key: key)
     }
 }
 
@@ -420,6 +528,10 @@ final class ThemeManager {
     static let backdropDimRange: ClosedRange<Double> = 0.6...0.95
     /// Name of the preset on the play surface — set by ContentView. Not persisted.
     var activePresetName: String = ""
+    /// Colours sampled from the loaded scene, and which scene they belong to (so a
+    /// stale palette is never applied to a different image). Set by BackdropView.
+    var backdropPalette: BackdropPalette?
+    var backdropPaletteURL: URL?
 
     init() {
         let d = UserDefaults.standard
@@ -452,9 +564,21 @@ final class ThemeManager {
         return Backdrop.url(for: activePresetName)
     }
 
-    /// The theme the main screen draws with: glass surfaces while a backdrop shows.
+    private var activePalette: BackdropPalette? {
+        guard let url = backdropURL, url == backdropPaletteURL else { return nil }
+        return backdropPalette
+    }
+
+    /// The theme the main screen draws with: glass surfaces, tinted to the scene,
+    /// while a backdrop shows.
     var current: AppTheme {
-        backdropURL == nil ? base : base.glass()
+        backdropURL == nil ? base : base.glass(palette: activePalette)
+    }
+
+    /// Opaque colour behind everything on the main screen: a very dark version of
+    /// the scene's ambient colour while a backdrop shows, else the theme's own.
+    var screenBackground: Color {
+        activePalette.map { $0.ambient.scaled(toMax: 0.07).color } ?? base.appBackground
     }
 
     var controlStyle: ControlStyle {

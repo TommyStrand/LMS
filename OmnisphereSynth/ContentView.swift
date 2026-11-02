@@ -35,12 +35,17 @@ struct ContentView: View {
         let theme = themeManager.current
         GeometryReader { geo in
             ZStack {
-                themeManager.base.appBackground.ignoresSafeArea()
+                themeManager.screenBackground.ignoresSafeArea()
 
                 // Instrument scene (Settings → Instrument backdrop). Decorative only.
                 if let url = themeManager.backdropURL {
                     BackdropView(url: url, dim: themeManager.backdropDim,
-                                 trailingFraction: geo.size.width > 680 ? 0.66 : 1)
+                                 trailingFraction: geo.size.width > 680 ? 0.66 : 1) { palette in
+                        withAnimation(.easeInOut(duration: 0.45)) {
+                            themeManager.backdropPalette    = palette
+                            themeManager.backdropPaletteURL = url
+                        }
+                    }
                         .transition(.opacity)
                 }
 
@@ -622,6 +627,8 @@ struct BackdropView: View {
     /// edge. On iPad (0.66) it sits behind the play surface and feathers out
     /// before the preset list and controls on the left; 1 = full screen.
     var trailingFraction: CGFloat = 1
+    /// Called on the main thread with the colours sampled from each loaded scene.
+    var onPalette: (BackdropPalette) -> Void = { _ in }
     @State private var image: UIImage?
 
     var body: some View {
@@ -643,12 +650,32 @@ struct BackdropView: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task(id: url) {
-            let loaded = await Task.detached(priority: .userInitiated) {
-                UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (UIImage, BackdropPalette)? in
+                guard let raw = UIImage(contentsOfFile: url.path) else { return nil }
+                let palette = BackdropPalette.extract(rgba: Self.thumbnailPixels(of: raw))
+                return (raw.preparingForDisplay() ?? raw, palette)
             }.value
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.45)) { image = loaded }
+            withAnimation(.easeInOut(duration: 0.45)) { image = loaded?.0 }
+            if let palette = loaded?.1 { onPalette(palette) }
         }
+    }
+
+    /// RGBA bytes of a 32×21 thumbnail — plenty for picking a palette.
+    nonisolated static func thumbnailPixels(of image: UIImage, width: Int = 32, height: Int = 21) -> [UInt8] {
+        guard let cg = image.cgImage else { return [] }
+        var px = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return drawn ? px : []
     }
 
     private var scene: some View {

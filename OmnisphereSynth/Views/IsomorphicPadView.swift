@@ -108,7 +108,7 @@ struct IsomorphicPadView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(Color(hex: preset.color).opacity(0.45), lineWidth: 1.5))
+            .strokeBorder(accent.opacity(0.45), lineWidth: 1.5))
     }
 
     // ── Single cell ───────────────────────────────────────────────────────

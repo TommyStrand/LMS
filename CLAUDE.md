@@ -63,13 +63,15 @@ to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
 patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
-sustain loop found in real recordings), `RenderParams` (preset →
+sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` (scene colours, image names), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
 - Backdrops: `ThemeManager.current` returns `base.glass()` (translucent surfaces) while a backdrop shows;
   screens with their own background (Settings) use `ThemeManager.base`. Dark themes only. `BackdropView`
-  decodes off the main thread and cross-fades on preset change
+  decodes off the main thread and cross-fades on preset change. It also samples a `BackdropPalette` from a
+  32×21 thumbnail (dominant light hue family → accent for every preset; ambient cast → dark panel tint and
+  `screenBackground`) so the UI matches the scene instead of mixing warm art with neon chrome
 - Drum patterns: the Mood collection (`MoodGrooves`, original, written as 32-step text grids
   in Models/DrumPatterns.swift) comes first in `DrumPattern.all`; the 30 post-rock grooves and
   any bundled .mid files follow. New patterns must be 2 bars of 4/4 to match the step grid

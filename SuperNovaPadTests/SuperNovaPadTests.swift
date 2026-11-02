@@ -641,4 +641,43 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertFalse(slugs.contains(""))
         XCTAssertEqual(Set(slugs).count, slugs.count, "two presets would share one backdrop file name")
     }
+
+    func testBackdropPaletteFindsTheWarmLight() {
+        // A dark brown room (90 %) with an orange lamp glow (10 %).
+        var px: [UInt8] = []
+        for i in 0..<100 {
+            if i < 10 { px += [250, 150, 40, 255] } else { px += [40, 25, 18, 255] }
+        }
+        let p = BackdropPalette.extract(rgba: px)
+        XCTAssertGreaterThan(p.key.r, p.key.g)          // orange: red > green > blue
+        XCTAssertGreaterThan(p.key.g, p.key.b)
+        XCTAssertEqual(max(p.key.r, p.key.g, p.key.b), 0.92, accuracy: 1e-9)  // lifted to a bright accent
+        XCTAssertGreaterThan(p.ambient.r, p.ambient.b)  // warm ambient cast
+    }
+
+    func testBackdropPaletteHandlesGreyAndEmptyImages() {
+        let grey = BackdropPalette.extract(rgba: [UInt8](repeating: 128, count: 4 * 50))
+        XCTAssertEqual(grey.key.r, grey.key.b, accuracy: 1e-9)   // no hue invented
+        let empty = BackdropPalette.extract(rgba: [])
+        XCTAssertEqual(empty.ambient, BackdropPalette.RGB(r: 0.5, g: 0.5, b: 0.5))
+        let black = BackdropPalette.RGB(r: 0, g: 0, b: 0).scaled(toMax: 0.1)
+        XCTAssertEqual(black.r, 0.1, accuracy: 1e-9)             // no divide-by-zero
+    }
+
+    func testBackdropPaletteNeverBlendsTwoLights() {
+        // Teal cave (dominant) with a smaller orange beam: the key must be teal-ish,
+        // not the grey-green you get by averaging teal and orange.
+        var px: [UInt8] = []
+        for i in 0..<200 {
+            switch i {
+            case 0..<14:  px += [ 30, 200, 190, 255]   // teal light
+            case 14..<20: px += [240, 140,  40, 255]   // orange beam
+            default:      px += [ 10,  25,  25, 255]   // dark rock
+            }
+        }
+        let key = BackdropPalette.extract(rgba: px).key
+        let h = try XCTUnwrap(BackdropPalette.hue(key))
+        XCTAssertEqual(h, try XCTUnwrap(BackdropPalette.hue(.init(r: 30/255, g: 200/255, b: 190/255))),
+                       accuracy: 0.02)
+    }
 }
