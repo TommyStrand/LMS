@@ -13,7 +13,20 @@ final class SamplerEngine {
     // MARK: - Graph
 
     /// Connect this node to the rest of the audio graph (e.g. voiceMixer).
-    let outputNode = AVAudioMixerNode()
+    var outputNode: AVAudioNode { limiter }
+
+    // All voices are summed in `mixNode`, then pass a peak limiter. Sampler
+    // voices do not go through the synth render loop (and so not through its
+    // limiter): a chord of real recordings — twelve organ pipes, each already a
+    // full registration — summed to several times full scale and was clipped
+    // hard at the output. The mixer leaves headroom for ordinary playing; the
+    // limiter catches what is left, so big chords get quieter instead of crackling.
+    private let mixNode = AVAudioMixerNode()
+    private let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+        componentType: kAudioUnitType_Effect,
+        componentSubType: kAudioUnitSubType_PeakLimiter,
+        componentManufacturer: kAudioUnitManufacturer_Apple,
+        componentFlags: 0, componentFlagsMask: 0))
 
     // MARK: - Private state
 
@@ -64,15 +77,18 @@ final class SamplerEngine {
     /// Attach all nodes to `engine` and wire them into outputNode.
     /// Call before engine.start() so connections are stable at launch.
     func attach(to engine: AVAudioEngine) {
-        engine.attach(outputNode)
+        engine.attach(mixNode)
+        engine.attach(limiter)
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+        mixNode.outputVolume = 0.6
+        engine.connect(mixNode, to: limiter, format: fmt)
         for _ in 0..<poolSize {
             let player    = AVAudioPlayerNode()
             let varispeed = AVAudioUnitVarispeed()
             engine.attach(player)
             engine.attach(varispeed)
             engine.connect(player,    to: varispeed,  format: fmt)
-            engine.connect(varispeed, to: outputNode, format: fmt)
+            engine.connect(varispeed, to: mixNode, format: fmt)
             pool.append(VoiceSlot(player: player, varispeed: varispeed))
         }
     }
@@ -152,7 +168,7 @@ final class SamplerEngine {
                        "SamplerEngine[\(instrument.id)] resolved \(key) to \(url.path) — wrong folder")
                 // Real recordings of sustaining instruments: find the steady part and
                 // loop it, so the note holds as long as the key does.
-                if !instrument.loops && instrument.sustainLoop, let parts = makeSustainParts(mono) {
+                if !instrument.loops && instrument.sustainLoop, let parts = makeSustainParts(mono, crossfade: instrument.loopCrossfade) {
                     d.parts[root, default: [:]][layer.midiValue] = parts
                     d.sustainLooped += 1
                 }
@@ -307,11 +323,11 @@ final class SamplerEngine {
 
     /// Splits a mono recording into attack (head) + seamless sustain loop (body),
     /// both promoted to stereo. nil if it has no steady part long enough to loop.
-    private static func makeSustainParts(_ mono: AVAudioPCMBuffer)
+    private static func makeSustainParts(_ mono: AVAudioPCMBuffer, crossfade: Double)
         -> (head: AVAudioPCMBuffer, body: AVAudioPCMBuffer)? {
         guard mono.format.channelCount == 1, let src = mono.floatChannelData?[0] else { return nil }
         var x = Array(UnsafeBufferPointer(start: src, count: Int(mono.frameLength)))
-        guard let loop = SustainLoop.prepare(&x, sampleRate: mono.format.sampleRate),
+        guard let loop = SustainLoop.prepare(&x, sampleRate: mono.format.sampleRate, crossfade: crossfade),
               let head = monoBuffer(x[0..<loop.lowerBound], format: mono.format),
               let body = monoBuffer(x[loop], format: mono.format),
               let headStereo = makeStereo(head),
@@ -484,10 +500,19 @@ enum SamplerSelection {
 ///     release tail (50 ms RMS windows; reference = the 75th-percentile window);
 ///  2. alignEnd: move the loop end back by up to 30 ms to where the waveform best
 ///     matches the waveform just before the loop start, so the two ends are in phase;
-///  3. makeSeamless: LINEAR crossfade (80 ms) of the loop's end into the material
-///     just before its start — linear because the aligned ends are correlated.
-/// Prototyped in Python on synthetic organ tones (41 Hz – 1 kHz): seam jump well
-/// below a normal sample step, level change across the seam < 1 dB.
+///  3. makeSeamless: crossfade of the loop's end into the material just before its
+///     start, with the gain corrected for how alike the two ends are. Two
+///     in-phase ends (a steady organ pipe after alignEnd) sum like a plain linear
+///     fade; two unrelated ends (a string section, a flute with vibrato) would dip
+///     by 3 dB mid-fade — or bump, with an equal-power fade, when they do happen
+///     to line up. Measuring their correlation ρ and dividing by
+///     √(a² + b² + 2abρ) keeps the level constant either way.
+/// The crossfade length is per instrument (`SamplerInstrument.loopCrossfade`):
+/// 80 ms for pipes; a quarter of a second for strings and flute, whose loop then
+/// also starts later — after the note has fully settled, plus the crossfade
+/// length, so the fade never blends the attack back in.
+/// Prototyped in Python on synthetic organ tones (41 Hz – 1 kHz) and on the
+/// bundled string / flute recordings.
 enum SustainLoop {
     static let window      = 0.05   // RMS window (s)
     static let crossfade   = 0.08   // seam crossfade (s)
@@ -496,14 +521,19 @@ enum SustainLoop {
     static let minLoop     = 0.25   // shortest loop worth making (s)
 
     /// Finds, phase-aligns and crossfades the loop IN PLACE. nil = nothing to loop.
-    static func prepare(_ x: inout [Float], sampleRate: Double) -> Range<Int>? {
-        guard let found = find(x, sampleRate: sampleRate) else { return nil }
+    static func prepare(_ x: inout [Float], sampleRate: Double,
+                        crossfade seconds: Double = SustainLoop.crossfade) -> Range<Int>? {
+        guard let found = find(x, sampleRate: sampleRate, crossfade: seconds) else { return nil }
         let loop = found.lowerBound ..< alignEnd(x, loop: found, sampleRate: sampleRate)
-        makeSeamless(&x, loop: loop, crossfade: Int(sampleRate * crossfade))
+        makeSeamless(&x, loop: loop, crossfade: Int(sampleRate * seconds))
         return loop
     }
 
-    static func find(_ x: [Float], sampleRate: Double) -> Range<Int>? {
+    /// Crossfades longer than this are "long": the loop starts later (see above).
+    static let longCrossfade = 0.15
+
+    static func find(_ x: [Float], sampleRate: Double,
+                     crossfade seconds: Double = SustainLoop.crossfade) -> Range<Int>? {
         let win = Int(sampleRate * window)
         guard win > 0, x.count >= win * 12 else { return nil }
         let nw = x.count / win
@@ -516,14 +546,16 @@ enum SustainLoop {
             }
         }
         let ref = rms.sorted()[nw * 3 / 4]
+        let long = seconds > longCrossfade
+        let xfade = Int(sampleRate * seconds)
         guard ref > 1e-4,
-              let a = rms.firstIndex(where: { $0 >= 0.7 * ref }),
+              let a = rms.firstIndex(where: { $0 >= (long ? 0.9 : 0.7) * ref }),
               // End threshold is stricter (90 %): at 70 % the loop reached ~110 ms
               // into a decaying release, so every pass would dip in level.
               let e = rms.lastIndex(where: { $0 >= 0.9 * ref }) else { return nil }
-        let start = (a + 2) * win
+        let start = (a + 2) * win + (long ? xfade : 0)
         let end   = min(x.count, (e + 1) * win)
-        guard end - start >= max(2 * Int(sampleRate * crossfade), Int(sampleRate * minLoop)) else { return nil }
+        guard end - start >= max(2 * xfade, Int(sampleRate * minLoop)) else { return nil }
         return start..<end
     }
 
@@ -554,11 +586,23 @@ enum SustainLoop {
     static func makeSeamless(_ x: inout [Float], loop: Range<Int>, crossfade: Int) {
         let xf = min(crossfade, loop.lowerBound, loop.count / 2)
         guard xf > 0 else { return }
+        let endStart = loop.upperBound - xf      // the loop's last xf samples…
+        let preStart = loop.lowerBound - xf      // …fade into the xf samples before its start
+
+        // How alike are the two ends? (normalised correlation, −1…1)
+        var sumEnd: Float = 0, sumPre: Float = 0, sumBoth: Float = 0
         for k in 0..<xf {
-            let a = Float(k + 1) / Float(xf + 1)
-            let i = loop.upperBound - xf + k
-            let j = loop.lowerBound - xf + k
-            x[i] = x[i] * (1 - a) + x[j] * a
+            let e = x[endStart + k], p = x[preStart + k]
+            sumEnd += e * e; sumPre += p * p; sumBoth += e * p
+        }
+        let denom = (sumEnd * sumPre).squareRoot()
+        let rho = denom > 1e-12 ? max(-0.9, min(1, sumBoth / denom)) : 1
+
+        for k in 0..<xf {
+            let b = Float(k + 1) / Float(xf + 1)   // weight of the incoming (pre-start) material
+            let a = 1 - b
+            let gain = 1 / (a * a + b * b + 2 * a * b * rho).squareRoot()
+            x[endStart + k] = (x[endStart + k] * a + x[preStart + k] * b) * gain
         }
     }
 }

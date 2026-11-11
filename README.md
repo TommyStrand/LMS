@@ -161,5 +161,4 @@ OmnisphereSynthVST/       VST3/AU plugin (C++ / JUCE)
 
 ## Credits
 
-Sample and artwork credits, including the attribution required by the Salamander
-Grand Piano's CC BY 3.0 licence, are in [CREDITS.md](CREDITS.md).
+Sample and artwork credits are in [CREDITS.md](CREDITS.md).

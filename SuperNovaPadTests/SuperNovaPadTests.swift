@@ -8,7 +8,7 @@ final class SuperNovaPadTests: XCTestCase {
     // MARK: - Velocity layer selection
 
     func testVelocityLayerSelection() {
-        let layers = SamplerInstrument.grandPiano.velocityLayers   // [0-63 → 64, 64-127 → 110]
+        let layers = SamplerInstrument.stringEnsemble.velocityLayers   // [0-63 → 64, 64-127 → 110]
         XCTAssertEqual(SamplerSelection.velocityMidiValue(for: 0,   layers: layers), 64)
         XCTAssertEqual(SamplerSelection.velocityMidiValue(for: 63,  layers: layers), 64)
         XCTAssertEqual(SamplerSelection.velocityMidiValue(for: 64,  layers: layers), 110)
@@ -16,7 +16,7 @@ final class SuperNovaPadTests: XCTestCase {
     }
 
     func testVelocityOutOfRangeFallsBackToLastLayer() {
-        let layers = SamplerInstrument.grandPiano.velocityLayers
+        let layers = SamplerInstrument.stringEnsemble.velocityLayers
         // 200 is above every hiVel → should still resolve (last layer), not nil.
         XCTAssertEqual(SamplerSelection.velocityMidiValue(for: 200, layers: layers), 110)
     }
@@ -52,11 +52,14 @@ final class SuperNovaPadTests: XCTestCase {
 
     // MARK: - Instrument descriptors
 
-    func testGrandPianoRootNoteRange() {
-        let roots = SamplerInstrument.grandPiano.rootNotes
-        XCTAssertEqual(roots.first, 24)
-        XCTAssertEqual(roots.last, 96)
-        XCTAssertEqual(roots.count, 25)   // 24...96 step 3
+    func testStringEnsembleRootsCoverCelloToViolinWithoutBigGaps() {
+        let roots = SamplerInstrument.stringEnsemble.rootNotes
+        XCTAssertEqual(roots.first, 36)   // cello C2
+        XCTAssertEqual(roots.last, 83)    // violin B5
+        // No key is more than 3 semitones from a recording (varispeed range stays small).
+        for (a, b) in zip(roots, roots.dropFirst()) {
+            XCTAssertLessThanOrEqual(b - a, 5, "gap between recorded roots \(a) and \(b)")
+        }
     }
 
     // MARK: - Preset equality (stable id, not regenerated UUID)
@@ -74,7 +77,7 @@ final class SuperNovaPadTests: XCTestCase {
     // MARK: - Sampler descriptor invariants (what SamplerEngine.load() asserts at runtime)
 
     func testEverySamplerInstrumentHasValidRootsAndContiguousVelocityLayers() {
-        let instruments: [SamplerInstrument] = [.grandPiano, .stringEnsemble, .concertFlute, .pipeOrgan]
+        let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan]
         for inst in instruments {
             XCTAssertFalse(inst.rootNotes.isEmpty, "\(inst.id) has no roots")
             XCTAssertEqual(inst.rootNotes, inst.rootNotes.sorted(), "\(inst.id) roots not ascending")
@@ -101,11 +104,10 @@ final class SuperNovaPadTests: XCTestCase {
             XCTAssertGreaterThan(inst.attack, 0)
             XCTAssertGreaterThan(inst.release, 0)
         }
-        // The piano is a one-shot that is damped on release (not rung out for ever).
-        XCTAssertFalse(SamplerInstrument.grandPiano.loops)
-        XCTAssertFalse(SamplerInstrument.grandPiano.sustainLoop)
-        XCTAssertTrue(SamplerInstrument.grandPiano.damps)
-        XCTAssertGreaterThanOrEqual(SamplerInstrument.grandPiano.release, 0.3)
+        // Ensembles and vibrato need a longer loop crossfade than a steady pipe.
+        XCTAssertGreaterThan(SamplerInstrument.stringEnsemble.loopCrossfade, SustainLoop.longCrossfade)
+        XCTAssertGreaterThan(SamplerInstrument.concertFlute.loopCrossfade, SustainLoop.longCrossfade)
+        XCTAssertLessThan(SamplerInstrument.pipeOrgan.loopCrossfade, SustainLoop.longCrossfade)
     }
 
     // MARK: - Musical scale
@@ -504,7 +506,7 @@ final class SuperNovaPadTests: XCTestCase {
         let found  = SamplerSelection.discoverRoots(keys: keys, folder: "pipe_organ", layers: layers)
         XCTAssertEqual(found.count * layers.count, 46)
         XCTAssertTrue(SamplerInstrument.pipeOrgan.discoversRoots)
-        XCTAssertFalse(SamplerInstrument.grandPiano.discoversRoots, "generated instruments keep the strict check")
+        XCTAssertFalse(SamplerInstrument.stringEnsemble.discoversRoots, "instruments in git keep the strict check")
     }
 
     func testDiscoverRootsWithNoFilesIsEmpty() {
@@ -595,7 +597,6 @@ final class SuperNovaPadTests: XCTestCase {
     func testSustainLoopFlags() {
         XCTAssertTrue(SamplerInstrument.pipeOrgan.sustainLoop)
         XCTAssertFalse(SamplerInstrument.pipeOrgan.loops, "organ recordings play attack → sustain loop")
-        XCTAssertFalse(SamplerInstrument.grandPiano.sustainLoop, "a piano decays; it must not sustain-loop")
     }
 
     // MARK: - MIDI 2.0 (UMP) message sizes
@@ -950,6 +951,47 @@ final class SuperNovaPadTests: XCTestCase {
             }
             XCTAssertLessThan(early, 2)
             XCTAssertLessThan(late, early * 0.6, "\(name) should be decaying while held")
+        }
+    }
+
+    // MARK: - Sustain loop for ensembles (long crossfade)
+
+    /// Steady noise with a short swell: stands in for a string section — the two
+    /// ends of any loop in it are unrelated (correlation ≈ 0).
+    private func ensembleNoise(seconds: Double = 5, attack: Double = 0.4) -> [Float] {
+        var state: UInt32 = 12345
+        return (0..<Int(seconds * 44100)).map { i in
+            state = state &* 1664525 &+ 1013904223
+            let n = Float(Int32(bitPattern: state)) / Float(Int32.max)
+            return 0.3 * n * Float(min(1, Double(i) / 44100 / attack))
+        }
+    }
+
+    func testLongCrossfadeLoopStartsAfterTheSwellAndKeepsItsLevel() throws {
+        let sr = 44100.0
+        var x = ensembleNoise()
+        let fade = 0.25
+        let loop = try XCTUnwrap(SustainLoop.prepare(&x, sampleRate: sr, crossfade: fade))
+        // Starts after the swell has settled PLUS the crossfade length, so the
+        // fade never blends the attack back in.
+        XCTAssertGreaterThan(loop.lowerBound, Int((0.3 + fade) * sr))
+        // Unrelated ends: a plain linear fade would dip 3 dB in the middle. The
+        // correlation-corrected fade holds the level.
+        let xf = Int(fade * sr)
+        let body = rms(x, loop.lowerBound..<(loop.upperBound - xf))
+        let mid  = rms(x, (loop.upperBound - xf * 3 / 4)..<(loop.upperBound - xf / 4))
+        XCTAssertLessThan(abs(20 * log10(mid / body)), 1.0)
+    }
+
+    func testCorrelatedEndsAreNotBoosted() {
+        // Identical material at both ends (ρ = 1): the corrected fade must be the
+        // plain linear one — no bump.
+        var x = [Float](repeating: 0, count: 44100 * 2)
+        for i in x.indices { x[i] = 0.4 * Float(sin(2 * Double.pi * 441 * Double(i) / 44100)) }   // 100-sample period
+        let before = x
+        SustainLoop.makeSeamless(&x, loop: 22050..<66150, crossfade: 4410)     // ends 441 periods apart
+        for i in stride(from: 66150 - 4410, to: 66150, by: 97) {
+            XCTAssertEqual(x[i], before[i], accuracy: 0.01)
         }
     }
 }

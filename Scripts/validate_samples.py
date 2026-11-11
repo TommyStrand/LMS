@@ -64,6 +64,14 @@ def descriptor_roots(folder):
         return list(range(a, b + 1, c))
     return None
 
+def app_declares(folder):
+    """True if SynthPreset.swift has a SamplerInstrument descriptor for `folder`."""
+    try:
+        return f'id: "{folder}"' in open(SYNTH_PRESET).read()
+    except OSError:
+        return True      # can't tell → stay strict
+
+
 def discovers_roots(folder):
     """True if the descriptor sets discoversRoots (roots read from disk at load)."""
     try:
@@ -107,7 +115,10 @@ def main():
     for folder, _fn, start, end, step in INSTRUMENTS:
         out_dir = os.path.join(OUT_ROOT, folder)
         if not os.path.isdir(out_dir):
-            fail(f"{folder}: directory missing")
+            # The generator knows more instruments than the app ships (the sampled
+            # piano was removed). Only a folder the APP declares may not be missing.
+            if app_declares(folder):
+                fail(f"{folder}: directory missing")
             continue
 
         actual   = {f for f in os.listdir(out_dir) if f.endswith(".wav")}

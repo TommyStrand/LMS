@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
 """
 fetch_free_samples.py — download free, real recordings and install them as the
-app's Grand Piano, String Ensemble and Concert Flute.
+app's String Ensemble and Concert Flute.
 
-The three instruments used to be SYNTHESISED WAVs (Scripts/generate_samples.py).
-This script replaces them with real recordings from two openly licensed
-libraries, fetched file by file from GitHub:
+Both used to be SYNTHESISED WAVs (Scripts/generate_samples.py). This script
+replaces them with real recordings from VSCO 2 Community Edition by Versilian
+Studios (https://github.com/sgossner/VSCO-2-CE, CC0 1.0 — public domain),
+fetched file by file from GitHub:
 
-  Grand Piano      Salamander Grand Piano V3 (Yamaha C5) by Alexander Holm
-                   https://github.com/sfzinstruments/SalamanderGrandPiano
-                   Licence: CC BY 3.0 — ATTRIBUTION REQUIRED (the app's About box
-                   and README credit it).
-
-  String Ensemble  VSCO 2 Community Edition by Versilian Studios — cello section
-  Concert Flute    (low notes) + violin section (high notes), and solo flute.
-                   https://github.com/sgossner/VSCO-2-CE
-                   Licence: CC0 1.0 (public domain).
+  String Ensemble  cello section (low notes) + violin section (high notes)
+  Concert Flute    solo flute with vibrato
 
 Output: mono 16-bit 44.1 kHz WAVs named {midi_note}_{velocity}.wav in
 OmnisphereSynth/Resources/Samples/<instrument>/, each written under its OWN
 recorded pitch, with the descriptor's `rootNotes` in SynthPreset.swift patched to
 match (same rules as import_samples.py). Run Scripts/validate_samples.py after.
 
-Needs: python3, curl, ffmpeg. Downloads ~200 MB into a cache folder (default
+The players shape every note (the level drifts by up to 10 dB over a held
+note), which is musical in a performance but ruins a sample that has to LOOP:
+each pass would swell and jump. So after the attack the level is flattened
+(`flatten_sustain`) — the app's sustain loop then repeats without pumping.
+
+Needs: python3, curl, ffmpeg. Downloads ~60 MB into a cache folder (default
 ~/.cache/supernova-samples, override with --cache); re-runs reuse the cache.
 
-  python3 Scripts/fetch_free_samples.py            # all three
-  python3 Scripts/fetch_free_samples.py --only grand_piano
+  python3 Scripts/fetch_free_samples.py            # both
+  python3 Scripts/fetch_free_samples.py --only concert_flute
 
-To go back to the synthesised set: `git checkout <old commit> -- OmnisphereSynth/Resources/Samples`
-or run generate_samples.py, and restore the descriptors in SynthPreset.swift.
+To go back to the synthesised set, run generate_samples.py and restore the
+descriptors (`loops: true`, the stride root lists) in SynthPreset.swift.
 """
 from __future__ import annotations
 
@@ -48,7 +47,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLES   = REPO_ROOT / "OmnisphereSynth" / "Resources" / "Samples"
 SWIFT     = REPO_ROOT / "OmnisphereSynth" / "Models" / "SynthPreset.swift"
 
-SALAMANDER = "https://raw.githubusercontent.com/sfzinstruments/SalamanderGrandPiano/master/Samples/"
 VSCO       = "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/"
 
 PITCH = {"C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11}
@@ -63,21 +61,6 @@ def midi(name: str, octave: int) -> int:
 # ── What to fetch ─────────────────────────────────────────────────────────────
 # Each entry: (midi note, velocity suffix, url, seconds to keep, target peak)
 
-def piano_plan() -> list[tuple]:
-    """Every third semitone C1…C7 (Salamander records exactly these), two of its
-    16 velocity layers: v5 (soft) and v12 (loud). Bass notes ring longest, so
-    they keep more of the tail; every note is faded out over its last 1.5 s."""
-    plan = []
-    for note in range(24, 97, 3):
-        name = ["C", "D#", "F#", "A"][(note % 12) // 3]
-        octave = note // 12 - 1
-        keep = max(3.0, 8.0 - (note - 24) / 72 * 5.0)
-        for suffix, layer, peak in ((SOFT, 5, 0.50), (HARD, 12, 0.80)):
-            url = SALAMANDER + urllib.parse.quote(f"{name}{octave}v{layer}.flac")
-            plan.append((note, suffix, url, keep, peak))
-    return plan
-
-
 def strings_plan() -> list[tuple]:
     """Cello section below G3, violin section from G3 up — one continuous
     ensemble. NOTE: VSCO 2 names octaves one lower than standard (its "C3" is
@@ -89,12 +72,12 @@ def strings_plan() -> list[tuple]:
         note = midi(token[:-1], int(token[-1]) + 1)
         for suffix, layer, peak in ((SOFT, "v1_1", 0.45), (HARD, "v3_1", 0.75)):
             path = f"Strings/Cello Section/susvib/susvib_{token}_{layer}.wav"
-            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 4.5, peak))
+            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 5.5, peak))
     for token in violin:
         note = midi(token[:-1], int(token[-1]) + 1)
         for suffix, layer, peak in ((SOFT, "v1", 0.45), (HARD, "v2", 0.75)):
             path = f"Strings/Violin Section/susVib/VlnEns_susVib_{token}_{layer}.wav"
-            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 4.5, peak))
+            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 5.5, peak))
     return plan
 
 
@@ -107,13 +90,12 @@ def flute_plan() -> list[tuple]:
         note = midi(token[:-1], int(token[-1]) + 1)
         path = f"Woodwinds/Flute/susvib/LDFlute_susvib_{token}_v1_1.wav"
         for suffix, peak in ((SOFT, 0.45), (HARD, 0.75)):
-            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 4.0, peak))
+            plan.append((note, suffix, VSCO + urllib.parse.quote(path), 4.5, peak))
     return plan
 
 
 PLANS = {
-    "grand_piano":     (piano_plan,   1.5),    # (plan, fade-out seconds at the end)
-    "string_ensemble": (strings_plan, 0.05),
+    "string_ensemble": (strings_plan, 0.05),   # (plan, fade-out seconds at the end)
     "concert_flute":   (flute_plan,   0.05),
 }
 
@@ -134,13 +116,48 @@ def download(url: str, cache: Path) -> Path:
     raise RuntimeError(f"download failed: {url}")
 
 
+def flatten_sustain(samples: array.array, rate: int = 44100) -> list[float]:
+    """Even out the level of a held note after its attack.
+
+    RMS is measured in 100 ms windows; the reference is the 75th-percentile
+    window. From the first window that reaches 70 % of it (the attack has
+    settled) every window is scaled toward the reference, the gain limited to
+    0.4…5× and interpolated between window centres so it never steps. The attack
+    itself keeps its shape (it gets the first settled window's gain).
+    """
+    win = rate // 10
+    count = len(samples) // win
+    if count < 6:
+        return [float(v) for v in samples]
+    rms = []
+    for w in range(count):
+        chunk = samples[w * win:(w + 1) * win]
+        rms.append((sum(v * v for v in chunk) / win) ** 0.5)
+    ref = sorted(rms)[count * 3 // 4]
+    if ref <= 1:
+        return [float(v) for v in samples]
+    settled = next((i for i, r in enumerate(rms) if r >= 0.7 * ref), 0)
+    gains = [min(5.0, max(0.4, ref / max(r, 1e-9))) for r in rms]
+    for i in range(settled):
+        gains[i] = gains[settled]
+    out = []
+    for n, v in enumerate(samples):
+        pos = (n - win / 2) / win              # window-centre coordinates
+        lo = min(count - 1, max(0, int(pos)))
+        hi = min(count - 1, lo + 1)
+        frac = min(1.0, max(0.0, pos - lo))
+        out.append(v * (gains[lo] * (1 - frac) + gains[hi] * frac))
+    return out
+
+
 def convert(src: Path, dest: Path, keep: float, fade: float, peak: float) -> None:
     """→ mono 16-bit 44.1 kHz, trimmed to `keep` seconds with a fade-out, leading
-    silence removed (so notes speak immediately), peak-normalised to `peak`."""
+    silence removed (so notes speak immediately), the sustain level flattened,
+    peak-normalised to `peak`."""
     raw = dest.with_suffix(".tmp.wav")
     filters = (
         "silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.004,"
-        f"atrim=0:{keep:.3f},afade=t=out:st={max(0.0, keep - fade):.3f}:d={fade:.3f}"
+        f"atrim=0:{keep:.3f}"
     )
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
@@ -151,9 +168,13 @@ def convert(src: Path, dest: Path, keep: float, fade: float, peak: float) -> Non
     raw.unlink()
     if sys.byteorder != "little":
         samples.byteswap()
-    loudest = max(1, max(abs(min(samples)), max(samples)))
+    flat = flatten_sustain(samples)
+    fade_len = int(fade * 44100)                 # short fade so the file ends at zero
+    for k in range(min(fade_len, len(flat))):
+        flat[len(flat) - 1 - k] *= k / fade_len
+    loudest = max(1.0, max(abs(v) for v in flat))
     gain = peak * 32767 / loudest
-    scaled = array.array("h", (max(-32766, min(32766, int(round(s * gain)))) for s in samples))
+    scaled = array.array("h", (max(-32766, min(32766, int(round(v * gain)))) for v in flat))
     if sys.byteorder != "little":
         scaled.byteswap()
     with wave.open(str(dest), "wb") as wf:

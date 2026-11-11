@@ -186,6 +186,9 @@ struct SamplerInstrument: Equatable, Hashable {
     /// this behaves as if the sustain pedal were held down for ever, and real
     /// piano recordings (6–8 s of tail) pile up into mud.
     var damps = false
+    /// Length (seconds) of the crossfade at the sustain-loop seam. 80 ms suits a
+    /// steady pipe; ensembles and vibrato need longer (see `SustainLoop`).
+    var loopCrossfade = 0.08
 
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
@@ -193,19 +196,9 @@ struct SamplerInstrument: Equatable, Hashable {
         let hiVel:     Int   // highest MIDI velocity mapped to this zone
     }
 
-    // Grand piano, strings and flute are REAL RECORDINGS installed by
-    // Scripts/fetch_free_samples.py (Salamander Grand Piano V3, CC BY 3.0; VSCO 2
-    // Community Edition, CC0). They are in git, so `rootNotes` is exact.
-    static let grandPiano = SamplerInstrument(
-        id: "grand_piano", displayName: "Grand Piano",
-        rootNotes: [24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72, 75, 78, 81, 84, 87, 90, 93, 96],
-        velocityLayers: [
-            VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
-            VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
-        ],
-        release: 1.0,          // damper: a lifted key fades over a second, not instantly
-        damps: true
-    )
+    // Strings and flute are REAL RECORDINGS installed by Scripts/fetch_free_samples.py
+    // (VSCO 2 Community Edition, CC0). They are in git, so `rootNotes` is exact.
+    // (There is no piano: the sampled grand was removed at the owner's request.)
     static let stringEnsemble = SamplerInstrument(
         id: "string_ensemble", displayName: "String Ensemble",
         rootNotes: [36, 40, 43, 47, 50, 53, 55, 59, 62, 66, 69, 72, 76, 79, 83],
@@ -214,7 +207,8 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
         loops: false, attack: 0.09, release: 0.35,  // slow bow swell + smooth release
-        sustainLoop: true                           // attack once, then the steady bowing loops
+        sustainLoop: true,                          // attack once, then the steady bowing loops
+        loopCrossfade: 0.25
     )
     static let concertFlute = SamplerInstrument(
         id: "concert_flute", displayName: "Concert Flute",
@@ -224,7 +218,8 @@ struct SamplerInstrument: Equatable, Hashable {
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
         loops: false, attack: 0.04, release: 0.18,   // breath onset + gentle release
-        sustainLoop: true                           // attack once, then the held tone loops
+        sustainLoop: true,                          // attack once, then the held tone loops
+        loopCrossfade: 0.2
     )
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
@@ -287,8 +282,8 @@ extension SynthPreset {
             filterCutoff: 8000, filterResonance: 0,
             attack: 0.005, decay: 0, sustain: 1.0, release: 0.04,
             lfoRate: 0, lfoDepth: 0, lfoTarget: .amplitude,
-            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5,
-            tremulantDepth: 0.25,
+            reverbMix: 0.65, delayMix: 0.06, delayTime: 0.5, chorusMix: 0.0,
+            tremulantDepth: 0.0,                           // a plain principal chorus has no tremulant (TREM knob adds it)
             iconStyle: .churchPipes
         ),
         SynthPreset(
@@ -563,14 +558,17 @@ extension SynthPreset {
             name: "Harmonium",
             color: "#8B3A3A",
             voiceMode: .synth,
-            osc1Waveform: .sawtooth, osc2Waveform: .square,
-            osc2Detune: 0, oscMix: 0.35,
-            filterCutoff: 2300, filterResonance: 0.2, filterEnvAmount: 0.05,
-            attack: 0.06, decay: 0.2, sustain: 0.9, release: 0.35,
-            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
-            reverbMix: 0.35, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.15,
-            tremulantDepth: 0.35, gritAmount: 0.12,
-            unisonCents: 5, stereoWidth: 0.4,        // two reed rows beating
+            // Free reeds: a bright, slightly nasal sawtooth tone. Two reed banks —
+            // 8' and 16' — a few cents apart; a slow bellows swell; NO tremolo and no
+            // chorus (it had both, plus distortion, and sounded like a wobbly synth).
+            osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
+            osc2Detune: -12, oscMix: 0.35,
+            filterCutoff: 1500, filterResonance: 0.3, filterEnvAmount: 0.0,
+            attack: 0.09, decay: 0.3, sustain: 0.92, release: 0.16,
+            lfoRate: 0.25, lfoDepth: 0.08, lfoTarget: .amplitude,
+            reverbMix: 0.2, delayMix: 0.0, delayTime: 0.375, chorusMix: 0.0,
+            gritAmount: 0.05,
+            unisonCents: 4, stereoWidth: 0.3, keyTrack: 0.65,
             level: 0.75,
             iconStyle: .churchPipes
         ),
@@ -659,14 +657,6 @@ extension SynthPreset {
 
         // MARK: – Sample-based instruments
 
-        SynthPreset(
-            name: "Grand Piano",
-            color: "#E8DCC8",
-            voiceMode: .sampler(.grandPiano),
-            attack: 0.002, decay: 0.5, sustain: 0.7, release: 0.8,
-            reverbMix: 0.18, delayMix: 0.04, delayTime: 0.375,
-            iconStyle: .pianoKeys
-        ),
         SynthPreset(
             name: "Str. Ensemble",
             color: "#7B3B1A",
