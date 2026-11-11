@@ -359,7 +359,51 @@ struct BackdropPalette: Equatable {
             return RGB(r: r / m * v, g: g / m * v, b: b / m * v)
         }
         var color: Color { Color(red: r, green: g, blue: b) }
+
+        /// "#RRGGBB" (the "#" is optional). Anything unparsable gives mid grey.
+        init(hex: String) {
+            let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+            guard digits.count == 6, let v = UInt32(digits, radix: 16) else {
+                self.init(r: 0.5, g: 0.5, b: 0.5); return
+            }
+            self.init(r: Double((v >> 16) & 0xFF) / 255,
+                      g: Double((v >> 8) & 0xFF) / 255,
+                      b: Double(v & 0xFF) / 255)
+        }
+        init(r: Double, g: Double, b: Double) { self.r = r; self.g = g; self.b = b }
+
+        /// The colour with its hue rotated by `turns` (1 = full circle); saturation
+        /// and brightness are kept. Greys are returned unchanged.
+        func rotated(byTurns turns: Double) -> RGB {
+            guard let h = BackdropPalette.hue(self) else { return self }
+            let mx = max(r, g, b), mn = min(r, g, b)
+            let sat = mx > 0 ? (mx - mn) / mx : 0
+            var nh = (h + turns).truncatingRemainder(dividingBy: 1)
+            if nh < 0 { nh += 1 }
+            let i = Int(nh * 6), f = nh * 6 - Double(i)
+            let p = mx * (1 - sat), q = mx * (1 - f * sat), t = mx * (1 - (1 - f) * sat)
+            switch i % 6 {
+            case 0:  return RGB(r: mx, g: t,  b: p)
+            case 1:  return RGB(r: q,  g: mx, b: p)
+            case 2:  return RGB(r: p,  g: mx, b: t)
+            case 3:  return RGB(r: p,  g: q,  b: mx)
+            case 4:  return RGB(r: t,  g: p,  b: mx)
+            default: return RGB(r: mx, g: p,  b: q)
+            }
+        }
     }
+
+    /// Palette for a generated (image-less) scene: the preset's own colour is both
+    /// the light and the cast.
+    init(presetColor: RGB) {
+        let bright = presetColor.scaled(toMax: 0.92)
+        let soft = 0.15
+        self.init(ambient: presetColor,
+                  key: RGB(r: bright.r + (0.92 - bright.r) * soft,
+                           g: bright.g + (0.92 - bright.g) * soft,
+                           b: bright.b + (0.92 - bright.b) * soft))
+    }
+    init(ambient: RGB, key: RGB) { self.ambient = ambient; self.key = key }
 
     var ambient: RGB
     var key: RGB
@@ -482,8 +526,94 @@ enum Backdrop {
         return [:]
     }()
 
+    /// Presets without their own image borrow a related instrument's scene
+    /// (preset slug → image slug). Anything not listed here and without its own
+    /// file — the synth pads, the flute — gets a generated `AbstractScene`.
+    static let borrowed: [String: String] = [
+        "church_organ":     "pipe_organ",
+        "vox_humana":       "pipe_organ",
+        "choir_ahs":        "pipe_organ",
+        "harmonium":        "musette_accordion",
+        "mellotron":        "vintage_studio",
+        "mellotron_flutes": "vintage_studio",
+        "tape_strings":     "vintage_studio",
+        "solina_strings":   "vintage_studio",
+        "ondes_martenot":   "vintage_studio",
+        "str_ensemble":     "grand_piano",
+        "bowed_psaltery":   "hurdy_gurdy",
+        "glass_harmonica":  "cristal_baschet",
+    ]
+
+    /// Image slug for a preset: its own name, else the scene it borrows.
+    static func imageSlug(for presetName: String, available: Set<String>) -> String? {
+        let own = slug(for: presetName)
+        if available.contains(own) { return own }
+        if let lent = borrowed[own], available.contains(lent) { return lent }
+        return nil
+    }
+
     static func url(for presetName: String) -> URL? {
-        library[slug(for: presetName)]
+        imageSlug(for: presetName, available: Set(library.keys)).flatMap { library[$0] }
+    }
+}
+
+/// What is drawn behind the main screen.
+enum BackdropSource: Equatable {
+    case image(URL)
+    /// Generated scene for presets with no image: `seed` (the preset slug) fixes
+    /// the layout, `color` is the preset colour.
+    case abstract(seed: String, color: BackdropPalette.RGB)
+}
+
+/// Layout of a generated scene (pure — unit-tested): a few soft glows in hues
+/// around the preset colour, in the upper part of the frame like the painted
+/// scenes, plus a sprinkle of stars. Deterministic per seed, so a preset always
+/// gets the same scene (Swift's own `hashValue` changes every launch).
+enum AbstractScene {
+    struct Glow: Equatable {
+        var x: Double, y: Double          // centre, 0...1 of the frame
+        var radius: Double                // in frame widths
+        var hueTurns: Double              // hue offset from the preset colour
+        var opacity: Double
+    }
+    struct Star: Equatable { var x: Double, y: Double, size: Double, opacity: Double }
+
+    /// 64-bit FNV-1a, then a SplitMix64 stream.
+    struct Random {
+        private var state: UInt64
+        init(seed: String) {
+            var h: UInt64 = 0xcbf2_9ce4_8422_2325
+            for byte in seed.utf8 { h = (h ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
+            state = h
+        }
+        /// Uniform in 0..<1.
+        mutating func next() -> Double {
+            state = state &+ 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            z ^= z >> 31
+            return Double(z >> 11) / Double(1 << 53)
+        }
+    }
+
+    static func layout(seed: String) -> (glows: [Glow], stars: [Star]) {
+        var rng = Random(seed: seed)
+        var glows: [Glow] = []
+        for i in 0..<4 {
+            glows.append(Glow(x: 0.15 + rng.next() * 0.7,
+                              y: 0.05 + rng.next() * 0.45,
+                              radius: 0.28 + rng.next() * 0.27,
+                              hueTurns: i == 0 ? 0 : (rng.next() - 0.5) * 0.24,
+                              opacity: 0.45 + rng.next() * 0.3))
+        }
+        var stars: [Star] = []
+        for _ in 0..<36 {
+            stars.append(Star(x: rng.next(), y: rng.next() * 0.7,
+                              size: 1 + rng.next() * 1.6,
+                              opacity: 0.25 + rng.next() * 0.55))
+        }
+        return (glows, stars)
     }
 }
 
@@ -532,8 +662,10 @@ final class ThemeManager {
         didSet { defaults.set(backdropDim, forKey: "backdropDimV2") }
     }
     static let backdropDimRange: ClosedRange<Double> = 0.6...0.95
-    /// Name of the preset on the play surface — set by ContentView. Not persisted.
+    /// Name and colour ("#RRGGBB") of the preset on the play surface — set by
+    /// ContentView. Not persisted.
     var activePresetName: String = ""
+    var activePresetColor: String = "#8B5CF6"
     /// Colours sampled from each scene loaded so far (filled in by BackdropView),
     /// plus the most recent one. A scene seen before is tinted instantly; a new
     /// one borrows the previous scene's colours for the moment it takes to load —
@@ -570,22 +702,28 @@ final class ThemeManager {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
     }
 
-    /// Scene image to show behind the main screen, or nil (backdrops off, a light
-    /// theme, or no image for this preset yet).
-    var backdropURL: URL? {
-        guard backdropEnabled, base.colorScheme == .dark else { return nil }
-        return Backdrop.url(for: activePresetName)
+    /// What to draw behind the main screen, or nil (backdrops off, a light theme,
+    /// or no preset yet). A preset's own image, else a related one, else a
+    /// generated scene in the preset's colour.
+    var backdrop: BackdropSource? {
+        guard backdropEnabled, base.colorScheme == .dark, !activePresetName.isEmpty else { return nil }
+        if let url = Backdrop.url(for: activePresetName) { return .image(url) }
+        return .abstract(seed: Backdrop.slug(for: activePresetName),
+                         color: BackdropPalette.RGB(hex: activePresetColor))
     }
 
     private var activePalette: BackdropPalette? {
-        guard let url = backdropURL else { return nil }
-        return palettes[url] ?? lastPalette
+        guard let source = backdrop else { return nil }
+        switch source {
+        case .image(let url):         return palettes[url] ?? lastPalette
+        case .abstract(_, let color): return BackdropPalette(presetColor: color)
+        }
     }
 
     /// The theme the main screen draws with: glass surfaces, tinted to the scene,
     /// while a backdrop shows.
     var current: AppTheme {
-        backdropURL == nil ? base : base.glass(palette: activePalette)
+        backdrop == nil ? base : base.glass(palette: activePalette)
     }
 
     /// Opaque colour behind everything on the main screen: a very dark version of

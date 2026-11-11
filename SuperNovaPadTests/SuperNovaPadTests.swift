@@ -680,4 +680,54 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(h, try XCTUnwrap(BackdropPalette.hue(.init(r: 30/255, g: 200/255, b: 190/255))),
                        accuracy: 0.02)
     }
+
+    func testEveryPresetGetsABackdrop() {
+        // The images that ship in Resources/Backgrounds (the test host is the app).
+        let available = Set(Backdrop.library.keys)
+        XCTAssertFalse(available.isEmpty, "Backgrounds folder is not bundled")
+        let presetSlugs = Set(SynthPreset.presets.map { Backdrop.slug(for: $0.name) })
+        for (preset, lent) in Backdrop.borrowed {
+            XCTAssertTrue(available.contains(lent), "\(preset) borrows \(lent), which has no image")
+            // pipe_organ is hidden when its (untracked) samples are missing — not a typo.
+            XCTAssertTrue(presetSlugs.contains(preset) || preset == "pipe_organ",
+                          "\(preset) is not a preset name")
+        }
+        // Own image wins over a borrowed one; unknown names fall through to nil
+        // (→ generated scene).
+        XCTAssertEqual(Backdrop.imageSlug(for: "Church Organ", available: ["pipe_organ"]), "pipe_organ")
+        XCTAssertEqual(Backdrop.imageSlug(for: "Church Organ", available: ["pipe_organ", "church_organ"]),
+                       "church_organ")
+        XCTAssertNil(Backdrop.imageSlug(for: "Mystic Pad", available: ["pipe_organ"]))
+    }
+
+    func testAbstractSceneIsDeterministicAndInFrame() {
+        let a = AbstractScene.layout(seed: "mystic_pad")
+        let b = AbstractScene.layout(seed: "mystic_pad")
+        let c = AbstractScene.layout(seed: "dark_matter")
+        XCTAssertEqual(a.glows, b.glows)
+        XCTAssertEqual(a.stars, b.stars)
+        XCTAssertNotEqual(a.glows, c.glows)
+        for g in a.glows + c.glows {
+            XCTAssertTrue((0...1).contains(g.x) && (0...0.5).contains(g.y))   // upper half
+            XCTAssertTrue((0...1).contains(g.opacity))
+        }
+        XCTAssertEqual(a.glows.first?.hueTurns, 0)   // first glow is the preset colour itself
+    }
+
+    func testBackdropColourHelpers() {
+        let c = BackdropPalette.RGB(hex: "#FF8000")
+        XCTAssertEqual(c.r, 1, accuracy: 1e-9)
+        XCTAssertEqual(c.g, 128.0 / 255, accuracy: 1e-9)
+        XCTAssertEqual(c.b, 0, accuracy: 1e-9)
+        XCTAssertEqual(BackdropPalette.RGB(hex: "nonsense"), BackdropPalette.RGB(r: 0.5, g: 0.5, b: 0.5))
+        // A third of a turn takes pure red to pure green; a full turn is the identity.
+        let green = BackdropPalette.RGB(r: 1, g: 0, b: 0).rotated(byTurns: 1.0 / 3)
+        XCTAssertEqual(green.r, 0, accuracy: 1e-6)
+        XCTAssertEqual(green.g, 1, accuracy: 1e-6)
+        XCTAssertEqual(green.b, 0, accuracy: 1e-6)
+        let same = c.rotated(byTurns: 1)
+        XCTAssertEqual(same.r, c.r, accuracy: 1e-6)
+        XCTAssertEqual(same.g, c.g, accuracy: 1e-6)
+        XCTAssertEqual(same.b, c.b, accuracy: 1e-6)
+    }
 }

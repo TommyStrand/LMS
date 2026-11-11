@@ -38,14 +38,24 @@ struct ContentView: View {
                 themeManager.screenBackground.ignoresSafeArea()
 
                 // Instrument scene (Settings → Instrument backdrop). Decorative only.
-                if let url = themeManager.backdropURL {
-                    BackdropView(url: url, dim: themeManager.backdropDim,
-                                 trailingFraction: geo.size.width > 680 ? 0.66 : 1) { palette in
-                        withAnimation(.easeInOut(duration: 0.45)) {
-                            themeManager.setPalette(palette, for: url)
+                if let source = themeManager.backdrop {
+                    let fraction: CGFloat = geo.size.width > 680 ? 0.66 : 1
+                    Group {
+                        switch source {
+                        case .image(let url):
+                            BackdropView(url: url, dim: themeManager.backdropDim,
+                                         trailingFraction: fraction) { palette in
+                                withAnimation(.easeInOut(duration: 0.45)) {
+                                    themeManager.setPalette(palette, for: url)
+                                }
+                            }
+                        case .abstract(let seed, let color):
+                            AbstractBackdropView(seed: seed, color: color,
+                                                 dim: themeManager.backdropDim,
+                                                 trailingFraction: fraction)
                         }
                     }
-                        .transition(.opacity)
+                    .transition(.opacity)
                 }
 
                 // Scanline overlay (Radar theme)
@@ -67,7 +77,8 @@ struct ContentView: View {
             looper.audioEngine = engine
             engine.looper      = looper
             engine.yAxisMorph  = themeManager.yAxisMorph
-            themeManager.activePresetName = currentPreset.name
+            themeManager.activePresetName  = currentPreset.name
+            themeManager.activePresetColor = currentPreset.color
         }
         .onChange(of: themeManager.yAxisMorph) { _, morph in
             engine.yAxisMorph = morph
@@ -101,7 +112,8 @@ struct ContentView: View {
         // MARK: - AirPlay 2 / Now Playing updates
         .onChange(of: selectedPresetIndex) { _, idx in
             withAnimation(.easeInOut(duration: 0.4)) {
-                themeManager.activePresetName = SynthPreset.presets[idx].name
+                themeManager.activePresetName  = SynthPreset.presets[idx].name
+                themeManager.activePresetColor = SynthPreset.presets[idx].color
             }
             nowPlaying.update(presetName: SynthPreset.presets[idx].name,
                               isLiveInstrument: true, isPlaying: false)
@@ -616,25 +628,27 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 // MARK: - Instrument backdrop
 
-/// Full-screen scene behind the main UI. The image is decoded off the main thread
-/// (preparingForDisplay) so switching presets never stalls touch handling, and
-/// cross-fades when the preset changes.
-struct BackdropView: View {
-    let url: URL
+/// Shared framing for every backdrop: the scene sits against the trailing edge,
+/// feathers out on its leading side, and is dimmed for legibility.
+struct BackdropFrame<Content: View>: View {
     let dim: Double
     /// Share of the screen width the scene occupies, anchored to the trailing
     /// edge. On iPad (0.66) it sits behind the play surface and feathers out
     /// before the preset list and controls on the left; 1 = full screen.
-    var trailingFraction: CGFloat = 1
-    /// Called on the main thread with the colours sampled from each loaded scene.
-    var onPalette: (BackdropPalette) -> Void = { _ in }
-    @State private var image: UIImage?
+    let trailingFraction: CGFloat
+    @ViewBuilder let scene: () -> Content
 
     var body: some View {
         GeometryReader { geo in
-            let width = geo.size.width * trailingFraction
-            scene
-                .frame(width: width, height: geo.size.height)
+            Color.black
+                .overlay { scene() }
+                .overlay {
+                    // Dim, a little lighter at the top where the instrument sits and
+                    // darker towards the floor so grid labels stay readable.
+                    LinearGradient(colors: [.black.opacity(dim * 0.9), .black.opacity(min(0.97, dim + 0.1))],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .frame(width: geo.size.width * trailingFraction, height: geo.size.height)
                 .clipped()
                 .mask {
                     // Soft left edge so the scene melts into the plain background.
@@ -648,6 +662,30 @@ struct BackdropView: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// A painted scene from Resources/Backgrounds. The image is decoded off the main
+/// thread (preparingForDisplay) so switching presets never stalls touch handling,
+/// and cross-fades when the preset changes.
+struct BackdropView: View {
+    let url: URL
+    let dim: Double
+    var trailingFraction: CGFloat = 1
+    /// Called on the main thread with the colours sampled from each loaded scene.
+    var onPalette: (BackdropPalette) -> Void = { _ in }
+    @State private var image: UIImage?
+
+    var body: some View {
+        BackdropFrame(dim: dim, trailingFraction: trailingFraction) {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity)
+                    .id(ObjectIdentifier(image))
+            }
+        }
         .task(id: url) {
             let loaded = await Task.detached(priority: .userInitiated) { () -> (UIImage, BackdropPalette)? in
                 guard let raw = UIImage(contentsOfFile: url.path) else { return nil }
@@ -676,24 +714,40 @@ struct BackdropView: View {
         }
         return drawn ? px : []
     }
+}
 
-    private var scene: some View {
-        Color.black
-            .overlay {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .transition(.opacity)
-                        .id(ObjectIdentifier(image))
+/// Generated scene for presets without an image (the synth pads): soft glows in
+/// hues around the preset colour and a few stars, laid out by `AbstractScene`.
+struct AbstractBackdropView: View {
+    let seed: String
+    let color: BackdropPalette.RGB
+    let dim: Double
+    var trailingFraction: CGFloat = 1
+
+    var body: some View {
+        let layout = AbstractScene.layout(seed: seed)
+        let light  = color.scaled(toMax: 0.9)   // dark preset colours still glow
+        BackdropFrame(dim: dim, trailingFraction: trailingFraction) {
+            Canvas { ctx, size in
+                for glow in layout.glows {
+                    let c      = light.rotated(byTurns: glow.hueTurns).color
+                    let centre = CGPoint(x: glow.x * size.width, y: glow.y * size.height)
+                    let radius = glow.radius * size.width
+                    let rect   = CGRect(x: centre.x - radius, y: centre.y - radius,
+                                        width: radius * 2, height: radius * 2)
+                    ctx.fill(Path(ellipseIn: rect),
+                             with: .radialGradient(Gradient(colors: [c.opacity(glow.opacity), c.opacity(0)]),
+                                                   center: centre, startRadius: 0, endRadius: radius))
+                }
+                for star in layout.stars {
+                    let rect = CGRect(x: star.x * size.width, y: star.y * size.height,
+                                      width: star.size, height: star.size)
+                    ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(star.opacity)))
                 }
             }
-            .overlay {
-                // Dim, a little lighter at the top where the instrument sits and
-                // darker towards the floor so grid labels stay readable.
-                LinearGradient(colors: [.black.opacity(dim * 0.9), .black.opacity(min(0.97, dim + 0.1))],
-                               startPoint: .top, endPoint: .bottom)
-            }
+            .id(seed)
+            .transition(.opacity)
+        }
     }
 }
 

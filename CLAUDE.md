@@ -18,8 +18,11 @@ git pull origin claude/ios-music-creation-app-1Bpf8
 - `OmnisphereSynth/Resources/Samples/` — WAV samples (folder reference in Xcode; subfolders are bundled automatically). Some folders hold synthesised WAVs (generate_samples.py); others hold real recordings (import_samples.py).
 - `OmnisphereSynth/Resources/Backgrounds/` — per-preset backdrop scenes (folder reference, bundled as
   `Backgrounds/`). File name = `Backdrop.slug(presetName)` + `.webp` (e.g. "Suitcase '73" → `suitcase_73.webp`);
-  a preset without a file just shows the plain theme background. Art is generated in ChatGPT in one shared
-  painterly night style, instrument in the upper half, no text/logos. Spare variants live in `design/backgrounds/`
+  a preset without its own file borrows a related scene (`Backdrop.borrowed`, e.g. Church Organ → pipe_organ,
+  the tape/string machines → `vintage_studio.webp`), and anything else (synth pads, flute) gets a generated
+  `AbstractScene` in the preset colour — so every preset has a backdrop. Art is generated in ChatGPT in one shared
+  painterly night style, instrument in the upper half, no text/logos. Adding `<slug>.webp` later overrides the
+  borrowed/generated scene automatically. Spare variants live in `design/backgrounds/`
 - `Scripts/generate_samples.py` — regenerates the synthesised WAV samples (piano/strings/flute)
 - `Scripts/import_samples.py` — converts free sample libraries (Salamander piano, VSCO2 strings/flute, SFZ organ, or generic) to the app's mono 16-bit 44.1 kHz `{note}_{velocity}.wav` layout. Each recording is written under its OWN source note (never a target grid note — that played it out of tune), the target folder is cleared first, and for git-tracked instruments the descriptor's `rootNotes` is patched to the notes written and `loops` set to false (real recordings are one-shot). `validate_samples.py` checks folders against those declared `rootNotes`
 - `Scripts/validate_samples.py` — validates the sample library (run in QA / CI)
@@ -63,7 +66,7 @@ to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
 patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
-sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` (scene colours, image names), `RenderParams` (preset →
+sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `Backdrop.imageSlug` / `AbstractScene` (scene colours, image names, borrowed and generated scenes), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions

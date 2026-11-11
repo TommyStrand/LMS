@@ -269,7 +269,7 @@ struct SettingsView: View {
             .opacity(themeManager.backdropEnabled ? 1 : 0.4)
 
             Text(theme.colorScheme == .dark
-                 ? "\(Backdrop.library.count) scenes so far. Presets without a scene keep the plain background."
+                 ? "\(Backdrop.library.count) painted scenes. Presets without their own borrow a related one; synth pads get a generated scene in their colour."
                  : "Backdrops are available with the dark themes.")
                 .font(.system(size: 11, design: theme.fontDesign))
                 .foregroundColor(theme.secondaryText)
