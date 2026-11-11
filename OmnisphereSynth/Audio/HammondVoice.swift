@@ -4,10 +4,19 @@ import Foundation
 // Returns true stereo from Leslie (different L/R).
 final class HammondVoice: AnyVoice {
 
-    // Drawbar ratios (footage) and classic "888000000" rock levels
+    // Drawbar ratios in footage order: 16' 8' 5⅓' 4' 2⅔' 2' 1⅗' 1⅓' 1'.
+    //
+    // Registration: a warm, full "all-round" setting. It used to be only the first
+    // three drawbars at equal level — sub-octave, fundamental and a FIFTH as loud
+    // as the fundamental — which is hollow on single notes and puts a parallel
+    // fifth on every note of a chord. The fifth is now a colour, and the 4', 2'
+    // and 1' drawbars add the body and the shine.
     private static let ratios:     [Double] = [0.5,1.0,1.5,2.0,3.0,4.0,5.0,6.0,8.0]
-    private static let levels:     [Float]  = [0.8,0.8,0.8,0.0,0.0,0.0,0.0,0.0,0.0]
+    private static let levels:     [Float]  = [0.70,0.80,0.35,0.60,0.22,0.30,0.0,0.0,0.14]
     private static let detunes:    [Double] = [0.0,0.0,1.2,-0.8,0.5,-1.1,0.9,-0.6,0.3]
+    // Constant per-drawbar detune ratios. (These were recomputed with pow() for
+    // every partial of every voice on every sample — nine pow() calls per sample.)
+    private static let detuneRatios: [Double] = detunes.map { pow(2.0, $0 / 1200.0) }
     private static let totalLevel: Double   = levels.reduce(0) { $0 + Double($1) }
 
     var filterCutoffMod: Float = 0.5  // → brightness (pad Y): one-pole tone LPF
@@ -26,6 +35,7 @@ final class HammondVoice: AnyVoice {
     // Percussion (2nd harmonic, fast 40 ms decay)
     private var percPhase: Double = 0
     private var percEnv:   Double = 1.0
+    private let percDecay: Double
 
     // Leslie
     private var hornPhase:  Double = 0
@@ -52,6 +62,7 @@ final class HammondVoice: AnyVoice {
         self.sampleRate = sampleRate
         self.phases     = Array(repeating: 0, count: Self.ratios.count)
         self.clickLeft  = Int(sampleRate * 0.012)
+        self.percDecay  = exp(-1.0 / (0.07 * sampleRate))
         leslieBuffer    = UnsafeMutablePointer<Float>.allocate(capacity: 4096)
         leslieBuffer.initialize(repeating: 0, count: 4096)
     }
@@ -82,17 +93,20 @@ final class HammondVoice: AnyVoice {
         // Additive synthesis
         var sum: Double = 0
         for k in 0..<Self.ratios.count {
-            let df = pow(2.0, Self.detunes[k] / 1200.0)
-            let f  = freq * Self.ratios[k] * df * pitch
+            let level = Self.levels[k]
+            if level == 0 { continue }                    // drawbar pushed in
+            let f  = freq * Self.ratios[k] * Self.detuneRatios[k] * pitch
             phases[k] = (phases[k] + f * dt).truncatingRemainder(dividingBy: 1.0)
-            sum += sin(phases[k] * 2 * .pi) * Double(Self.levels[k])
+            sum += sin(phases[k] * 2 * .pi) * Double(level)
         }
         sum /= Self.totalLevel
 
         // Percussion (2nd harmonic)
         percPhase = (percPhase + freq * 2.0 * pitch * dt).truncatingRemainder(dividingBy: 1.0)
-        percEnv   = max(0, percEnv - dt / 0.04)
-        sum      += sin(percPhase * 2 * .pi) * percEnv * 0.35
+        // "Fast" percussion: an exponential ping of roughly 200 ms. (It was a
+        // 40 ms straight-line blip, closer to a click than to the B3's percussion.)
+        percEnv  *= percDecay
+        sum      += sin(percPhase * 2 * .pi) * percEnv * 0.30
 
         // Key click — softer + lowpassed so a flurry of note-ons doesn't
         // pile high-frequency transients into the reverb/delay tail.

@@ -214,8 +214,10 @@ final class SamplerEngine {
             slot.player.play()
             rampVolume(idx: idx, token: token, to: target, duration: instrument.attack)
         } else {
-            // One-shot: play once at full level and let the tail ring out.
-            slotNote.removeValue(forKey: idx)
+            // One-shot: play once at full level. A damped instrument (piano) is
+            // remembered like a sustaining note so noteOff can fade it; otherwise
+            // the tail rings out on its own.
+            if instrument.damps { slotNote[idx] = midi } else { slotNote.removeValue(forKey: idx) }
             let seconds = Double(buf.frameLength) / buf.format.sampleRate / Double(max(0.25, min(4.0, rate)))
             slotBusyUntil[idx] = ProcessInfo.processInfo.systemUptime + seconds + 0.05
             slot.player.volume = target
@@ -290,7 +292,10 @@ final class SamplerEngine {
     /// A slot is busy if it's playing AND (for one-shots) its buffer hasn't ended.
     private func isBusy(_ idx: Int) -> Bool {
         guard pool[idx].player.isPlaying else { return false }
-        if slotNote[idx] != nil { return true }                    // held (sustaining)
+        // Held sustaining note: busy until released. (A damped one-shot is also in
+        // slotNote but has an end time — a piano note that has rung out under a
+        // held finger frees its slot.)
+        if slotNote[idx] != nil && slotBusyUntil[idx] == nil { return true }
         return ProcessInfo.processInfo.systemUptime < (slotBusyUntil[idx] ?? 0)
     }
 

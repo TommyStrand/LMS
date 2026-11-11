@@ -37,6 +37,8 @@ final class OrganVoice: AnyVoice {
 
     // Per-partial slight detuning for warmth (cents)
     private static let detuneOffsets: [Double] = [0, 0, 1.2, -0.8, 0.5, -1.1, 0.9, -0.6, 0.3]
+    // Constant ratios — were recomputed with pow() per partial per sample.
+    private static let detuneRatios: [Double] = detuneOffsets.map { pow(2.0, $0 / 1200.0) }
 
     enum EnvStage { case idle, attack, sustain, release }
 
@@ -90,8 +92,7 @@ final class OrganVoice: AnyVoice {
         // Sum drawbar partials
         var sum: Double = 0
         for i in 0..<Self.ratios.count {
-            let detuneCents = Self.detuneOffsets[i]
-            let detuneFactor = pow(2.0, detuneCents / 1200.0)
+            let detuneFactor = Self.detuneRatios[i]
             let f = freq * Self.ratios[i] * detuneFactor * bendFactor * vibFactor * (1.0 + tremVal * 0.3)
             phases[i] = (phases[i] + f * dt).truncatingRemainder(dividingBy: 1.0)
             sum += sin(phases[i] * 2 * .pi) * Double(Self.churchLevels[i])

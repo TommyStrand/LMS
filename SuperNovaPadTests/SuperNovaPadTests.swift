@@ -93,12 +93,19 @@ final class SuperNovaPadTests: XCTestCase {
     }
 
     func testEverySamplerPresetReferencesALoopOrOneShotConsistently() {
-        // Looping instruments need a non-trivial attack/release ramp; one-shots don't ramp.
-        XCTAssertTrue(SamplerInstrument.stringEnsemble.loops)
-        XCTAssertTrue(SamplerInstrument.concertFlute.loops)
+        // Strings and flute are real recordings: not whole-buffer loops, but held
+        // via a sustain loop, with a non-trivial attack/release ramp.
+        for inst in [SamplerInstrument.stringEnsemble, .concertFlute] {
+            XCTAssertFalse(inst.loops, "\(inst.id): a real take looped whole restarts its attack")
+            XCTAssertTrue(inst.sustainLoop, "\(inst.id) must hold while the key is down")
+            XCTAssertGreaterThan(inst.attack, 0)
+            XCTAssertGreaterThan(inst.release, 0)
+        }
+        // The piano is a one-shot that is damped on release (not rung out for ever).
         XCTAssertFalse(SamplerInstrument.grandPiano.loops)
-        XCTAssertGreaterThan(SamplerInstrument.stringEnsemble.attack, 0)
-        XCTAssertGreaterThan(SamplerInstrument.stringEnsemble.release, 0)
+        XCTAssertFalse(SamplerInstrument.grandPiano.sustainLoop)
+        XCTAssertTrue(SamplerInstrument.grandPiano.damps)
+        XCTAssertGreaterThanOrEqual(SamplerInstrument.grandPiano.release, 0.3)
     }
 
     // MARK: - Musical scale

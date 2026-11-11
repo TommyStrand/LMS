@@ -181,6 +181,11 @@ struct SamplerInstrument: Equatable, Hashable {
     /// note sustains while the key is held instead of stopping when the recording
     /// ends. Ignored for synthesised `loops` instruments (they loop whole).
     var sustainLoop = false
+    /// true → a one-shot note is DAMPED when the key is released: it fades out
+    /// over `release` instead of ringing for the whole recording. A piano without
+    /// this behaves as if the sustain pedal were held down for ever, and real
+    /// piano recordings (6–8 s of tail) pile up into mud.
+    var damps = false
 
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
@@ -188,33 +193,38 @@ struct SamplerInstrument: Equatable, Hashable {
         let hiVel:     Int   // highest MIDI velocity mapped to this zone
     }
 
+    // Grand piano, strings and flute are REAL RECORDINGS installed by
+    // Scripts/fetch_free_samples.py (Salamander Grand Piano V3, CC BY 3.0; VSCO 2
+    // Community Edition, CC0). They are in git, so `rootNotes` is exact.
     static let grandPiano = SamplerInstrument(
         id: "grand_piano", displayName: "Grand Piano",
-        rootNotes: Array(stride(from: 24, through: 96, by: 3)),
+        rootNotes: [24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72, 75, 78, 81, 84, 87, 90, 93, 96],
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
-        ]
+        ],
+        release: 1.0,          // damper: a lifted key fades over a second, not instantly
+        damps: true
     )
     static let stringEnsemble = SamplerInstrument(
         id: "string_ensemble", displayName: "String Ensemble",
-        rootNotes: Array(stride(from: 36, through: 84, by: 3)),
+        rootNotes: [36, 40, 43, 47, 50, 53, 55, 59, 62, 66, 69, 72, 76, 79, 83],
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
-        loops: true, attack: 0.09, release: 0.35,  // slow bow swell + smooth release
-        sustainLoop: true                           // if real recordings are imported
+        loops: false, attack: 0.09, release: 0.35,  // slow bow swell + smooth release
+        sustainLoop: true                           // attack once, then the steady bowing loops
     )
     static let concertFlute = SamplerInstrument(
         id: "concert_flute", displayName: "Concert Flute",
-        rootNotes: Array(stride(from: 60, through: 96, by: 3)),
+        rootNotes: [60, 64, 69, 72, 76, 81, 84, 88, 93, 96],
         velocityLayers: [
             VelocityLayer(midiValue: 64,  loVel: 0,   hiVel: 63),
             VelocityLayer(midiValue: 110, loVel: 64,  hiVel: 127),
         ],
-        loops: true, attack: 0.04, release: 0.18,   // breath onset + gentle release
-        sustainLoop: true                           // if real recordings are imported
+        loops: false, attack: 0.04, release: 0.18,   // breath onset + gentle release
+        sustainLoop: true                           // attack once, then the held tone loops
     )
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
@@ -255,7 +265,8 @@ extension SynthPreset {
             name: "Hammond B3",
             color: "#B45309",
             voiceMode: .hammondB3,
-            reverbMix: 0.22, delayMix: 0.04, delayTime: 0.25,
+            reverbMix: 0.22, delayMix: 0.04, delayTime: 0.25, chorusMix: 0.25,
+            distortionAmount: 0.12,                        // a little valve warmth
             // Leslie rotation and key-click are built into HammondVoice —
             // no external tremulo or grit needed here.
             iconStyle: .hammondTonewheel

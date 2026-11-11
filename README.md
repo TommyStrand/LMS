@@ -158,3 +158,8 @@ OmnisphereSynthVST/       VST3/AU plugin (C++ / JUCE)
 - macOS 12 or later
 - Xcode 14+ and CMake 3.22+ for building
 - Any VST3 or AU host (Logic Pro, Ableton Live, Reaper, etc.)
+
+## Credits
+
+Sample and artwork credits, including the attribution required by the Salamander
+Grand Piano's CC BY 3.0 licence, are in [CREDITS.md](CREDITS.md).

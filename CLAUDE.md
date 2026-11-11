@@ -15,7 +15,8 @@ git pull origin claude/ios-music-creation-app-1Bpf8
 - `OmnisphereSynth/Audio/` — AudioEngine, SamplerEngine, voice files, effects
 - `OmnisphereSynth/Views/` — SwiftUI views
 - `OmnisphereSynth/Models/` — SynthPreset, SamplerInstrument
-- `OmnisphereSynth/Resources/Samples/` — WAV samples (folder reference in Xcode; subfolders are bundled automatically). Some folders hold synthesised WAVs (generate_samples.py); others hold real recordings (import_samples.py).
+- `OmnisphereSynth/Resources/Samples/` — WAV samples (folder reference in Xcode; subfolders are bundled automatically). Grand piano, strings and flute are REAL recordings in git, installed by `Scripts/fetch_free_samples.py` (Salamander Grand Piano V3, CC BY 3.0 — the credit in Settings → About and CREDITS.md is a licence requirement; VSCO 2 CE, CC0). `generate_samples.py` still produces the old synthesised set if ever needed.
+- `Scripts/fetch_free_samples.py` — downloads those recordings file by file from GitHub (raw.githubusercontent.com), converts with ffmpeg (mono 16-bit 44.1 kHz, leading silence removed, trimmed, peak-normalised) and patches the descriptors. VSCO 2 names octaves one lower than standard (its "C3" = MIDI 60)
 - `OmnisphereSynth/Resources/Backgrounds/` — per-preset backdrop scenes (folder reference, bundled as
   `Backgrounds/`). File name = `Backdrop.slug(presetName)` + `.webp` (e.g. "Suitcase '73" → `suitcase_73.webp`);
   a preset without its own file borrows a related scene (`Backdrop.borrowed`, e.g. Church Organ → pipe_organ,
@@ -70,6 +71,10 @@ sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `B
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- Sampler instruments: piano is a one-shot with `damps: true` (a lifted key fades over `release` — without it
+  real 6–8 s piano tails behave like a permanently held sustain pedal); strings/flute are `loops: false` +
+  `sustainLoop: true`. Hammond registration is a fuller drawbar set (the old 16'+8'+5⅓' at equal level was
+  hollow and put a parallel fifth on every note); constant per-partial detune ratios are precomputed
 - Sound engine (the user can't describe DSP; "sounds bad" was traced to these): `SynthVoice` uses PolyBLEP
   saw/square (naive ones alias — measured ~18 dB more inharmonic hash), stereo unison (`unisonCents`), a
   filter envelope + key tracking + velocity brightness, optional 2-op FM on a sine osc 1 (`fmIndex`, bells/

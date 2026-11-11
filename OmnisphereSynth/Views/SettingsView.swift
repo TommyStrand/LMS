@@ -212,6 +212,8 @@ struct SettingsView: View {
                             infoRow("Play modes", value: PlayMode.allCases.map(\.label).joined(separator: " · "), theme: theme)
                             infoRow("Effects",    value: "Trem · Chorus · Drive · Phaser · A.Wah · Lo-Fi · Grit · Reverb · Delay · Shimmer · S.Echo · B.Tape · Bloom · Waver", theme: theme)
                             infoRow("Also",       value: "Looper · Drum machine · MIDI in · Recording · AirPlay", theme: theme)
+                            // CC BY 3.0 requires this credit — do not remove it.
+                            infoRow("Samples",    value: "Grand piano: Salamander Grand Piano V3 by Alexander Holm (CC BY 3.0). Strings and flute: VSCO 2 Community Edition, Versilian Studios (CC0).", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)
