@@ -215,6 +215,13 @@ struct AppTheme: Identifiable {
     let colorScheme: ColorScheme
     let scanlines: Bool         // CRT scanline overlay
     let cornerRadius: CGFloat
+    /// True for the see-through variant used over an instrument backdrop (see
+    /// `glass(palette:)`): panels blur what is behind them and get a light edge.
+    var isGlass: Bool = false
+
+    /// Corner radius for header chips and small buttons: pill-like on glass,
+    /// the theme's own tighter corners otherwise.
+    var chipRadius: CGFloat { isGlass ? 15 : cornerRadius / 1.5 }
 
     func accent(for presetColor: Color) -> Color {
         accentOverride ?? presetColor
@@ -314,7 +321,7 @@ struct AppTheme: Identifiable {
     /// doesn't sit next to cool neon chrome.
     func glass(palette: BackdropPalette? = nil) -> AppTheme {
         if let p = palette {
-            return AppTheme(id: id, name: name, icon: icon,
+            var tinted = AppTheme(id: id, name: name, icon: icon,
                             appBackground: p.ambient.scaled(toMax: 0.10).color.opacity(0.30),
                             panelBackground: p.ambient.scaled(toMax: 0.17).color.opacity(0.62),
                             panelBorder: p.key.color.opacity(0.18),
@@ -327,8 +334,10 @@ struct AppTheme: Identifiable {
                             colorScheme: colorScheme,
                             scanlines: scanlines,
                             cornerRadius: cornerRadius)
+            tinted.isGlass = true
+            return tinted
         }
-        return AppTheme(id: id, name: name, icon: icon,
+        var plain = AppTheme(id: id, name: name, icon: icon,
                  appBackground: appBackground.opacity(0.30),
                  panelBackground: panelBackground.opacity(0.55),
                  panelBorder: panelBorder,
@@ -341,6 +350,48 @@ struct AppTheme: Identifiable {
                  colorScheme: colorScheme,
                  scanlines: scanlines,
                  cornerRadius: cornerRadius)
+        plain.isGlass = true
+        return plain
+    }
+}
+
+// MARK: - Panel surface
+
+/// The standard panel look — fill, rounded clip, 1 pt border — in one place.
+/// On a glass theme the panel also blurs the backdrop behind it (frosted glass),
+/// gets a lit top edge and a soft drop shadow, which is what gives the UI depth
+/// over a scene. `border` overrides the edge colour (record / CPU warnings).
+struct PanelSurface: ViewModifier {
+    let theme: AppTheme
+    let radius: CGFloat
+    var border: Color? = nil
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius)
+        if theme.isGlass {
+            content
+                .background(theme.panelBackground)
+                .background(.ultraThinMaterial)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(
+                    border.map { AnyShapeStyle($0) }
+                        ?? AnyShapeStyle(LinearGradient(colors: [.white.opacity(0.24), .white.opacity(0.05)],
+                                                        startPoint: .top, endPoint: .bottom)),
+                    lineWidth: 1))
+                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+        } else {
+            content
+                .background(theme.panelBackground)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(border ?? theme.panelBorder, lineWidth: 1))
+        }
+    }
+}
+
+extension View {
+    func panelSurface(_ theme: AppTheme, radius: CGFloat, border: Color? = nil) -> some View {
+        modifier(PanelSurface(theme: theme, radius: radius, border: border))
     }
 }
 

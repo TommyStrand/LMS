@@ -75,6 +75,10 @@ audio-thread scalars), plus descriptor and scale invariants.
   full-width play surface, sound drawer (`ControlsView(wide: true)`, toggled by the footer SOUND button, closed
   at launch), footer (looper + SOUND). The backdrop is the background of everything below the preset strip.
   iPhone keeps the stacked layout with a full-screen backdrop
+- Panels and chips are styled with `.panelSurface(theme, radius:border:)` (AppTheme.swift), not hand-rolled
+  background + clipShape + border. On a glass theme (`theme.isGlass`) it adds a blur material, a lit top edge
+  and a soft shadow; header chips use `theme.chipRadius`. iPad header keeps only play-time controls; the
+  visualizer, performance meter (`showHeaderMeter`, auto-shown at ≥85 % CPU) and Settings live in the More menu
 - Backdrops: `ThemeManager.current` returns `base.glass()` (translucent surfaces) while a backdrop shows;
   screens with their own background (Settings) use `ThemeManager.base`. Dark themes only. `BackdropView`
   decodes off the main thread and cross-fades on preset change. It also samples a `BackdropPalette` from a

@@ -156,12 +156,7 @@ struct FXPanel<Content: View>: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: theme.cornerRadius)
-                .strokeBorder(theme.panelBorder, lineWidth: 1)
-        )
+        .panelSurface(theme, radius: theme.cornerRadius)
     }
 }
 

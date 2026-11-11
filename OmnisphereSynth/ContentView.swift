@@ -27,6 +27,9 @@ struct ContentView: View {
     @State private var showShareSheet  = false
     @State private var recBlink        = false
     @State private var showBlob        = false   // blob background visualizer
+    /// CPU / RAM readout in the iPad header (More menu). Off by default; the meter
+    /// still appears by itself while the CPU is pegged.
+    @AppStorage("showHeaderMeter") private var showMeter = false
 
     // Initialise NowPlayingManager once so remote commands are registered early
     private let nowPlaying = NowPlayingManager.shared
@@ -299,25 +302,39 @@ struct ContentView: View {
 
     // MARK: - Header
     //
-    // Organised into three labelled clusters separated by dividers rather than a
-    // single row of multi-purpose icons:
-    //   • Transport  — transpose, play mode, drum machine
-    //   • Status     — voice activity, MIDI, live CPU/RAM meter
-    //   • System     — controls, record, AirPlay, settings
-    // `compact` (iPhone) tightens spacing, drops the dividers and the brand
-    // subtitle, and keeps the cycling play-mode button; expanded (iPad) uses the
-    // extra width for an explicit segmented play-mode picker and the full meter.
+    // iPad: what is playing on the left, the two mode switches (PLAY / DRUMS and
+    // the play mode) in the middle, and on the right only what is needed while
+    // playing — octave, MIDI activity, record, AirPlay — plus a More menu holding
+    // the visualizer, the performance meter and Settings.
+    // iPhone (`compact`): one tight row of icon buttons, no menu.
 
     private func header(theme: AppTheme, compact: Bool) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
-        return HStack(spacing: compact ? 8 : 14) {
+        return HStack(spacing: compact ? 8 : 10) {
             brandView(theme: theme, accent: accent, compact: compact)
             Spacer(minLength: 8)
-            transportGroup(theme: theme, accent: accent, compact: compact)
-            if !compact { groupDivider(theme: theme) }
-            statusGroup(theme: theme, accent: accent, compact: compact)
-            if !compact { groupDivider(theme: theme) }
-            systemGroup(theme: theme, accent: accent, compact: compact)
+            if compact {
+                transposeControls(theme: theme, accent: accent)
+                modeToggle(theme: theme, accent: accent, compact: true)
+                if !showDrumMachine {
+                    playModeControl(theme: theme, accent: accent, compact: true)
+                }
+                if midi.isConnected { midiChip(theme: theme, accent: accent) }
+                HeaderMeter(compact: true, theme: theme)
+                compactSystemButtons(theme: theme, accent: accent)
+            } else {
+                modeToggle(theme: theme, accent: accent, compact: false)
+                if !showDrumMachine {
+                    playModeControl(theme: theme, accent: accent, compact: false)
+                }
+                Spacer(minLength: 8)
+                transposeControls(theme: theme, accent: accent)
+                if midi.isConnected { midiChip(theme: theme, accent: accent) }
+                HeaderMeter(compact: false, theme: theme, onlyWhenWarning: !showMeter)
+                recordButton(theme: theme, accent: accent)
+                airPlayButton(theme: theme)
+                moreMenu(theme: theme)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -326,48 +343,52 @@ struct ContentView: View {
 
     // MARK: Header clusters
 
-    private func transportGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
+    private func compactSystemButtons(theme: AppTheme, accent: Color) -> some View {
         HStack(spacing: 8) {
-            transposeControls(theme: theme, accent: accent)
-            modeToggle(theme: theme, accent: accent, compact: compact)
-            if !showDrumMachine {
-                playModeControl(theme: theme, accent: accent, compact: compact)
+            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
+                       active: showControls, theme: theme) {
+                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
             }
-        }
-    }
-
-    private func statusGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
-        HStack(spacing: 8) {
-            if !compact { voiceDots(theme: theme, accent: accent) }
-            if midi.isConnected { midiChip(theme: theme, accent: accent) }
-            HeaderMeter(compact: compact, theme: theme)
-        }
-    }
-
-    private func systemGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
-        HStack(spacing: 8) {
-            // iPad opens the controls from the footer's SOUND button instead.
-            if compact {
-                iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
-                           active: showControls, theme: theme) {
-                    withAnimation(.spring(response: 0.3)) { showControls.toggle() }
-                }
-            }
-            // Blob visualizer toggle
             iconButton(systemName: "waveform.circle", active: showBlob, theme: theme) {
                 withAnimation(.spring(response: 0.4)) { showBlob.toggle() }
             }
             recordButton(theme: theme, accent: accent)
-            AirPlayButton(tintColor: UIColor(theme.secondaryText))
-                .frame(width: 36, height: 36)
-                .background(theme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-                .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                    .strokeBorder(theme.panelBorder, lineWidth: 1))
+            airPlayButton(theme: theme)
             iconButton(systemName: "gearshape", active: false, theme: theme) {
                 showSettings = true
             }
         }
+    }
+
+    private func airPlayButton(theme: AppTheme) -> some View {
+        AirPlayButton(tintColor: UIColor(theme.secondaryText))
+            .frame(width: 36, height: 36)
+            .panelSurface(theme, radius: theme.chipRadius)
+    }
+
+    /// iPad: the less-used actions, behind one button.
+    private func moreMenu(theme: AppTheme) -> some View {
+        Menu {
+            Toggle(isOn: $showBlob) {
+                Label("Visualizer", systemImage: "waveform.circle")
+            }
+            Toggle(isOn: $showMeter) {
+                Label("Performance meter", systemImage: "cpu")
+            }
+            Divider()
+            Button {
+                showSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+                .frame(width: 36, height: 36)
+                .panelSurface(theme, radius: theme.chipRadius)
+        }
+        .accessibilityLabel("More")
     }
 
     // MARK: Header pieces
@@ -435,10 +456,7 @@ struct ContentView: View {
                     .frame(width: 30, height: 30)
             }
         }
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
+        .panelSurface(theme, radius: theme.chipRadius)
     }
 
     @ViewBuilder
@@ -468,15 +486,12 @@ struct ContentView: View {
                             .foregroundColor(isOn ? .white : theme.secondaryText)
                             .frame(width: 36, height: 30)
                             .background(isOn ? accent : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 2))
+                            .clipShape(RoundedRectangle(cornerRadius: max(2, theme.chipRadius - 3)))
                     }
                 }
             }
             .padding(3)
-            .background(theme.panelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-            .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                .strokeBorder(theme.panelBorder, lineWidth: 1))
+            .panelSurface(theme, radius: theme.chipRadius)
         }
     }
 
@@ -501,10 +516,7 @@ struct ContentView: View {
             }
         }
         .padding(3)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
+        .panelSurface(theme, radius: theme.chipRadius)
     }
 
     private func modeSegment(icon: String, label: String, active: Bool,
@@ -523,18 +535,7 @@ struct ContentView: View {
             .padding(.horizontal, compact ? 0 : 10)
             .frame(width: compact ? 34 : nil, height: 30)
             .background(active ? accent : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 2))
-        }
-    }
-
-    private func voiceDots(theme: AppTheme, accent: Color) -> some View {
-        HStack(spacing: 4) {
-            ForEach(0..<6, id: \.self) { i in
-                Circle()
-                    .fill(i < engine.voices.count ? accent : theme.primaryText.opacity(0.12))
-                    .frame(width: 7, height: 7)
-                    .animation(.easeInOut(duration: 0.1), value: engine.voices.count)
-            }
+            .clipShape(RoundedRectangle(cornerRadius: max(2, theme.chipRadius - 3)))
         }
     }
 
@@ -551,17 +552,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-            .strokeBorder(theme.panelBorder, lineWidth: 1))
-    }
-
-    private func groupDivider(theme: AppTheme) -> some View {
-        RoundedRectangle(cornerRadius: 0.5)
-            .fill(theme.panelBorder)
-            .frame(width: 1, height: 26)
-            .opacity(0.7)
+        .panelSurface(theme, radius: theme.chipRadius)
     }
 
     private func iconButton(systemName: String, active: Bool, theme: AppTheme, action: @escaping () -> Void) -> some View {
@@ -572,12 +563,7 @@ struct ContentView: View {
                     ? theme.accent(for: Color(hex: currentPreset.color))
                     : theme.secondaryText)
                 .frame(width: 36, height: 36)
-                .background(theme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                        .strokeBorder(theme.panelBorder, lineWidth: 1)
-                )
+                .panelSurface(theme, radius: theme.chipRadius)
         }
     }
 
@@ -593,12 +579,6 @@ struct ContentView: View {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                    .fill(theme.panelBackground)
-                RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-                    .strokeBorder(recorder.isRecording
-                                  ? recColor.opacity(recBlink ? 0.9 : 0.3)
-                                  : theme.panelBorder, lineWidth: 1)
                 if recorder.isExporting {
                     ProgressView()
                         .scaleEffect(0.7)
@@ -612,6 +592,8 @@ struct ContentView: View {
                 }
             }
             .frame(width: 36, height: 36)
+            .panelSurface(theme, radius: theme.chipRadius,
+                          border: recorder.isRecording ? recColor.opacity(recBlink ? 0.9 : 0.3) : nil)
         }
         .disabled(recorder.isExporting)
     }
@@ -628,10 +610,18 @@ struct HeaderMeter: View {
     private let diag = Diagnostics.shared
     let compact: Bool
     let theme: AppTheme
+    /// iPad default: stay out of the header unless the CPU is pegged.
+    var onlyWhenWarning: Bool = false
 
     var body: some View {
         let cpuWarn = diag.cpuPercent >= 85
-        return HStack(spacing: 7) {
+        if !onlyWhenWarning || cpuWarn {
+            readout(cpuWarn: cpuWarn)
+        }
+    }
+
+    private func readout(cpuWarn: Bool) -> some View {
+        HStack(spacing: 7) {
             metric(icon: "cpu", value: String(format: "%.0f%%", diag.cpuPercent),
                    valueWidth: 30, warn: cpuWarn)
             if !compact {
@@ -642,10 +632,7 @@ struct HeaderMeter: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(theme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5))
-        .overlay(RoundedRectangle(cornerRadius: theme.cornerRadius / 1.5)
-            .strokeBorder(cpuWarn ? Color.red.opacity(0.65) : theme.panelBorder, lineWidth: 1))
+        .panelSurface(theme, radius: theme.chipRadius, border: cpuWarn ? Color.red.opacity(0.65) : nil)
     }
 
     // Fixed-width, trailing-aligned monospaced value so the readout (and the whole

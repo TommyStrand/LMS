@@ -96,10 +96,7 @@ struct LooperView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(color)
                 .frame(width: 30, height: 30)
-                .background(theme.panelBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(border, lineWidth: 1))
+                .panelSurface(theme, radius: 7, border: border)
         }
     }
 }
