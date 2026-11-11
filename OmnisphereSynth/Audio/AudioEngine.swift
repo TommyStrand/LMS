@@ -25,6 +25,46 @@ struct RenderParams {
         tremulant = p.tremulantDepth; chorus = p.chorusMix;  distortion = p.distortionAmount
         phaser  = p.phaserAmount;    modDelay = p.modDelayAmount
     }
+
+    // MARK: Smoothing (pure — unit-tested)
+    //
+    // A preset change or a knob turn used to reach the render loop as a STEP: every
+    // effect amount jumped between two buffers, which clicks whenever sound is
+    // still ringing. The render thread now glides from the values it is using to
+    // the published ones. All three helpers are allocation-free.
+
+    /// Field-wise combination of two parameter sets.
+    @inline(__always)
+    static func combine(_ a: RenderParams, _ b: RenderParams, _ f: (Float, Float) -> Float) -> RenderParams {
+        var r = RenderParams()
+        r.autoWah = f(a.autoWah, b.autoWah);          r.grit = f(a.grit, b.grit)
+        r.lofi = f(a.lofi, b.lofi);                   r.space = f(a.space, b.space)
+        r.tape = f(a.tape, b.tape);                   r.bloom = f(a.bloom, b.bloom)
+        r.tremulant = f(a.tremulant, b.tremulant);    r.chorus = f(a.chorus, b.chorus)
+        r.distortion = f(a.distortion, b.distortion); r.phaser = f(a.phaser, b.phaser)
+        r.modDelay = f(a.modDelay, b.modDelay)
+        return r
+    }
+
+    /// One smoothing step: each value moves `fraction` of the way to its target,
+    /// and lands exactly on it once within 0.0005 (so it really reaches 0 and the
+    /// effect can switch off).
+    func moved(toward target: RenderParams, fraction: Float) -> RenderParams {
+        RenderParams.combine(self, target) { v, t in
+            let d = t - v
+            return (d > -0.0005 && d < 0.0005) ? t : v + d * fraction
+        }
+    }
+
+    /// Per-sample increment that takes `from` to `to` across `frames` samples.
+    static func increment(from: RenderParams, to: RenderParams, frames: Int) -> RenderParams {
+        let n = Float(max(1, frames))
+        return combine(from, to) { a, b in (b - a) / n }
+    }
+
+    mutating func add(_ inc: RenderParams) {
+        self = RenderParams.combine(self, inc) { a, b in a + b }
+    }
 }
 
 // Immutable view of everything the render thread reads, published atomically by
@@ -114,6 +154,14 @@ final class AudioEngine {
     @ObservationIgnored private var publishedSnapshot = RenderSnapshot()
     // Render-thread-only cache of the last snapshot read; never touched off-render.
     @ObservationIgnored private var cachedSnapshot = RenderSnapshot()
+    // Render-thread only: the effect amounts actually in use (gliding toward the
+    // published ones) and which stateful effects ran last buffer (bit per effect).
+    @ObservationIgnored private var smoothedParams   = RenderParams()
+    // Main thread only: preset → AU-node glide bookkeeping (see applyPresetToNodes).
+    @ObservationIgnored private var nodeRampGeneration = 0
+    @ObservationIgnored private var loadedReverbPreset: AVAudioUnitReverbPreset? = nil
+    @ObservationIgnored private var shimmerPresetLoaded = false
+    @ObservationIgnored private var activeEffectMask: UInt16 = 0
     // Main-thread only: recently replaced snapshots, released here (see retire()).
     @ObservationIgnored private var retiredSnapshots: [RenderSnapshot] = []
 
@@ -286,7 +334,17 @@ final class AudioEngine {
                 os_unfair_lock_unlock(self.snapshotLock)
             }
             let entries = self.cachedSnapshot.entries
-            let params  = self.cachedSnapshot.params
+            let frames  = Int(frameCount)
+
+            // Glide the effect amounts toward the published values (~25 ms time
+            // constant) and interpolate per sample inside the buffer, so neither a
+            // preset change nor a knob turn lands as a step.
+            let from = self.smoothedParams
+            let to   = from.moved(toward: self.cachedSnapshot.params,
+                                  fraction: 1 - expf(-Float(frames) / (0.025 * Float(self.sampleRate))))
+            let inc  = RenderParams.increment(from: from, to: to, frames: frames)
+            var params = from
+            self.smoothedParams = to
 
             let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
             guard abl.count >= 2,
@@ -298,27 +356,54 @@ final class AudioEngine {
             // effects is what keeps idle/light CPU low — previously every one of
             // these custom per-sample processors ran 44 100×/sec regardless of its
             // amount, which pinned the audio thread even in silence.
-            let doAutoWah  = params.autoWah    > 0.001
-            let doGrit     = params.grit       > 0.001
-            let doLofi     = params.lofi       > 0.001
-            let doSpace    = params.space      > 0.001
-            let doTape     = params.tape       > 0.001
-            let doBloom    = params.bloom      > 0.005
-            let doMod      = params.tremulant  > 0.001 || params.chorus > 0.001
-            let doDist     = params.distortion > 0.001
-            let doPhaser   = params.phaser     > 0.001
-            let doModDelay = params.modDelay   > 0.001
+            // (An effect stays on while it is still fading out: from OR to.)
+            let doAutoWah  = from.autoWah    > 0.001 || to.autoWah    > 0.001
+            let doGrit     = from.grit       > 0.001 || to.grit       > 0.001
+            let doLofi     = from.lofi       > 0.001 || to.lofi       > 0.001
+            let doSpace    = from.space      > 0.001 || to.space      > 0.001
+            let doTape     = from.tape       > 0.001 || to.tape       > 0.001
+            let doBloom    = from.bloom      > 0.005 || to.bloom      > 0.005
+            let doMod      = from.tremulant  > 0.001 || to.tremulant  > 0.001
+                          || from.chorus     > 0.001 || to.chorus     > 0.001
+            let doDist     = from.distortion > 0.001 || to.distortion > 0.001
+            let doPhaser   = from.phaser     > 0.001 || to.phaser     > 0.001
+            let doModDelay = from.modDelay   > 0.001 || to.modDelay   > 0.001
+
+            // An effect that has just faded out forgets its state. Otherwise its
+            // delay line keeps the last echoes frozen and replays them — as a pop —
+            // the next time a preset switches that effect on.
+            var mask: UInt16 = 0
+            if doAutoWah  { mask |= 1 << 0 }
+            if doLofi     { mask |= 1 << 1 }
+            if doSpace    { mask |= 1 << 2 }
+            if doTape     { mask |= 1 << 3 }
+            if doBloom    { mask |= 1 << 4 }
+            if doMod      { mask |= 1 << 5 }
+            if doPhaser   { mask |= 1 << 6 }
+            if doModDelay { mask |= 1 << 7 }
+            let ended = self.activeEffectMask & ~mask
+            if ended != 0 {
+                if ended & (1 << 0) != 0 { self.masterAutoWahL.reset();   self.masterAutoWahR.reset() }
+                if ended & (1 << 1) != 0 { self.masterLofiL.reset();      self.masterLofiR.reset() }
+                if ended & (1 << 2) != 0 { self.masterSpaceEchoL.reset(); self.masterSpaceEchoR.reset() }
+                if ended & (1 << 3) != 0 { self.masterTapeL.reset();      self.masterTapeR.reset() }
+                if ended & (1 << 4) != 0 { self.masterBloom.reset() }
+                if ended & (1 << 5) != 0 { self.masterMod.reset() }
+                if ended & (1 << 6) != 0 { self.masterPhaserL.reset();    self.masterPhaserR.reset() }
+                if ended & (1 << 7) != 0 { self.masterModDelayL.reset();  self.masterModDelayR.reset() }
+            }
+            self.activeEffectMask = mask
 
             // Push the live tremulant depth to organ voices ONCE per buffer rather
             // than re-casting every voice every sample (was 44.1k dynamic casts/sec).
             // Always push, including 0: skipping it when ≤ 0.001 meant turning the
             // tremolo knob down to zero never reached organ notes already held.
             for (voice, _) in entries {
-                (voice as? OrganVoice)?.tremulantDepth = params.tremulant
+                (voice as? OrganVoice)?.tremulantDepth = to.tremulant
             }
 
             var widx = self.analysisWriteIndex
-            for i in 0..<Int(frameCount) {
+            for i in 0..<frames {
                 var l: Float = 0.0
                 var r: Float = 0.0
 
@@ -388,6 +473,7 @@ final class AudioEngine {
                 // Visualiser ring write — plain store into uniquely-owned memory.
                 self.analysisPtr[widx & (Self.analysisCount - 1)] = (l + r) * 0.5
                 widx &+= 1
+                params.add(inc)
             }
             self.analysisWriteIndex = widx
             return noErr
@@ -570,27 +656,104 @@ final class AudioEngine {
         applyPresetToNodes(preset)
     }
 
-    /// Applies a preset's reverb/delay/shimmer settings to the audio-unit nodes.
-    /// Separate from `applyPreset` so it can run on the session queue during an
-    /// engine restart without mutating the observed currentPreset off-main.
+    /// Applies a preset's reverb/delay/shimmer settings to the audio-unit nodes
+    /// and publishes its per-sample effect amounts. Main thread only.
+    ///
+    /// While the engine is running the change is made WITHOUT steps, because sound
+    /// is usually still ringing when a preset is switched and every step clicks:
+    ///   • wet/dry mixes and the shimmer level glide to their new values (~50 ms);
+    ///   • the reverb's factory preset is only reloaded when it actually changes
+    ///     (it used to be reloaded on every switch, re-initialising the reverb),
+    ///     and then only while the reverb's wet level is faded to zero;
+    ///   • a new delay time is set, and the delay line cleared, while the delay's
+    ///     wet level is at zero (changing it under signal bends and clicks);
+    ///   • the shimmer path is bypassed only after its level reached zero.
+    /// With the engine stopped (start-up, route-change rebuild) it is applied at once.
     private func applyPresetToNodes(_ preset: SynthPreset) {
-        reverb.loadFactoryPreset(preset.isOrgan ? .cathedral : .largeChamber)
-        reverb.wetDryMix = preset.reverbMix * 100
+        nodeRampGeneration &+= 1
+        let generation = nodeRampGeneration
 
-        delay.wetDryMix     = preset.delayMix * 100
-        delay.delayTime     = Double(preset.delayTime)
+        let reverbPreset: AVAudioUnitReverbPreset = preset.isOrgan ? .cathedral : .largeChamber
+        let reverbWet  = preset.reverbMix * 100
+        let delayWet   = preset.delayMix * 100
+        let delayTime  = Double(preset.delayTime)
+        let shimmerVol = preset.shimmerAmount * 0.45
+        let shimmerOn  = preset.shimmerAmount > 0.001
+
         delay.feedback      = 28
         // Roll off high frequencies in echoes — keeps repeats warm and masks
         // any transient content (key clicks, attack edges) from clicking.
         delay.lowPassCutoff = 4000
+        if !shimmerPresetLoaded {
+            shimmerReverb.loadFactoryPreset(.plate)
+            shimmerReverb.wetDryMix = 80
+            shimmerPresetLoaded = true
+        }
 
-        shimmerReverb.loadFactoryPreset(.plate)
-        shimmerReverb.wetDryMix = 80
-        shimmerMixer.outputVolume = preset.shimmerAmount * 0.45
-        setShimmerPathActive(preset.shimmerAmount > 0.001)
-
-        // Push the new per-sample effect scalars to the render thread.
+        // Push the new per-sample effect scalars to the render thread (it glides
+        // to them itself — see RenderParams smoothing).
         publishParams(from: preset)
+
+        let reverbChanges = loadedReverbPreset != reverbPreset
+        let delayChanges  = abs(delay.delayTime - delayTime) > 0.0005
+
+        guard engine.isRunning else {
+            if reverbChanges { reverb.loadFactoryPreset(reverbPreset); loadedReverbPreset = reverbPreset }
+            reverb.wetDryMix = reverbWet
+            delay.delayTime  = delayTime
+            delay.wetDryMix  = delayWet
+            shimmerMixer.outputVolume = shimmerVol
+            setShimmerPathActive(shimmerOn)
+            return
+        }
+
+        if shimmerOn { setShimmerPathActive(true) }      // un-bypass before fading in
+        let reverbFrom  = reverb.wetDryMix
+        let delayFrom   = delay.wetDryMix
+        let shimmerFrom = shimmerMixer.outputVolume
+
+        // Phase 1: glide to the new levels — or down to silence for a node that
+        // has to be reconfigured.
+        rampNodes(generation: generation, step: { [weak self] t in
+            guard let self else { return }
+            self.reverb.wetDryMix = reverbFrom + ((reverbChanges ? 0 : reverbWet) - reverbFrom) * t
+            self.delay.wetDryMix  = delayFrom  + ((delayChanges  ? 0 : delayWet)  - delayFrom)  * t
+            self.shimmerMixer.outputVolume = shimmerFrom + (shimmerVol - shimmerFrom) * t
+        }, completion: { [weak self] in
+            guard let self else { return }
+            if !shimmerOn { self.setShimmerPathActive(false) }
+            guard reverbChanges || delayChanges else { return }
+            if reverbChanges {
+                self.reverb.loadFactoryPreset(reverbPreset)
+                self.loadedReverbPreset = reverbPreset
+                self.reverb.wetDryMix = 0          // loading a preset resets the mix
+            }
+            if delayChanges {
+                self.delay.delayTime = delayTime
+                self.delay.reset()                 // drop echoes recorded at the old time
+            }
+            // Phase 2: bring the reconfigured nodes back up.
+            self.rampNodes(generation: generation, step: { [weak self] t in
+                guard let self else { return }
+                if reverbChanges { self.reverb.wetDryMix = reverbWet * t }
+                if delayChanges  { self.delay.wetDryMix  = delayWet * t }
+            }, completion: {})
+        })
+    }
+
+    /// Calls `step` with t = 1/6 … 1 at 8 ms intervals on the main queue, then
+    /// `completion`. A newer preset change (generation mismatch) abandons the ramp;
+    /// the new one starts from wherever the nodes are.
+    private func rampNodes(generation: Int, step: @escaping (Float) -> Void,
+                           completion: @escaping () -> Void) {
+        let steps = 6
+        for k in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(k) * 0.008) { [weak self] in
+                guard let self, self.nodeRampGeneration == generation else { return }
+                step(Float(k) / Float(steps))
+                if k == steps { completion() }
+            }
+        }
     }
 
     /// Republishes just the render effect scalars (called from knob setters and

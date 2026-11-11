@@ -791,4 +791,38 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(step.tail, [3])
         XCTAssertEqual(step.fire, [0])
     }
+
+    // MARK: - Click-free parameter changes
+
+    func testRenderParamsGlideInsteadOfStepping() {
+        var from = RenderParams()
+        var target = RenderParams()
+        target.chorus = 0.8
+        from.space = 0.6            // switching this effect OFF
+
+        // One step moves part of the way — never a jump to the target.
+        let step = from.moved(toward: target, fraction: 0.25)
+        XCTAssertEqual(step.chorus, 0.2, accuracy: 1e-6)
+        XCTAssertEqual(step.space, 0.45, accuracy: 1e-6)
+
+        // Repeated steps converge and land EXACTLY on the target (so a fading
+        // effect really reaches 0 and can be switched off and cleared).
+        var p = from
+        for _ in 0..<200 { p = p.moved(toward: target, fraction: 0.25) }
+        XCTAssertEqual(p.chorus, 0.8)
+        XCTAssertEqual(p.space, 0)
+    }
+
+    func testRenderParamsPerSampleRampReachesTheBufferTarget() {
+        var from = RenderParams(); from.phaser = 0.1
+        var to   = RenderParams(); to.phaser = 0.5; to.grit = 0.2
+        let inc = RenderParams.increment(from: from, to: to, frames: 256)
+        var p = from
+        for _ in 0..<256 { p.add(inc) }
+        XCTAssertEqual(p.phaser, 0.5, accuracy: 1e-4)
+        XCTAssertEqual(p.grit, 0.2, accuracy: 1e-4)
+        XCTAssertEqual(p.lofi, 0)                       // untouched fields stay put
+        // A zero-length buffer must not divide by zero.
+        XCTAssertTrue(RenderParams.increment(from: from, to: to, frames: 0).phaser.isFinite)
+    }
 }

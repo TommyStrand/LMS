@@ -7,6 +7,11 @@ final class LofiProcessor {
     private var counter = 0
     private var held: Float = 0
 
+    /// Forget all state. Called by the render thread when the effect switches
+    /// off, so nothing stale (a held sample, an old echo) is replayed the next
+    /// time it is switched on. Every processor below has the same method.
+    func reset() { counter = 0; held = 0 }
+
     func process(_ input: Float, amount: Float) -> Float {
         guard amount > 0.005 else { return input }
         let div = 1 + Int(amount * 15)
@@ -35,6 +40,11 @@ final class SpaceEchoProcessor {
     // Stored, not a local literal: a [Float] literal inside process() was a heap
     // allocation per SAMPLE on the audio render thread.
     private let headGains:    [Float] = [0.55, 0.38, 0.22]
+
+    func reset() {
+        for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
+        lpState = 0
+    }
 
     init(sampleRate: Double) {
         self.sampleRate = Float(sampleRate)
@@ -90,6 +100,11 @@ final class BloomReverbProcessor {
     private let tapSamples: [Float]
     private let tapGains: [Float] = [0.18, 0.32, 0.54, 0.78]
     private let sampleRate: Double
+
+    func reset() {
+        for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
+        lpState = 0
+    }
 
     init(sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -160,6 +175,11 @@ final class BrokenTapeDelay {
     private let sampleRate: Float
     private let maxSamples: Int
 
+    func reset() {
+        for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
+        lpState = 0; dropGain = 1; dropTimer = 0
+    }
+
     init(sampleRate: Double) {
         self.sampleRate = Float(sampleRate)
         maxSamples = Int(sampleRate * 2.5) + 1
@@ -212,6 +232,10 @@ final class ModulationProcessor {
     private var buf: [Float]
     private var writePos = 0
     private var chorusLfoPhase: Double = .random(in: 0...1)   // start at random phase per voice for richness
+
+    func reset() {
+        for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
+    }
 
     init(sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -275,6 +299,12 @@ final class PhaserProcessor {
     private var stateY: [Float] = [0, 0, 0, 0]
     private var feedbackSample: Float = 0
 
+    func reset() {
+        for i in 0..<stateX.count { stateX[i] = 0 }
+        for i in 0..<stateY.count { stateY[i] = 0 }
+        feedbackSample = 0
+    }
+
     init(sampleRate: Double, lfoPhaseOffset: Double = 0) {
         self.sampleRate = Float(sampleRate)
         self.lfoPhase   = lfoPhaseOffset
@@ -310,6 +340,8 @@ final class AutoWahProcessor {
     private var envelope: Float = 0
     private var bq_x1: Float = 0, bq_x2: Float = 0
     private var bq_y1: Float = 0, bq_y2: Float = 0
+
+    func reset() { envelope = 0; bq_x1 = 0; bq_x2 = 0; bq_y1 = 0; bq_y2 = 0 }
 
     init(sampleRate: Double) { self.sampleRate = Float(sampleRate) }
 
@@ -359,6 +391,11 @@ final class ModulatingDelayProcessor {
     private var lpState:  Float  = 0
     private let sampleRate: Float
     private let lfoRate:    Double
+
+    func reset() {
+        for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
+        lpState = 0
+    }
 
     init(sampleRate: Double, lfoRate: Double = 0.35) {
         self.sampleRate = Float(sampleRate)
