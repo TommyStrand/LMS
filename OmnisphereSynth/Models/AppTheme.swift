@@ -552,8 +552,16 @@ enum Backdrop {
         return nil
     }
 
+    /// Slugs of the images that are actually bundled.
+    static let availableSlugs = Set(library.keys)
+
+    /// Image slug for a preset among the bundled images (own, else borrowed).
+    static func imageSlug(for presetName: String) -> String? {
+        imageSlug(for: presetName, available: availableSlugs)
+    }
+
     static func url(for presetName: String) -> URL? {
-        imageSlug(for: presetName, available: Set(library.keys)).flatMap { library[$0] }
+        imageSlug(for: presetName).flatMap { library[$0] }
     }
 }
 
@@ -702,11 +710,14 @@ final class ThemeManager {
         AppTheme.all.first { $0.id == storedId } ?? .cosmos
     }
 
+    /// Backdrops are switched on and the theme supports them (dark themes only).
+    var backdropsActive: Bool { backdropEnabled && base.colorScheme == .dark }
+
     /// What to draw behind the main screen, or nil (backdrops off, a light theme,
     /// or no preset yet). A preset's own image, else a related one, else a
     /// generated scene in the preset's colour.
     var backdrop: BackdropSource? {
-        guard backdropEnabled, base.colorScheme == .dark, !activePresetName.isEmpty else { return nil }
+        guard backdropsActive, !activePresetName.isEmpty else { return nil }
         if let url = Backdrop.url(for: activePresetName) { return .image(url) }
         return .abstract(seed: Backdrop.slug(for: activePresetName),
                          color: BackdropPalette.RGB(hex: activePresetColor))

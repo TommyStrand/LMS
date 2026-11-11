@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 
 struct PresetSelectorView: View {
     @Binding var selectedIndex: Int
@@ -15,6 +16,19 @@ struct PresetSelectorView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .onAppear { BackdropThumbnails.shared.loadIfNeeded() }
+    }
+
+    /// Scene thumbnail for a preset chip while backdrops are on: its painted
+    /// scene (own or borrowed) once loaded, else a glow in the preset colour.
+    /// nil = classic icon chip (backdrops off / light theme).
+    private func thumbnail(for preset: SynthPreset) -> PresetThumbnail? {
+        guard themeManager.backdropsActive else { return nil }
+        if let slug = Backdrop.imageSlug(for: preset.name) {
+            if let image = BackdropThumbnails.shared.images[slug] { return .image(image) }
+            return .glow(Color(hex: preset.color))      // still loading
+        }
+        return .glow(Color(hex: preset.color))
     }
 
     // MARK: - Chip row
@@ -32,7 +46,8 @@ struct PresetSelectorView: View {
                         isLayeringMode: engine.isLayeringMode,
                         isActiveLayer: engine.activeLayerIndices.contains(idx),
                         isPrimaryLayer: engine.primaryLayerIndex == idx,
-                        theme: theme
+                        theme: theme,
+                        thumbnail: thumbnail(for: preset)
                     )
                     .onTapGesture {
                         handleTap(idx: idx, preset: preset)
@@ -151,10 +166,78 @@ struct PresetChip: View {
     let isActiveLayer: Bool
     let isPrimaryLayer: Bool
     let theme: AppTheme
+    var thumbnail: PresetThumbnail? = nil
 
     private var accentColor: Color { theme.accent(for: Color(hex: preset.color)) }
 
+    private var isHighlighted: Bool { isPrimaryLayer || (!isLayeringMode && isSelected) }
+
     var body: some View {
+        Group {
+            if let thumbnail {
+                thumbnailChip(thumbnail)
+            } else {
+                iconChip
+            }
+        }
+        .scaleEffect(scaleAmount)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPrimaryLayer)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isActiveLayer)
+    }
+
+    /// Scene card: the preset's backdrop in miniature with its name on a scrim.
+    private func thumbnailChip(_ thumbnail: PresetThumbnail) -> some View {
+        let shape = RoundedRectangle(cornerRadius: max(10, theme.cornerRadius))
+        let dimmed = isLayeringMode && !isActiveLayer
+        return ZStack(alignment: .topTrailing) {
+            Color.black
+                .overlay {
+                    switch thumbnail {
+                    case .image(let image):
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    case .glow(let color):
+                        RadialGradient(colors: [color.opacity(0.95), color.opacity(0.25), .black],
+                                       center: UnitPoint(x: 0.5, y: 0.25),
+                                       startRadius: 2, endRadius: 80)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    Text(preset.name)
+                        .font(.system(size: 10, weight: .semibold, design: theme.fontDesign))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 7)
+                        .padding(.top, 14)
+                        .padding(.bottom, 5)
+                        .background(LinearGradient(colors: [.clear, .black.opacity(0.75)],
+                                                   startPoint: .top, endPoint: .bottom))
+                }
+                .frame(width: 104, height: 68)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(isHighlighted ? accentColor
+                                            : (isActiveLayer ? accentColor.opacity(0.65) : Color.white.opacity(0.16)),
+                                            lineWidth: isHighlighted ? 2 : 1))
+                .shadow(color: shadowColor, radius: 10)
+                .opacity(dimmed ? 0.45 : (isHighlighted || isActiveLayer ? 1 : 0.82))
+
+            // Active-layer badge (dot in top-right corner)
+            if isLayeringMode && isActiveLayer {
+                Circle()
+                    .fill(isPrimaryLayer ? accentColor : accentColor.opacity(0.7))
+                    .frame(width: 9, height: 9)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.6), lineWidth: 1.5))
+                    .offset(x: 3, y: -3)
+            }
+        }
+        .frame(width: 104, height: 68)
+    }
+
+    /// Classic chip: instrument icon on a panel, name below.
+    private var iconChip: some View {
         VStack(spacing: 5) {
             ZStack(alignment: .topTrailing) {
                 ZStack {
@@ -191,9 +274,6 @@ struct PresetChip: View {
                 .lineLimit(1)
                 .frame(width: 72)
         }
-        .scaleEffect(scaleAmount)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPrimaryLayer)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isActiveLayer)
     }
 
     private var fillColor: Color {
@@ -238,6 +318,48 @@ struct PresetChip: View {
         if isActiveLayer  { return 1.02 }
         if !isLayeringMode && isSelected { return 1.05 }
         return isLayeringMode ? 0.95 : 1.0
+    }
+}
+
+// MARK: - Scene thumbnails
+
+enum PresetThumbnail {
+    case image(UIImage)
+    case glow(Color)
+}
+
+/// Small versions of the backdrop scenes for the preset strip. The full images
+/// are 1536×1024 (≈6 MB decoded each), so the strip must never use them:
+/// ImageIO makes ≤320 px thumbnails straight from the files, once, off the main
+/// thread.
+@Observable
+final class BackdropThumbnails {
+    static let shared = BackdropThumbnails()
+
+    /// image slug → thumbnail. Empty until the first load finishes.
+    private(set) var images: [String: UIImage] = [:]
+    @ObservationIgnored private var started = false
+
+    func loadIfNeeded() {
+        guard !started else { return }
+        started = true
+        let library = Backdrop.library
+        Task.detached(priority: .utility) {
+            var result: [String: UIImage] = [:]
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 320
+            ]
+            for (slug, url) in library {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                      let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+                else { continue }
+                result[slug] = UIImage(cgImage: cg)
+            }
+            let loaded = result
+            await MainActor.run { BackdropThumbnails.shared.images = loaded }
+        }
     }
 }
 

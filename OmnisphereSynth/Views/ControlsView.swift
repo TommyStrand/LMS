@@ -7,6 +7,10 @@ struct ControlsView: View {
     @Environment(ThemeManager.self) var themeManager
     @Environment(\.horizontalSizeClass) var sizeClass
 
+    /// Drawer layout (iPad main screen): the three panels side by side across the
+    /// full width, only as tall as their knobs — no scrolling.
+    var wide: Bool = false
+
     private var isPad: Bool { sizeClass != .compact }
 
     // Adaptive grid fills the full panel width; 60 pt min keeps iPhone at ~4 cols,
@@ -18,6 +22,21 @@ struct ControlsView: View {
         let color  = Color(hex: preset.color)
         let theme  = themeManager.current
 
+        if wide {
+            HStack(alignment: .top, spacing: 10) {
+                if preset.voiceMode == .synth {
+                    voicePanel(preset: preset, color: color, theme: theme)
+                }
+                preFXPanel(preset: preset, color: color, theme: theme)
+                postFXPanel(preset: preset, color: color, theme: theme)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            scrollingLayout(preset: preset, color: color, theme: theme)
+        }
+    }
+
+    private func scrollingLayout(preset: SynthPreset, color: Color, theme: AppTheme) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             if isPad {
                 // iPad: voice + pre-FX on the left, post-FX on the right

@@ -18,7 +18,9 @@ struct ContentView: View {
     @Environment(AudioRecorder.self)  private var recorder
     @Environment(LooperEngine.self)   private var looper
     @State private var selectedPresetIndex = 0
-    @State private var showControls    = true
+    // iPad: the sound controls are a drawer opened from the footer's SOUND button,
+    // closed at launch so the play surface gets the room. iPhone keeps them open.
+    @State private var showControls    = UIDevice.current.userInterfaceIdiom != .pad
     @State private var showSettings    = false
     @State private var midiActivityLit = false
     @State private var showDrumMachine = false
@@ -38,24 +40,10 @@ struct ContentView: View {
                 themeManager.screenBackground.ignoresSafeArea()
 
                 // Instrument scene (Settings → Instrument backdrop). Decorative only.
-                if let source = themeManager.backdrop {
-                    let fraction: CGFloat = geo.size.width > 680 ? 0.66 : 1
-                    Group {
-                        switch source {
-                        case .image(let url):
-                            BackdropView(url: url, dim: themeManager.backdropDim,
-                                         trailingFraction: fraction) { palette in
-                                withAnimation(.easeInOut(duration: 0.45)) {
-                                    themeManager.setPalette(palette, for: url)
-                                }
-                            }
-                        case .abstract(let seed, let color):
-                            AbstractBackdropView(seed: seed, color: color,
-                                                 dim: themeManager.backdropDim,
-                                                 trailingFraction: fraction)
-                        }
-                    }
-                    .transition(.opacity)
+                // iPhone: behind the whole screen. iPad places it behind the play
+                // area instead (see ipadLayout), clear of the header and preset strip.
+                if geo.size.width <= 680 {
+                    backdropLayer(featherTop: false)
                 }
 
                 // Scanline overlay (Radar theme)
@@ -149,6 +137,28 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Backdrop
+
+    @ViewBuilder
+    private func backdropLayer(featherTop: Bool) -> some View {
+        if let source = themeManager.backdrop {
+            Group {
+                switch source {
+                case .image(let url):
+                    BackdropView(url: url, dim: themeManager.backdropDim, featherTop: featherTop) { palette in
+                        withAnimation(.easeInOut(duration: 0.45)) {
+                            themeManager.setPalette(palette, for: url)
+                        }
+                    }
+                case .abstract(let seed, let color):
+                    AbstractBackdropView(seed: seed, color: color,
+                                         dim: themeManager.backdropDim, featherTop: featherTop)
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
     // MARK: - Play surface helper
 
     @ViewBuilder
@@ -213,40 +223,78 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - iPad layout (side-by-side)
+    // MARK: - iPad layout
+    //
+    // Top to bottom: header, preset strip (scene thumbnails), the play surface
+    // across the full width, the sound drawer (when open) and a footer with the
+    // looper and the SOUND button. The instrument scene sits behind everything
+    // below the preset strip, so the instrument shows through the play surface
+    // rather than hiding under the header.
 
     private func ipadLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
         return VStack(spacing: 0) {
             header(theme: theme, compact: false)
 
-            HStack(alignment: .top, spacing: 0) {
-                // Left panel: presets + controls
-                VStack(spacing: 10) {
-                    PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
-                        engine.applyPreset(preset)
-                    }
+            PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
+                engine.applyPreset(preset)
+            }
+            .padding(.top, 4)
 
-                    LooperView(looper: looper, theme: theme, accent: accent)
-
-                    if showControls {
-                        ControlsView(engine: engine)
-                            .transition(.opacity)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(width: geo.size.width * 0.38)
-                .padding(.leading, 16)
-                .padding(.top, 10)
-
-                // Right panel: play surface
+            VStack(spacing: 0) {
                 playSurface(preset: currentPreset)
                     .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 16)
+                    .padding(.top, 8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if showControls {
+                    ControlsView(engine: engine, wide: true)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                HStack(spacing: 0) {
+                    LooperView(looper: looper, theme: theme, accent: accent)
+                    soundButton(theme: theme, accent: accent)
+                        .padding(.trailing, 16)
+                }
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+            }
+            .background {
+                // Starts a little above the play surface and feathers in, so
+                // there is no hard edge under the preset strip.
+                backdropLayer(featherTop: true)
+                    .padding(.top, -28)
             }
         }
+    }
+
+    /// Footer button that opens / closes the sound-controls drawer (iPad).
+    private func soundButton(theme: AppTheme, accent: Color) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { showControls.toggle() }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("SOUND")
+                    .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                    .kerning(1)
+                Image(systemName: showControls ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundColor(showControls ? .white : theme.primaryText)
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(showControls ? accent : theme.panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(showControls ? accent : theme.panelBorder, lineWidth: 1))
+        }
+        .accessibilityLabel(showControls ? "Hide sound controls" : "Show sound controls")
     }
 
     // MARK: - Header
@@ -269,7 +317,7 @@ struct ContentView: View {
             if !compact { groupDivider(theme: theme) }
             statusGroup(theme: theme, accent: accent, compact: compact)
             if !compact { groupDivider(theme: theme) }
-            systemGroup(theme: theme, accent: accent)
+            systemGroup(theme: theme, accent: accent, compact: compact)
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -296,11 +344,14 @@ struct ContentView: View {
         }
     }
 
-    private func systemGroup(theme: AppTheme, accent: Color) -> some View {
+    private func systemGroup(theme: AppTheme, accent: Color, compact: Bool) -> some View {
         HStack(spacing: 8) {
-            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
-                       active: showControls, theme: theme) {
-                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
+            // iPad opens the controls from the footer's SOUND button instead.
+            if compact {
+                iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
+                           active: showControls, theme: theme) {
+                    withAnimation(.spring(response: 0.3)) { showControls.toggle() }
+                }
             }
             // Blob visualizer toggle
             iconButton(systemName: "waveform.circle", active: showBlob, theme: theme) {
@@ -321,19 +372,32 @@ struct ContentView: View {
 
     // MARK: Header pieces
 
+    /// iPhone: just the wordmark. iPad: wordmark, what is being played (preset, or
+    /// the drum pattern) and its context (key and play mode).
     private func brandView(theme: AppTheme, accent: Color, compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text("SUPERNOVA PAD")
-                .font(.system(size: 11, weight: .bold, design: theme.fontDesign))
+                .font(.system(size: compact ? 11 : 10, weight: .bold, design: theme.fontDesign))
                 .foregroundColor(accent.opacity(0.9))
                 .kerning(compact ? 1.5 : 3)
             if !compact {
-                Text("Touch Synthesizer")
-                    .font(.system(size: 18, weight: .thin, design: theme.fontDesign))
+                Text(showDrumMachine ? DrumPattern.all[drum.patternIndex].name : currentPreset.name)
+                    .font(.system(size: 21, weight: .semibold, design: theme.fontDesign))
                     .foregroundColor(theme.primaryText)
+                    .minimumScaleFactor(0.7)
+                Text(showDrumMachine ? "Drum machine" : brandSubtitle)
+                    .font(.system(size: 11, weight: .medium, design: theme.fontDesign))
+                    .foregroundColor(theme.secondaryText)
             }
         }
         .lineLimit(1)
+    }
+
+    /// e.g. "C Major · Grid"
+    private var brandSubtitle: String {
+        let names = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"]
+        let root  = names[((themeManager.rootNote % 12) + 12) % 12]
+        return "\(root) \(themeManager.scale.label) · \(themeManager.playMode.label)"
     }
 
     private func transposeControls(theme: AppTheme, accent: Color) -> some View {
@@ -636,12 +700,16 @@ struct BackdropFrame<Content: View>: View {
     /// edge. On iPad (0.66) it sits behind the play surface and feathers out
     /// before the preset list and controls on the left; 1 = full screen.
     let trailingFraction: CGFloat
+    /// Fade the top edge in (iPad: the scene starts just under the preset strip).
+    var featherTop: Bool = false
     @ViewBuilder let scene: () -> Content
 
     var body: some View {
         GeometryReader { geo in
             Color.black
-                .overlay { scene() }
+                // Top-aligned: when the frame is wider than the art, crop the
+                // (dark, empty) floor rather than the instrument.
+                .overlay(alignment: .top) { scene() }
                 .overlay {
                     // Dim, a little lighter at the top where the instrument sits and
                     // darker towards the floor so grid labels stay readable.
@@ -656,6 +724,12 @@ struct BackdropFrame<Content: View>: View {
                         .init(color: .clear, location: 0),
                         .init(color: .black, location: trailingFraction < 1 ? 0.22 : 0)
                     ], startPoint: .leading, endPoint: .trailing)
+                }
+                .mask {
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: featherTop ? 0.12 : 0)
+                    ], startPoint: .top, endPoint: .bottom)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         }
@@ -672,12 +746,13 @@ struct BackdropView: View {
     let url: URL
     let dim: Double
     var trailingFraction: CGFloat = 1
+    var featherTop: Bool = false
     /// Called on the main thread with the colours sampled from each loaded scene.
     var onPalette: (BackdropPalette) -> Void = { _ in }
     @State private var image: UIImage?
 
     var body: some View {
-        BackdropFrame(dim: dim, trailingFraction: trailingFraction) {
+        BackdropFrame(dim: dim, trailingFraction: trailingFraction, featherTop: featherTop) {
             if let image {
                 Image(uiImage: image)
                     .resizable()
@@ -723,11 +798,12 @@ struct AbstractBackdropView: View {
     let color: BackdropPalette.RGB
     let dim: Double
     var trailingFraction: CGFloat = 1
+    var featherTop: Bool = false
 
     var body: some View {
         let layout = AbstractScene.layout(seed: seed)
         let light  = color.scaled(toMax: 0.9)   // dark preset colours still glow
-        BackdropFrame(dim: dim, trailingFraction: trailingFraction) {
+        BackdropFrame(dim: dim, trailingFraction: trailingFraction, featherTop: featherTop) {
             Canvas { ctx, size in
                 for glow in layout.glows {
                     let c      = light.rotated(byTurns: glow.hueTurns).color

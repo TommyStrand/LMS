@@ -70,6 +70,11 @@ sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `B
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- iPad main screen (ContentView.ipadLayout), top to bottom: header (wordmark + preset name + key/mode),
+  preset strip (scene-thumbnail chips from `BackdropThumbnails`, ≤320 px via ImageIO — never the full images),
+  full-width play surface, sound drawer (`ControlsView(wide: true)`, toggled by the footer SOUND button, closed
+  at launch), footer (looper + SOUND). The backdrop is the background of everything below the preset strip.
+  iPhone keeps the stacked layout with a full-screen backdrop
 - Backdrops: `ThemeManager.current` returns `base.glass()` (translucent surfaces) while a backdrop shows;
   screens with their own background (Settings) use `ThemeManager.base`. Dark themes only. `BackdropView`
   decodes off the main thread and cross-fades on preset change. It also samples a `BackdropPalette` from a
