@@ -62,7 +62,7 @@ Unit tests live in `SuperNovaPadTests/` (Xcode: ⌘U). They cover pure logic onl
 no audio hardware — so the pattern for anything testable is to factor it into a
 plain `enum`/`struct` with no `Date`/timers/AVFoundation and test that:
 `SamplerSelection` (note/velocity → sample), `PitchSnap` (keyboard glide + snap-
-to-scale), `LoopSchedule` (looper event firing/wrap), `FingerVibrato`
+to-scale), `LoopSchedule` (looper event firing/wrap, resuming mid-loop), `LoopSync` (snapping a take to the drums' bar grid), `FingerVibrato`
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
 patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
@@ -70,6 +70,11 @@ sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `B
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- Looper ↔ drums: with SYNC on (`LooperEngine.syncToDrums`, the button in the looper strip) and the drums
+  running, a recorded take is snapped to bars (`LoopSync.align`) and played from the drum clock
+  (`DrumEngine.beatsNow()`, derived from the render callback's host timestamps — one Double written by the
+  render thread, like `renderBeatFraction`), so it stays locked and follows tempo. Drums stopped / SYNC off →
+  free wall-clock loop. The looper records synth notes only; the header record button captures synth + drums audio
 - iPad main screen (ContentView.ipadLayout), top to bottom: header (wordmark + preset name + key/mode),
   preset strip (scene-thumbnail chips from `BackdropThumbnails`, ≤320 px via ImageIO — never the full images),
   full-width play surface, sound drawer (`ControlsView(wide: true)`, toggled by the footer SOUND button, closed

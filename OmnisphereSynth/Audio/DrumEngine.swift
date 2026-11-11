@@ -2,6 +2,7 @@ import AVFoundation
 import CoreAudio
 import Foundation
 import Observation
+import QuartzCore
 import os
 
 // MARK: - Sample voice (value type, pool-allocated, no ARC in hot path)
@@ -187,6 +188,19 @@ final class DrumEngine {
     // Double: a torn read is impossible on arm64 and the worst case is a
     // one-frame-stale step highlight.
     @ObservationIgnored private var renderBeatFraction: Double = 0
+    // Beat clock for the looper (see beatsNow()). `totalTicks` is render-thread
+    // only: ticks since the loop last (re)started, NOT wrapped at the loop end.
+    // `renderBeatZeroTime` is written by the render thread and read by the main
+    // thread (same single-aligned-Double hand-off as renderBeatFraction): the
+    // host time, in seconds, at which beat 0 reached the output at the current
+    // tempo. NaN = no valid clock (stopped, or not rendered since play()).
+    @ObservationIgnored private var totalTicks: Double = 0
+    @ObservationIgnored private var renderBeatZeroTime: Double = .nan
+    private let hostTimeToSeconds: Double = {
+        var tb = mach_timebase_info_data_t()
+        mach_timebase_info(&tb)
+        return Double(tb.numer) / Double(tb.denom) / 1_000_000_000
+    }()
     @ObservationIgnored private var shuffleBag:         [Int]  = []
 
     // MARK: Init
@@ -232,7 +246,22 @@ final class DrumEngine {
 
     // MARK: Playback
 
+    /// Every pattern is in 4/4 (see DrumPatterns.swift).
+    static let beatsPerBar = 4.0
+
+    /// The drum clock: beats since the loop last (re)started — continuous, not
+    /// wrapped at the loop end, and bar lines fall on multiples of `beatsPerBar`.
+    /// nil while stopped. Derived from the audio output's own timestamps, so it
+    /// tracks what is actually heard rather than a UI timer. Main thread.
+    func beatsNow() -> Double? {
+        guard isPlaying else { return nil }
+        let zero = renderBeatZeroTime
+        guard zero.isFinite else { return nil }
+        return max(0, (CACurrentMediaTime() - zero) * bpm / 60.0)
+    }
+
     func play() {
+        renderBeatZeroTime = .nan  // old clock is void; the first new buffer sets it
         resetGeneration &+= 1      // render thread restarts the loop from tick 0
         isPlaying = true           // publishes
         beatTimer?.invalidate()
@@ -246,6 +275,7 @@ final class DrumEngine {
 
     func stop() {
         isPlaying = false          // publishes
+        renderBeatZeroTime = .nan
         beatTimer?.invalidate()
         beatTimer = nil
         beatFraction = 0
@@ -433,9 +463,10 @@ final class DrumEngine {
     private func setupAudio() {
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
 
-        sourceNode = AVAudioSourceNode(format: fmt) { [weak self] isSilence, _, frameCount, abl in
+        sourceNode = AVAudioSourceNode(format: fmt) { [weak self] isSilence, timestamp, frameCount, abl in
             guard let self else { isSilence.pointee = true; return noErr }
-            self.renderBlock(isSilence: isSilence, frameCount: Int(frameCount), abl: abl)
+            self.renderBlock(isSilence: isSilence, hostTime: timestamp.pointee.mHostTime,
+                             frameCount: Int(frameCount), abl: abl)
             return noErr
         }
 
@@ -509,6 +540,7 @@ final class DrumEngine {
     // MARK: Render block
 
     private func renderBlock(isSilence: UnsafeMutablePointer<ObjCBool>,
+                             hostTime: UInt64,
                              frameCount: Int,
                              abl: UnsafeMutablePointer<AudioBufferList>) {
         // Non-blocking read of the published state; if the main thread is
@@ -524,6 +556,7 @@ final class DrumEngine {
         if st.resetGeneration != seenGeneration {
             seenGeneration = st.resetGeneration
             tickPosition   = 0
+            totalTicks     = 0
         }
         // Starting from stopped: drop any tail left over from the last run so it
         // doesn't resume mid-sample. (A pattern change while playing keeps tails.)
@@ -552,6 +585,13 @@ final class DrumEngine {
                                 frameCount: frameCount, loopTicks: loopTicks) { i, frame in
             spawnVoice(type: st.hits[i].voice, velocity: st.hits[i].velocity, delay: frame, bank: st.bank)
         }
+        // Beat clock: when did beat 0 reach the output, at this tempo? `hostTime`
+        // is when this buffer's first frame plays (0 if the host didn't stamp it).
+        if st.ticksPerBeat > 0, st.bpm > 0 {
+            let bufferStart = Double(hostTime != 0 ? hostTime : mach_absolute_time()) * hostTimeToSeconds
+            renderBeatZeroTime = bufferStart - (totalTicks / st.ticksPerBeat) * 60.0 / st.bpm
+        }
+        totalTicks  += ticksPerFrame * Double(frameCount)
         tickPosition = (tickPosition + ticksPerFrame * Double(frameCount))
             .truncatingRemainder(dividingBy: loopTicks)
         renderBeatFraction = tickPosition / loopTicks

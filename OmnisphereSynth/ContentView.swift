@@ -66,6 +66,7 @@ struct ContentView: View {
             midi.attach(to: engine)
             Diagnostics.shared.startSampling()   // drives the always-on header meter
             looper.audioEngine = engine
+            looper.drumEngine  = drum
             engine.looper      = looper
             engine.yAxisMorph  = themeManager.yAxisMorph
             themeManager.activePresetName  = currentPreset.name

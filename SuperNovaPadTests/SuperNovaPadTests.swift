@@ -730,4 +730,65 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(same.g, c.g, accuracy: 1e-6)
         XCTAssertEqual(same.b, c.b, accuracy: 1e-6)
     }
+
+    // MARK: - Looper ↔ drum sync
+
+    func testLoopSyncSnapsToBarGrid() {
+        // 120 BPM: a beat is 0.5 s, a bar 2 s. Record pressed at beat 5; the first
+        // note lands exactly on the bar line at beat 8; stopped a little after
+        // two bars (beat 16.3).
+        let r = LoopSync.align(eventTimes: [1.5, 2.0, 5.4], recordStartBeat: 5.0, stopBeat: 16.3,
+                               bpm: 120, beatsPerBar: 4)
+        XCTAssertEqual(r.originBeat, 8)                       // starts on a bar line
+        XCTAssertEqual(r.bars, 2)                             // 8.3 beats → 2 bars
+        XCTAssertEqual(r.loopDuration, 4.0, accuracy: 1e-9)
+        XCTAssertEqual(r.times[0] ?? -1, 0.0, accuracy: 1e-9) // first note on the downbeat
+        XCTAssertEqual(r.times[1] ?? -1, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(r.times[2] ?? -1, 3.9, accuracy: 1e-9)
+    }
+
+    func testLoopSyncHandlesEarlyDownbeatAndMidBarStart() {
+        // First note a tenth of a beat BEFORE the bar line: an early downbeat —
+        // the loop starts on that bar line and the note is pulled onto it.
+        let early = LoopSync.align(eventTimes: [1.45, 2.0], recordStartBeat: 5.0, stopBeat: 16.3,
+                                   bpm: 120, beatsPerBar: 4)
+        XCTAssertEqual(early.originBeat, 8)
+        XCTAssertEqual(early.times[0] ?? -1, 0.0, accuracy: 1e-9)
+
+        // First note one beat INTO a bar: the loop still starts on that bar's line.
+        let mid = LoopSync.align(eventTimes: [2.0], recordStartBeat: 5.0, stopBeat: 12.2,
+                                 bpm: 120, beatsPerBar: 4)
+        XCTAssertEqual(mid.originBeat, 8)
+        XCTAssertEqual(mid.bars, 1)
+        XCTAssertEqual(mid.times[0] ?? -1, 0.5, accuracy: 1e-9)
+    }
+
+    func testLoopSyncRoundsLengthAndDropsTheOverhang() {
+        // 1.25 bars rounds down to one bar; the note in the overhang is dropped.
+        let r = LoopSync.align(eventTimes: [0.0, 1.0, 2.6], recordStartBeat: 8.0, stopBeat: 13.0,
+                               bpm: 120, beatsPerBar: 4)
+        XCTAssertEqual(r.bars, 1)
+        XCTAssertEqual(r.loopDuration, 2.0, accuracy: 1e-9)
+        XCTAssertNotNil(r.times[1])
+        XCTAssertNil(r.times[2])
+        // Never shorter than one bar, however short the take.
+        let tiny = LoopSync.align(eventTimes: [0.0], recordStartBeat: 8.0, stopBeat: 8.4,
+                                  bpm: 120, beatsPerBar: 4)
+        XCTAssertEqual(tiny.bars, 1)
+    }
+
+    func testLoopScheduleResumeDoesNotReplayThePast() {
+        let times = [0.0, 0.5, 1.0, 1.5]
+        // Join a 2 s loop 0.75 s into its fourth pass.
+        var s = LoopSchedule.State(resumingAt: 6.75, eventTimes: times, loopDuration: 2.0)
+        var step = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 2.0, elapsed: 6.76)
+        XCTAssertEqual(step.fire, [])            // 0.0 and 0.5 are NOT fired in a burst
+        XCTAssertFalse(step.wrapped)
+        step = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 2.0, elapsed: 7.1)
+        XCTAssertEqual(step.fire, [2])           // carries on with the next event
+        step = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 2.0, elapsed: 8.01)
+        XCTAssertTrue(step.wrapped)              // …and wraps normally afterwards
+        XCTAssertEqual(step.tail, [3])
+        XCTAssertEqual(step.fire, [0])
+    }
 }

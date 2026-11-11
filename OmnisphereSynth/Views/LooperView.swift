@@ -65,6 +65,27 @@ struct LooperView: View {
             }
             .frame(height: 30)
 
+            // ── Sync to drums ──────────────────────────────────────────────
+            Button {
+                looper.syncToDrums.toggle()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "metronome")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("SYNC")
+                        .font(.system(size: 9, weight: .bold, design: theme.fontDesign))
+                        .kerning(1)
+                }
+                .foregroundColor(looper.syncToDrums ? accent : theme.secondaryText.opacity(0.55))
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .panelSurface(theme, radius: 7,
+                              border: looper.syncToDrums ? accent.opacity(0.5) : theme.panelBorder)
+            }
+            .accessibilityLabel("Sync loop to drums")
+            .accessibilityValue(looper.syncToDrums ? "On" : "Off")
+
             // ── Clear ──────────────────────────────────────────────────────
             looperButton(
                 icon: "trash",
@@ -80,9 +101,12 @@ struct LooperView: View {
     }
 
     private var statusLabel: String {
+        // A loop recorded with the drums shows its length: "PLAYING · 2 BARS".
+        let bars = looper.syncedBars > 0
+            ? " · \(looper.syncedBars) BAR\(looper.syncedBars == 1 ? "" : "S")" : ""
         if looper.isRecording { return "REC" }
-        if looper.isPlaying   { return "PLAYING" }
-        if looper.hasLoop     { return "READY" }
+        if looper.isPlaying   { return "PLAYING" + bars }
+        if looper.hasLoop     { return "READY" + bars }
         return "EMPTY"
     }
 
