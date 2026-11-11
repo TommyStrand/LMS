@@ -386,8 +386,8 @@ struct BackdropPalette: Equatable {
     /// Ambient = mean colour. Key = the scene's dominant light: pixels are ranked
     /// by saturation × brightness; among the top 10 % the ±30° hue family with the
     /// most total weight wins and is averaged (so two different lights — an orange
-    /// beam in a teal cave — never blend into a muddy in-between colour). It is then lifted to a bright accent and
-    /// softened 15 % toward white so it reads as warm light rather than neon.
+    /// beam in a teal cave — never blend into a muddy in-between colour). It is
+    /// then lifted to a bright accent and softened 15 % toward white so it reads as warm light rather than neon.
     /// A scene with no saturated light falls back to a lightened ambient.
     static func extract(rgba: [UInt8]) -> BackdropPalette {
         let n = rgba.count / 4
@@ -412,9 +412,15 @@ struct BackdropPalette: Equatable {
         let top = scored.prefix(max(1, n / 10)).filter { $0.score > 0.05 }
         // Pick the hue family (±30°) carrying the most total score — the scene's
         // dominant light, not just its single most saturated pixel.
-        let hued = top.compactMap { t in hue(t.rgb).map { (score: t.score, rgb: t.rgb, hue: $0) } }
+        // (Explicit types and plain loops: keeps the type checker fast and unambiguous.)
+        var hued: [(score: Double, rgb: RGB, hue: Double)] = []
+        for t in top {
+            if let h = BackdropPalette.hue(t.rgb) { hued.append((score: t.score, rgb: t.rgb, hue: h)) }
+        }
         func familyScore(_ h: Double) -> Double {
-            hued.reduce(0) { $0 + (hueDistance($1.hue, h) <= 1.0 / 12 ? $1.score : 0) }
+            var total = 0.0
+            for t in hued where hueDistance(t.hue, h) <= 1.0 / 12 { total += t.score }
+            return total
         }
         guard let lead = hued.max(by: { familyScore($0.hue) < familyScore($1.hue) }) else {
             return BackdropPalette(ambient: ambient, key: ambient.scaled(toMax: 0.9))
@@ -528,10 +534,17 @@ final class ThemeManager {
     static let backdropDimRange: ClosedRange<Double> = 0.6...0.95
     /// Name of the preset on the play surface — set by ContentView. Not persisted.
     var activePresetName: String = ""
-    /// Colours sampled from the loaded scene, and which scene they belong to (so a
-    /// stale palette is never applied to a different image). Set by BackdropView.
-    var backdropPalette: BackdropPalette?
-    var backdropPaletteURL: URL?
+    /// Colours sampled from each scene loaded so far (filled in by BackdropView),
+    /// plus the most recent one. A scene seen before is tinted instantly; a new
+    /// one borrows the previous scene's colours for the moment it takes to load —
+    /// falling back to the theme's own neon for that moment showed as a flash.
+    private var palettes: [URL: BackdropPalette] = [:]
+    private var lastPalette: BackdropPalette? = nil
+
+    func setPalette(_ palette: BackdropPalette, for url: URL) {
+        palettes[url] = palette
+        lastPalette   = palette
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -565,8 +578,8 @@ final class ThemeManager {
     }
 
     private var activePalette: BackdropPalette? {
-        guard let url = backdropURL, url == backdropPaletteURL else { return nil }
-        return backdropPalette
+        guard let url = backdropURL else { return nil }
+        return palettes[url] ?? lastPalette
     }
 
     /// The theme the main screen draws with: glass surfaces, tinted to the scene,

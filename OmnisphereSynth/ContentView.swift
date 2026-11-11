@@ -42,8 +42,7 @@ struct ContentView: View {
                     BackdropView(url: url, dim: themeManager.backdropDim,
                                  trailingFraction: geo.size.width > 680 ? 0.66 : 1) { palette in
                         withAnimation(.easeInOut(duration: 0.45)) {
-                            themeManager.backdropPalette    = palette
-                            themeManager.backdropPaletteURL = url
+                            themeManager.setPalette(palette, for: url)
                         }
                     }
                         .transition(.opacity)

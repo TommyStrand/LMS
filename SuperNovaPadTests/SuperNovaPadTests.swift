@@ -664,7 +664,7 @@ final class SuperNovaPadTests: XCTestCase {
         XCTAssertEqual(black.r, 0.1, accuracy: 1e-9)             // no divide-by-zero
     }
 
-    func testBackdropPaletteNeverBlendsTwoLights() {
+    func testBackdropPaletteNeverBlendsTwoLights() throws {
         // Teal cave (dominant) with a smaller orange beam: the key must be teal-ish,
         // not the grey-green you get by averaging teal and orange.
         var px: [UInt8] = []
