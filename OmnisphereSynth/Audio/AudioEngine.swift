@@ -162,6 +162,8 @@ final class AudioEngine {
     @ObservationIgnored private var loadedReverbPreset: AVAudioUnitReverbPreset? = nil
     @ObservationIgnored private var shimmerPresetLoaded = false
     @ObservationIgnored private var activeEffectMask: UInt16 = 0
+    // Master limiter (render thread only): peak envelope with instant attack.
+    @ObservationIgnored private var limiterEnvelope: Float = 0
     // Main-thread only: recently replaced snapshots, released here (see retire()).
     @ObservationIgnored private var retiredSnapshots: [RenderSnapshot] = []
 
@@ -402,6 +404,15 @@ final class AudioEngine {
                 (voice as? OrganVoice)?.tremulantDepth = to.tremulant
             }
 
+            // Master limiter. Voices are summed with no headroom management — six
+            // held notes reach 2–3× full scale — and the output used to clip hard
+            // (a harsh crackle on big chords). The envelope jumps to any new peak
+            // and falls back over ~120 ms; whenever it is above the threshold the
+            // signal is scaled down to it. Below the threshold it does nothing.
+            let limiterThreshold: Float = 1.3      // ×0.55 voice-mixer gain ≈ −3 dBFS
+            let limiterRelease = 1 - expf(-1 / (0.12 * Float(self.sampleRate)))
+            var limiterEnv = self.limiterEnvelope
+
             var widx = self.analysisWriteIndex
             for i in 0..<frames {
                 var l: Float = 0.0
@@ -464,6 +475,14 @@ final class AudioEngine {
                     r = self.masterModDelayR.process(r, amount: params.modDelay)
                 }
 
+                let peak = max(abs(l), abs(r))
+                if peak > limiterEnv { limiterEnv = peak }
+                else { limiterEnv += (peak - limiterEnv) * limiterRelease }
+                if limiterEnv > limiterThreshold {
+                    let g = limiterThreshold / limiterEnv
+                    l *= g; r *= g
+                }
+
                 // Flush sub-denormal magnitudes to zero before they reach the AU
                 // reverb/delay — denormal floats trigger 10–100× CPU spikes in IIR
                 // tails on some hardware (right when many voices are decaying).
@@ -476,6 +495,7 @@ final class AudioEngine {
                 params.add(inc)
             }
             self.analysisWriteIndex = widx
+            self.limiterEnvelope = limiterEnv.isFinite ? limiterEnv : 0
             return noErr
         }
 
@@ -911,7 +931,7 @@ final class AudioEngine {
         case .hammondB3:
             voice = HammondVoice(note: note, velocity: velocity, sampleRate: sampleRate)
         case .rhodes:
-            voice = RhodesVoice(note: note, velocity: velocity, sampleRate: sampleRate)
+            voice = RhodesVoice(note: note, velocity: velocity, preset: preset, sampleRate: sampleRate)
         case .synth:
             voice = SynthVoice(note: note, velocity: velocity, preset: preset, sampleRate: sampleRate)
         case .sampler:

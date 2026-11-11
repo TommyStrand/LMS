@@ -51,6 +51,22 @@ struct SynthPreset: Identifiable, Equatable {
     var autoWahAmount: Float
     var modDelayAmount: Float
 
+    // Synth-voice character (SynthVoice only)
+    /// > 0: osc 1 is played as two copies this many cents either side of pitch,
+    /// one to each stereo side — width and slow movement for pads and strings.
+    var unisonCents: Float
+    /// How far apart the unison copies sit (0 = both centre, 1 = hard left/right).
+    var stereoWidth: Float
+    /// Filter key tracking: 0 = same cutoff for every note, 1 = cutoff follows pitch.
+    var keyTrack: Float
+    /// 2-operator FM on a SINE osc 1: peak modulation index (0 = off), modulator
+    /// frequency ratio, and how fast the brightness settles (seconds).
+    var fmIndex: Float
+    var fmRatio: Float
+    var fmDecay: Float
+    /// Loudness trim so presets sit at a similar level (measured on a held chord).
+    var level: Float
+
     // Preset chip icon style
     var iconStyle: IconStyle
 
@@ -106,6 +122,8 @@ struct SynthPreset: Identifiable, Equatable {
         phaserAmount: Float = 0,
         autoWahAmount: Float = 0,
         modDelayAmount: Float = 0,
+        unisonCents: Float = 0, stereoWidth: Float = 0.7, keyTrack: Float = 0.5,
+        fmIndex: Float = 0, fmRatio: Float = 1, fmDecay: Float = 0.5, level: Float = 1,
         iconStyle: IconStyle = .mysticWave
     ) {
         self.id = name; self.name = name; self.color = color
@@ -129,6 +147,8 @@ struct SynthPreset: Identifiable, Equatable {
         self.phaserAmount = phaserAmount
         self.autoWahAmount = autoWahAmount
         self.modDelayAmount = modDelayAmount
+        self.unisonCents = unisonCents; self.stereoWidth = stereoWidth; self.keyTrack = keyTrack
+        self.fmIndex = fmIndex; self.fmRatio = fmRatio; self.fmDecay = fmDecay; self.level = level
         self.iconStyle = iconStyle
     }
 
@@ -246,6 +266,7 @@ extension SynthPreset {
             voiceMode: .rhodes,
             reverbMix: 0.35, delayMix: 0.2, delayTime: 0.375, chorusMix: 0.25,
             tremulantDepth: 0.3,
+            fmIndex: 1.6, fmRatio: 14, fmDecay: 1.0,       // body bite, tine "ting", decay length
             iconStyle: .rhodesTine
         ),
         SynthPreset(
@@ -264,11 +285,12 @@ extension SynthPreset {
             color: "#8B5CF6",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
-            osc2Detune: 7, oscMix: 0.5,
-            filterCutoff: 800, filterResonance: 0.3, filterEnvAmount: 0.5,
-            attack: 1.2, decay: 0.5, sustain: 0.8, release: 2.0,
+            osc2Detune: 12, oscMix: 0.3,             // octave above (was a parallel fifth)
+            filterCutoff: 900, filterResonance: 0.25, filterEnvAmount: 0.25,
+            attack: 1.0, decay: 1.5, sustain: 0.8, release: 2.4,
             lfoRate: 0.3, lfoDepth: 0.15, lfoTarget: .filter,
-            reverbMix: 0.7, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.4,
+            reverbMix: 0.7, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.35,
+            unisonCents: 12,
             iconStyle: .mysticWave
         ),
         SynthPreset(
@@ -276,11 +298,12 @@ extension SynthPreset {
             color: "#1E3A5F",
             voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .sawtooth,
-            osc2Detune: -5, oscMix: 0.4,
-            filterCutoff: 400, filterResonance: 0.35, filterEnvAmount: 0.7,
-            attack: 0.08, decay: 0.8, sustain: 0.5, release: 1.5,
-            lfoRate: 0.8, lfoDepth: 0.2, lfoTarget: .pitch,
+            osc2Detune: -12, oscMix: 0.45,           // sub octave (was a fourth below)
+            filterCutoff: 380, filterResonance: 0.4, filterEnvAmount: 0.55,
+            attack: 0.06, decay: 0.9, sustain: 0.5, release: 1.8,
+            lfoRate: 0.8, lfoDepth: 0.06, lfoTarget: .pitch,
             reverbMix: 0.5, delayMix: 0.3, delayTime: 0.5, chorusMix: 0.2,
+            unisonCents: 6, keyTrack: 0.6,
             iconStyle: .darkVortex
         ),
         SynthPreset(
@@ -288,35 +311,39 @@ extension SynthPreset {
             color: "#06B6D4",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .triangle,
-            osc2Detune: 12, oscMix: 0.6,
-            filterCutoff: 2000, filterResonance: 0.1, filterEnvAmount: 0.3,
-            attack: 2.0, decay: 1.0, sustain: 0.9, release: 3.0,
+            osc2Detune: 12, oscMix: 0.4,
+            filterCutoff: 2600, filterResonance: 0.1, filterEnvAmount: 0.15,
+            attack: 1.6, decay: 1.2, sustain: 0.85, release: 3.4,
             lfoRate: 0.15, lfoDepth: 0.1, lfoTarget: .amplitude,
-            reverbMix: 0.85, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.6,
+            reverbMix: 0.85, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.5,
+            unisonCents: 7, fmIndex: 1.2, fmRatio: 2, fmDecay: 2.5,
             iconStyle: .celestialDots
         ),
         SynthPreset(
             name: "Pulse Drive",
             color: "#F59E0B",
             voiceMode: .synth,
-            osc1Waveform: .square, osc2Waveform: .square,
-            osc2Detune: 0, oscMix: 0.5,
-            filterCutoff: 1200, filterResonance: 0.55, filterEnvAmount: 0.9,
-            attack: 0.02, decay: 0.3, sustain: 0.6, release: 0.4,
+            osc1Waveform: .square, osc2Waveform: .sawtooth,
+            osc2Detune: -12, oscMix: 0.35,
+            filterCutoff: 900, filterResonance: 0.5, filterEnvAmount: 0.75,
+            attack: 0.01, decay: 0.28, sustain: 0.55, release: 0.4,
             lfoRate: 4.0, lfoDepth: 0.4, lfoTarget: .filter,
             reverbMix: 0.3, delayMix: 0.38, delayTime: 0.25, chorusMix: 0.1,
+            unisonCents: 9, keyTrack: 0.6,
             iconStyle: .pulseBolt
         ),
         SynthPreset(
             name: "Void Walker",
             color: "#059669",
             voiceMode: .synth,
-            osc1Waveform: .noise, osc2Waveform: .sawtooth,
-            osc2Detune: 2, oscMix: 0.3,
-            filterCutoff: 600, filterResonance: 0.4, filterEnvAmount: 0.6,
-            attack: 0.8, decay: 1.2, sustain: 0.4, release: 2.5,
-            lfoRate: 0.5, lfoDepth: 0.25, lfoTarget: .pitch,
-            reverbMix: 0.6, delayMix: 0.35, delayTime: 0.333, chorusMix: 0.5,
+            osc1Waveform: .sawtooth, osc2Waveform: .noise,
+            osc2Detune: 0, oscMix: 0.18,             // a breath of noise over the saws (was 70 % noise)
+            filterCutoff: 550, filterResonance: 0.4, filterEnvAmount: 0.45,
+            attack: 0.9, decay: 1.4, sustain: 0.5, release: 2.8,
+            lfoRate: 0.25, lfoDepth: 0.25, lfoTarget: .filter,
+            reverbMix: 0.6, delayMix: 0.35, delayTime: 0.333, chorusMix: 0.4,
+            unisonCents: 16,
+            level: 1.25,
             iconStyle: .voidHole
         ),
         SynthPreset(
@@ -324,11 +351,12 @@ extension SynthPreset {
             color: "#EF4444",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .triangle,
-            osc2Detune: 3, oscMix: 0.45,
-            filterCutoff: 1500, filterResonance: 0.5, filterEnvAmount: 0.4,
-            attack: 0.4, decay: 0.6, sustain: 0.7, release: 1.8,
+            osc2Detune: 12, oscMix: 0.3,             // octave (was a minor third on every note)
+            filterCutoff: 1400, filterResonance: 0.45, filterEnvAmount: 0.35,
+            attack: 0.35, decay: 0.7, sustain: 0.7, release: 2.0,
             lfoRate: 1.2, lfoDepth: 0.3, lfoTarget: .filter,
-            reverbMix: 0.55, delayMix: 0.25, delayTime: 0.4, chorusMix: 0.35,
+            reverbMix: 0.55, delayMix: 0.25, delayTime: 0.4, chorusMix: 0.3,
+            unisonCents: 10,
             iconStyle: .solarRadial
         ),
 
@@ -340,6 +368,7 @@ extension SynthPreset {
             reverbMix: 0.30, delayMix: 0.08, chorusMix: 0.18,
             distortionAmount: 0.18,
             tremulantDepth: 0.55,                          // Wurly's signature trem
+            fmIndex: 2.8, fmRatio: 1, fmDecay: 0.6,        // reed bark, no tine, shorter decay
             iconStyle: .rhodesTine
         ),
         SynthPreset(
@@ -348,6 +377,7 @@ extension SynthPreset {
             voiceMode: .rhodes,
             reverbMix: 0.45, delayMix: 0.18, chorusMix: 0.40,
             tremulantDepth: 0.05,
+            fmIndex: 1.2, fmRatio: 14, fmDecay: 1.3,       // mellower, longer
             iconStyle: .rhodesTine
         ),
         SynthPreset(
@@ -356,11 +386,12 @@ extension SynthPreset {
             voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .sawtooth,
             osc2Detune: 0, oscMix: 0.35,
-            filterCutoff: 4500, filterResonance: 0.45, filterEnvAmount: 0.6,
-            attack: 0.001, decay: 0.18, sustain: 0.35, release: 0.20,
+            filterCutoff: 1800, filterResonance: 0.4, filterEnvAmount: 0.7,   // pluck: opens, then closes
+            attack: 0.001, decay: 0.35, sustain: 0.25, release: 0.12,
             reverbMix: 0.18, delayMix: 0.05, chorusMix: 0.0,
-            distortionAmount: 0.30,                        // tube-warm bite
-            gritAmount: 0.20,
+            distortionAmount: 0.25,                        // tube-warm bite
+            gritAmount: 0.12,
+            keyTrack: 0.7,
             iconStyle: .pulseBolt
         ),
         SynthPreset(
@@ -368,12 +399,13 @@ extension SynthPreset {
             color: "#6B4423",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .triangle,
-            osc2Detune: 0.4, oscMix: 0.55,
-            filterCutoff: 1800, filterResonance: 0.20, filterEnvAmount: 0.2,
-            attack: 0.45, decay: 0.5, sustain: 0.75, release: 1.6,
-            reverbMix: 0.55, delayMix: 0.10, chorusMix: 0.30,
+            osc2Detune: 12, oscMix: 0.3,
+            filterCutoff: 1900, filterResonance: 0.15, filterEnvAmount: 0.1,
+            attack: 0.35, decay: 0.6, sustain: 0.8, release: 1.6,
+            reverbMix: 0.55, delayMix: 0.10, chorusMix: 0.25,
             tremulantDepth: 0.12,
-            spaceEchoAmount: 0.28, brokenTape: 0.18,
+            spaceEchoAmount: 0.2, brokenTape: 0.18,
+            unisonCents: 7,
             iconStyle: .mysticWave
         ),
         SynthPreset(
@@ -381,23 +413,25 @@ extension SynthPreset {
             color: "#7DD3FC",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.45,
-            filterCutoff: 6000, filterResonance: 0.0, filterEnvAmount: 0.0,
-            attack: 0.001, decay: 1.4, sustain: 0.0, release: 1.0,
+            osc2Detune: 12, oscMix: 0.2,
+            filterCutoff: 7000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.001, decay: 1.3, sustain: 0.0, release: 0.9,
             reverbMix: 0.72, delayMix: 0.18, chorusMix: 0.0,
+            keyTrack: 0.3, fmIndex: 2.2, fmRatio: 4, fmDecay: 0.25,   // bright metal strike that settles fast
             iconStyle: .celestialDots
         ),
         SynthPreset(
             name: "Vibraphone",
             color: "#FCD34D",
             voiceMode: .synth,
-            osc1Waveform: .sine, osc2Waveform: .triangle,
-            osc2Detune: 5, oscMix: 0.30,
-            filterCutoff: 4000, filterResonance: 0.0, filterEnvAmount: 0.0,
-            attack: 0.002, decay: 1.6, sustain: 0.20, release: 1.2,
-            lfoRate: 6.0, lfoDepth: 0.40, lfoTarget: .amplitude,
+            osc1Waveform: .sine, osc2Waveform: .sine,
+            osc2Detune: 12, oscMix: 0.15,
+            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.002, decay: 2.2, sustain: 0.0, release: 1.4,
+            lfoRate: 6.0, lfoDepth: 0.0, lfoTarget: .amplitude,
             reverbMix: 0.62, delayMix: 0.10,
-            tremulantDepth: 0.55,
+            tremulantDepth: 0.4,                           // the motor tremolo (was applied twice)
+            keyTrack: 0.3, fmIndex: 1.3, fmRatio: 4, fmDecay: 0.5,    // vibe bars: a tuned 4th partial
             iconStyle: .solarRadial
         ),
 
@@ -408,12 +442,14 @@ extension SynthPreset {
             color: "#C8A44A",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
-            osc2Detune: 0.08, oscMix: 0.5,          // ~8 cents sharp → ensemble beat
-            filterCutoff: 3500, filterResonance: 0.05, filterEnvAmount: 0.0,
-            attack: 0.55, decay: 0.3, sustain: 0.9, release: 1.8,
+            osc2Detune: 12, oscMix: 0.3,
+            filterCutoff: 3200, filterResonance: 0.05, filterEnvAmount: 0.0,
+            attack: 0.45, decay: 0.3, sustain: 0.9, release: 1.8,
             lfoRate: 5.0, lfoDepth: 0.08, lfoTarget: .amplitude,
             reverbMix: 0.55, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.7,
             shimmerAmount: 0.2,
+            unisonCents: 9,                           // ensemble beat, now in stereo
+            level: 0.8,
             iconStyle: .solarRadial
         ),
 
@@ -422,12 +458,14 @@ extension SynthPreset {
             color: "#7BA7BC",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .triangle,
-            osc2Detune: 12, oscMix: 0.35,            // octave blend for flute body
-            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
-            attack: 0.4, decay: 0.2, sustain: 0.9, release: 1.2,
-            lfoRate: 0.2, lfoDepth: 0.05, lfoTarget: .amplitude,
+            osc2Detune: 12, oscMix: 0.3,             // octave blend for flute body
+            filterCutoff: 2600, filterResonance: 0.0, filterEnvAmount: 0.2,   // brighter "chiff" at the start
+            attack: 0.12, decay: 0.3, sustain: 0.9, release: 1.0,
+            lfoRate: 5.0, lfoDepth: 0.04, lfoTarget: .pitch,                  // gentle flute vibrato
             reverbMix: 0.65, delayMix: 0.06, delayTime: 0.5, chorusMix: 0.15,
             brokenTape: 0.08,
+            fmIndex: 0.5, fmRatio: 2, fmDecay: 0.4,
+            level: 0.55,
             iconStyle: .celestialDots
         ),
 
@@ -436,12 +474,13 @@ extension SynthPreset {
             color: "#8B6347",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .triangle,
-            osc2Detune: 0.5, oscMix: 0.4,
-            filterCutoff: 2200, filterResonance: 0.15, filterEnvAmount: 0.1,
+            osc2Detune: 12, oscMix: 0.3,
+            filterCutoff: 2000, filterResonance: 0.15, filterEnvAmount: 0.1,
             attack: 0.6, decay: 0.4, sustain: 0.85, release: 2.0,
             lfoRate: 0.4, lfoDepth: 0.06, lfoTarget: .amplitude,
-            reverbMix: 0.65, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.35,
+            reverbMix: 0.65, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.3,
             spaceEchoAmount: 0.15, brokenTape: 0.22, bloomAmount: 0.2,
+            unisonCents: 11,
             iconStyle: .mysticWave
         ),
 
@@ -450,12 +489,13 @@ extension SynthPreset {
             color: "#D4A843",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .sine,
-            osc2Detune: 7, oscMix: 0.3,              // fifth above adds overtone layer
-            filterCutoff: 2800, filterResonance: 0.2, filterEnvAmount: 0.1,
-            attack: 0.7, decay: 0.4, sustain: 0.8, release: 2.2,
+            osc2Detune: 12, oscMix: 0.3,
+            filterCutoff: 2600, filterResonance: 0.2, filterEnvAmount: 0.1,
+            attack: 0.5, decay: 0.4, sustain: 0.8, release: 2.2,
             lfoRate: 5.5, lfoDepth: 0.1, lfoTarget: .amplitude,
-            reverbMix: 0.6, delayMix: 0.1, delayTime: 0.4, chorusMix: 0.25,
+            reverbMix: 0.6, delayMix: 0.1, delayTime: 0.4, chorusMix: 0.2,
             shimmerAmount: 0.25, bloomAmount: 0.2,
+            unisonCents: 5, keyTrack: 0.6,
             iconStyle: .solarRadial
         ),
 
@@ -466,12 +506,13 @@ extension SynthPreset {
             color: "#A8D8EA",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.4,             // octave sine for glassy shimmer
+            osc2Detune: 12, oscMix: 0.3,             // octave sine for glassy shimmer
             filterCutoff: 4000, filterResonance: 0.3, filterEnvAmount: 0.1,
-            attack: 1.8, decay: 0.5, sustain: 0.8, release: 3.0,
+            attack: 1.2, decay: 0.5, sustain: 0.8, release: 3.0,
             lfoRate: 3.5, lfoDepth: 0.12, lfoTarget: .amplitude,
             reverbMix: 0.85, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.3,
             shimmerAmount: 0.45, bloomAmount: 0.35,
+            unisonCents: 4, fmIndex: 0.5, fmRatio: 3, fmDecay: 3.0,
             iconStyle: .celestialDots
         ),
 
@@ -480,12 +521,13 @@ extension SynthPreset {
             color: "#6BBFD4",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .triangle,
-            osc2Detune: 7, oscMix: 0.35,
+            osc2Detune: 12, oscMix: 0.2,
             filterCutoff: 6000, filterResonance: 0.25, filterEnvAmount: 0.0,
-            attack: 1.2, decay: 0.6, sustain: 0.7, release: 2.5,
+            attack: 0.9, decay: 0.6, sustain: 0.7, release: 2.5,
             lfoRate: 4.0, lfoDepth: 0.15, lfoTarget: .amplitude,
             reverbMix: 0.78, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.2,
             shimmerAmount: 0.35, bloomAmount: 0.3,
+            unisonCents: 5, fmIndex: 1.0, fmRatio: 2.76, fmDecay: 2.5,   // inharmonic: struck metal and glass
             iconStyle: .celestialDots
         ),
 
@@ -494,12 +536,13 @@ extension SynthPreset {
             color: "#4A6070",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .noise,
-            osc2Detune: 0, oscMix: 0.25,             // noise adds metallic overtones
-            filterCutoff: 2000, filterResonance: 0.45, filterEnvAmount: 0.3,
-            attack: 2.0, decay: 1.0, sustain: 0.6, release: 4.0,
-            lfoRate: 0.5, lfoDepth: 0.2, lfoTarget: .pitch,
+            osc2Detune: 0, oscMix: 0.08,             // a little bow noise
+            filterCutoff: 2400, filterResonance: 0.45, filterEnvAmount: 0.3,
+            attack: 1.6, decay: 1.0, sustain: 0.6, release: 4.0,
+            lfoRate: 0.5, lfoDepth: 0.12, lfoTarget: .pitch,
             reverbMix: 0.9, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.3,
             shimmerAmount: 0.5, bloomAmount: 0.4, phaserAmount: 0.35,
+            unisonCents: 9, fmIndex: 2.0, fmRatio: 1.41, fmDecay: 4.0,   // clangorous, slowly settling
             iconStyle: .voidHole
         ),
 
@@ -510,12 +553,14 @@ extension SynthPreset {
             color: "#8B3A3A",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .square,
-            osc2Detune: 0.06, oscMix: 0.45,          // ~6 cents → reed-row beating
-            filterCutoff: 2500, filterResonance: 0.25, filterEnvAmount: 0.1,
-            attack: 0.05, decay: 0.2, sustain: 0.9, release: 0.4,
+            osc2Detune: 0, oscMix: 0.35,
+            filterCutoff: 2300, filterResonance: 0.2, filterEnvAmount: 0.05,
+            attack: 0.06, decay: 0.2, sustain: 0.9, release: 0.35,
             lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
             reverbMix: 0.35, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.15,
             tremulantDepth: 0.35, gritAmount: 0.12,
+            unisonCents: 5, stereoWidth: 0.4,        // two reed rows beating
+            level: 0.75,
             iconStyle: .churchPipes
         ),
 
@@ -524,11 +569,13 @@ extension SynthPreset {
             color: "#CC4444",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
-            osc2Detune: 0.14, oscMix: 0.5,           // ~14 cents → classic musette beating
-            filterCutoff: 3000, filterResonance: 0.1, filterEnvAmount: 0.0,
+            osc2Detune: 12, oscMix: 0.25,
+            filterCutoff: 3200, filterResonance: 0.1, filterEnvAmount: 0.0,
             attack: 0.03, decay: 0.1, sustain: 0.95, release: 0.3,
             lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
-            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25, chorusMix: 0.55,
+            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25, chorusMix: 0.3,
+            unisonCents: 14, stereoWidth: 0.5,       // the classic musette beating
+            level: 0.8,
             iconStyle: .pulseBolt
         ),
 
@@ -537,12 +584,14 @@ extension SynthPreset {
             color: "#7B5C3A",
             voiceMode: .synth,
             osc1Waveform: .sawtooth, osc2Waveform: .square,
-            osc2Detune: 7, oscMix: 0.35,             // fifth drone buzz
-            filterCutoff: 1800, filterResonance: 0.35, filterEnvAmount: 0.2,
+            osc2Detune: -12, oscMix: 0.3,            // octave below for body (was a parallel fifth)
+            filterCutoff: 1700, filterResonance: 0.35, filterEnvAmount: 0.15,
             attack: 0.04, decay: 0.2, sustain: 0.9, release: 0.5,
             lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
             reverbMix: 0.3, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.2,
             tremulantDepth: 0.3, gritAmount: 0.25,
+            unisonCents: 6, stereoWidth: 0.4, keyTrack: 0.6,
+            level: 0.85,
             iconStyle: .hammondTonewheel
         ),
 
@@ -552,13 +601,14 @@ extension SynthPreset {
             name: "Choir Ahs",
             color: "#9B7FD4",
             voiceMode: .synth,
-            osc1Waveform: .sine, osc2Waveform: .triangle,
-            osc2Detune: 7, oscMix: 0.45,
-            filterCutoff: 1800, filterResonance: 0.15, filterEnvAmount: 0.2,
-            attack: 1.4, decay: 0.5, sustain: 0.85, release: 2.5,
+            osc1Waveform: .sawtooth, osc2Waveform: .triangle,
+            osc2Detune: 12, oscMix: 0.25,
+            filterCutoff: 1100, filterResonance: 0.35, filterEnvAmount: 0.1,   // an "ah" formant…
+            attack: 1.0, decay: 0.5, sustain: 0.85, release: 2.5,
             lfoRate: 0.8, lfoDepth: 0.12, lfoTarget: .amplitude,
-            reverbMix: 0.8, delayMix: 0.1, delayTime: 0.666, chorusMix: 0.55,
+            reverbMix: 0.8, delayMix: 0.1, delayTime: 0.666, chorusMix: 0.5,
             shimmerAmount: 0.3, bloomAmount: 0.35,
+            unisonCents: 12, keyTrack: 0.2,                                    // …that stays put across the keys
             iconStyle: .mysticWave
         ),
 
@@ -567,12 +617,14 @@ extension SynthPreset {
             color: "#E8A060",
             voiceMode: .synth,
             osc1Waveform: .square, osc2Waveform: .triangle,
-            osc2Detune: 3, oscMix: 0.4,
-            filterCutoff: 1200, filterResonance: 0.4, filterEnvAmount: 0.3,
+            osc2Detune: 12, oscMix: 0.3,
+            filterCutoff: 1300, filterResonance: 0.4, filterEnvAmount: 0.2,
             attack: 0.2, decay: 0.3, sustain: 0.8, release: 1.0,
             lfoRate: 5.0, lfoDepth: 0.08, lfoTarget: .amplitude,
-            reverbMix: 0.5, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.4,
+            reverbMix: 0.5, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.35,
             tremulantDepth: 0.25,
+            unisonCents: 8, keyTrack: 0.3,
+            level: 0.65,
             iconStyle: .churchPipes
         ),
 
@@ -583,12 +635,14 @@ extension SynthPreset {
             color: "#2D9E8F",
             voiceMode: .synth,
             osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 0, oscMix: 0.0,              // pure single-oscillator sine
+            osc2Detune: 0, oscMix: 0.0,              // single oscillator
             filterCutoff: 8000, filterResonance: 0.0, filterEnvAmount: 0.0,
             attack: 0.08, decay: 0.1, sustain: 1.0, release: 0.8,
             lfoRate: 5.5, lfoDepth: 0.18, lfoTarget: .amplitude,
             reverbMix: 0.45, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.0,
-            tremulantDepth: 0.55,
+            tremulantDepth: 0.25,
+            fmIndex: 0.35, fmRatio: 2, fmDecay: 3.0, // a touch of warmth on the pure sine
+            level: 0.42,
             iconStyle: .voidHole
         ),
 

@@ -232,6 +232,7 @@ final class ModulationProcessor {
     private var buf: [Float]
     private var writePos = 0
     private var chorusLfoPhase: Double = .random(in: 0...1)   // start at random phase per voice for richness
+    private var chorusLfo2Phase: Double = 0.37
 
     func reset() {
         for i in 0..<buf.count { buf[i] = 0 }   // in place — no allocation (render thread)
@@ -260,18 +261,24 @@ final class ModulationProcessor {
         buf[writePos & (bufSize - 1)] = (lOut + rOut) * 0.5
         writePos = (writePos + 1) & (bufSize - 1)
 
-        // Chorus: LFO-modulated short delay, opposite-phase L/R for stereo width
+        // Chorus: two modulated delay taps per side, opposite LFO phase L/R.
+        // The delays are real chorus delays — about 9 and 13 ms, swept ±2 / ±1.5 ms.
+        // (They used to be 14 ± 9 SAMPLES, i.e. 0.3 ms: that is a flanger's comb
+        // filter, which is why the "chorus" sounded thin and metallic rather than
+        // wide.) Two taps at unrelated rates keep it from sounding like one wobble.
         if chorusMix > 0.001 {
-            chorusLfoPhase += 0.65 * dt
+            chorusLfoPhase += 0.5 * dt
             if chorusLfoPhase >= 1.0 { chorusLfoPhase -= 1.0 }
-            let lfo = Float(sin(chorusLfoPhase * 2 * .pi))
-            let baseDelay: Float = 14
-            let modDepth: Float  = 9
-            let chL = readDelay(baseDelay + lfo * modDepth)
-            let chR = readDelay(baseDelay - lfo * modDepth)
+            chorusLfo2Phase += 0.81 * dt
+            if chorusLfo2Phase >= 1.0 { chorusLfo2Phase -= 1.0 }
+            let lfo1 = Float(sin(chorusLfoPhase * 2 * .pi))
+            let lfo2 = Float(sin(chorusLfo2Phase * 2 * .pi))
+            let ms = Float(sampleRate) / 1000
+            let chL = (readDelay((9 + lfo1 * 2) * ms) + readDelay((13 - lfo2 * 1.5) * ms)) * 0.5
+            let chR = (readDelay((9 - lfo1 * 2) * ms) + readDelay((13 + lfo2 * 1.5) * ms)) * 0.5
             let mix = min(chorusMix, 1)
-            lOut = lOut * (1 - mix * 0.5) + chL * mix
-            rOut = rOut * (1 - mix * 0.5) + chR * mix
+            lOut = lOut * (1 - mix * 0.4) + chL * mix * 0.8
+            rOut = rOut * (1 - mix * 0.4) + chR * mix * 0.8
         }
 
         return (lOut, rOut)

@@ -66,10 +66,18 @@ to-scale), `LoopSchedule` (looper event firing/wrap, resuming mid-loop), `LoopSy
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
 patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
-sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `Backdrop.imageSlug` / `AbstractScene` (scene colours, image names, borrowed and generated scenes), `RenderParams` (preset →
+sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `Backdrop.imageSlug` / `AbstractScene` (scene colours, image names, borrowed and generated scenes), `SynthVoice` / `RhodesVoice` (every preset renders finite, bounded, and ends), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- Sound engine (the user can't describe DSP; "sounds bad" was traced to these): `SynthVoice` uses PolyBLEP
+  saw/square (naive ones alias — measured ~18 dB more inharmonic hash), stereo unison (`unisonCents`), a
+  filter envelope + key tracking + velocity brightness, optional 2-op FM on a sine osc 1 (`fmIndex`, bells/
+  mallets/glass) and exponential decay/release; slow values update every 16 samples. Presets must keep osc 2
+  at a unison or whole octaves (parallel thirds/fourths muddied every chord — enforced by a test) and use
+  `level` to sit at a similar loudness. `RhodesVoice` = FM body + tine partial, exponential decay, per-preset
+  character. Chorus delays are 9/13 ms (they were 0.3 ms = a flanger). A master limiter in the render loop
+  replaces hard clipping on big chords. Check DSP changes numerically (a Python port) when you can't listen
 - No parameter steps on the audio path: the render thread glides `RenderParams` toward the published values
   (per-sample ramp), AU-node levels are ramped in `applyPresetToNodes`, reverb preset / delay time change only
   at zero wet, and a boutique effect is `reset()` once it has faded out (stale delay lines pop when re-enabled).

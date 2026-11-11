@@ -861,4 +861,88 @@ final class SuperNovaPadTests: XCTestCase {
         // At normal settings it still drives the signal.
         XCTAssertGreaterThan(tubeSaturate(x, drive: 0.5), x * 1.5)
     }
+
+    // MARK: - Synth voice sound quality
+
+    func testBandLimitedWaveformsMatchTheIdealShapeAwayFromTheirEdges() {
+        let inc = 0.01                                   // 441 Hz at 44.1 kHz
+        // Mid-ramp the saw is the plain ramp; the correction only acts within one
+        // sample of the jump.
+        XCTAssertEqual(SynthVoice.bandLimited(2, 0.3, inc), 2 * 0.3 - 1, accuracy: 1e-12)
+        XCTAssertEqual(SynthVoice.bandLimited(3, 0.25, inc), 1, accuracy: 1e-12)
+        XCTAssertEqual(SynthVoice.bandLimited(3, 0.75, inc), -1, accuracy: 1e-12)
+        // At the jump itself the naive saw leaps from +1 to −1; the band-limited
+        // one passes through the middle instead.
+        XCTAssertEqual(SynthVoice.bandLimited(2, 0.0, inc), 0, accuracy: 1e-9)
+        XCTAssertEqual(SynthVoice.polyBLEP(0.5, inc), 0)
+        // Always within a sane range.
+        for k in 0..<1000 {
+            let ph = Double(k) / 1000
+            for w in 0...3 { XCTAssertLessThanOrEqual(abs(SynthVoice.bandLimited(w, ph, inc)), 1.3) }
+        }
+    }
+
+    func testEverySynthPresetRendersCleanlyAndEnds() {
+        for preset in SynthPreset.presets where preset.voiceMode == .synth {
+            let voice = SynthVoice(note: 60, velocity: 0.85, preset: preset, sampleRate: 44100)
+            voice.start()
+            var peak: Float = 0
+            for _ in 0..<22_050 {                        // half a second held
+                let (l, r) = voice.nextStereoSample()
+                XCTAssertTrue(l.isFinite && r.isFinite, "\(preset.name) produced a non-finite sample")
+                peak = max(peak, abs(l), abs(r))
+            }
+            XCTAssertLessThan(peak, 4, "\(preset.name) is far too loud (filter blowing up?)")
+            voice.release()
+            var samples = 0
+            while !voice.isFinished && samples < 44_100 * 20 {
+                _ = voice.nextStereoSample()
+                samples += 1
+            }
+            XCTAssertTrue(voice.isFinished, "\(preset.name) never finishes after release")
+        }
+    }
+
+    func testPercussiveVoiceFreesItselfWithoutARelease() {
+        // Sustain 0 (celesta, vibraphone): once decayed the voice is done, even
+        // while the key is still held — it must not occupy a polyphony slot.
+        let celesta = try! XCTUnwrap(SynthPreset.presets.first { $0.name == "Celesta" })
+        XCTAssertEqual(celesta.sustain, 0)
+        let voice = SynthVoice(note: 72, velocity: 0.8, preset: celesta, sampleRate: 44100)
+        voice.start()
+        var samples = 0
+        while !voice.isFinished && samples < 44_100 * 10 {
+            _ = voice.nextStereoSample()
+            samples += 1
+        }
+        XCTAssertTrue(voice.isFinished)
+    }
+
+    func testSynthPresetsUseOctavesNotParallelIntervals() {
+        // Osc 2 a third, fourth or second away from osc 1 puts that interval on
+        // EVERY note, so chords turn to mud (this was the case for several
+        // presets). Thickness now comes from unisonCents; osc 2 is a unison or octaves.
+        for preset in SynthPreset.presets where preset.voiceMode == .synth {
+            let semis = preset.osc2Detune
+            XCTAssertEqual(semis.truncatingRemainder(dividingBy: 12), 0,
+                           "\(preset.name): osc2Detune \(semis) is not a whole number of octaves")
+        }
+    }
+
+    func testElectricPianoVoicesStayBoundedAndDecay() {
+        for name in ["Rhodes Mk1", "Wurlitzer", "Suitcase '73"] {
+            let preset = try! XCTUnwrap(SynthPreset.presets.first { $0.name == name })
+            let voice = RhodesVoice(note: 60, velocity: 0.9, preset: preset, sampleRate: 44100)
+            voice.start()
+            var early: Float = 0, late: Float = 0
+            for i in 0..<(44_100 * 3) {
+                let (l, _) = voice.nextStereoSample()
+                XCTAssertTrue(l.isFinite)
+                if i < 4_410 { early = max(early, abs(l)) }
+                if i > 44_100 * 3 - 4_410 { late = max(late, abs(l)) }
+            }
+            XCTAssertLessThan(early, 2)
+            XCTAssertLessThan(late, early * 0.6, "\(name) should be decaying while held")
+        }
+    }
 }
