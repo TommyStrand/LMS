@@ -56,7 +56,7 @@ final class LooperEngine {
     /// starts on (a bar line) and the tempo it was recorded at (event times are
     /// seconds at that tempo).
     private struct Sync {
-        let originBeat: Double
+        var originBeat: Double
         let bpm: Double
     }
 
@@ -161,12 +161,18 @@ final class LooperEngine {
     /// free loops, it is wall-clock time since `playbackStart`.
     private func elapsedNow() -> (elapsed: Double, drumClock: Bool)? {
         guard loopDuration > 0 else { return nil }
-        if let sync, syncToDrums, let beats = drumEngine?.beatsNow() {
-            var elapsed = (beats - sync.originBeat) * 60.0 / sync.bpm
-            // The drums restarted (their beat count went back to 0): still on the
-            // bar grid, just an earlier bar — fold it into a non-negative time.
-            if elapsed < 0 { elapsed += (-elapsed / loopDuration).rounded(.up) * loopDuration }
-            return (elapsed, true)
+        if var tie = sync, syncToDrums, let beats = drumEngine?.beatsNow() {
+            if beats < tie.originBeat {
+                // The drums restarted (their beat count went back to 0). Move the
+                // loop's origin back by whole loops — still on the bar grid — so
+                // the timeline keeps growing from here. (Folding the negative time
+                // into 0..<loop on every call instead made each loop boundary look
+                // like a backward jump, and the resync dropped the downbeat notes.)
+                let loopBeats = loopDuration * tie.bpm / 60.0
+                tie.originBeat -= ((tie.originBeat - beats) / loopBeats).rounded(.up) * loopBeats
+                sync = tie
+            }
+            return ((beats - tie.originBeat) * 60.0 / tie.bpm, true)
         }
         guard let start = playbackStart else { return nil }
         return (Date().timeIntervalSince(start), false)
@@ -180,8 +186,11 @@ final class LooperEngine {
             // Join the drums mid-bar: skip what "already happened" this pass.
             onDrumClock = true
             lastElapsed = now.elapsed
+            // Stopping a take a moment after the bar line must not swallow the
+            // downbeat of the first pass: within the grace window those notes are
+            // played (slightly late) rather than skipped.
             schedule = LoopSchedule.State(resumingAt: now.elapsed, eventTimes: events.map(\.t),
-                                          loopDuration: loopDuration)
+                                          loopDuration: loopDuration, grace: 0.2)
         } else {
             onDrumClock = false
             lastElapsed = 0
@@ -217,8 +226,10 @@ final class LooperEngine {
     /// held notes and carry on from the new position without replaying the past.
     private func resync(at elapsed: Double) {
         releaseHeldNotes()
+        // Small grace: a resync that lands a few ms past a bar line still plays
+        // the notes on that bar line.
         schedule = LoopSchedule.State(resumingAt: elapsed, eventTimes: events.map(\.t),
-                                      loopDuration: loopDuration)
+                                      loopDuration: loopDuration, grace: 0.03)
     }
 
     private func tick() {
@@ -339,6 +350,11 @@ enum LoopSchedule {
         guard loopDuration > 0 else { return Step(tail: [], fire: [], wrapped: false) }
         let pass  = Int(elapsed / loopDuration)
         let phase = elapsed.truncatingRemainder(dividingBy: loopDuration)
+        // The clock slipped back across a loop boundary (audio dropout, clock
+        // adjustment): we are momentarily at the END of the previous pass, whose
+        // events have all been handled. Without this, `phase ≈ loopDuration`
+        // matched every event after the cursor reset and fired the whole loop at once.
+        if pass < s.lastPass { return Step(tail: [], fire: [], wrapped: false) }
 
         var tail: [Int] = []
         var wrapped = false
@@ -364,12 +380,15 @@ extension LoopSchedule.State {
     /// A state that joins a loop already in progress at `elapsed`: events earlier
     /// in the current pass count as already played (they are NOT fired in a burst),
     /// and the pass under way is not reported as a wrap.
+    /// `grace`: when the join lands no more than this many seconds into a pass,
+    /// nothing is skipped — the events since the pass began fire on the next
+    /// advance (a little late), so a downbeat is not lost to a late join.
     /// (In an extension so the plain `State()` initialiser is kept.)
-    init(resumingAt elapsed: Double, eventTimes: [Double], loopDuration: Double) {
+    init(resumingAt elapsed: Double, eventTimes: [Double], loopDuration: Double, grace: Double = 0) {
         self.init()
         guard loopDuration > 0, elapsed > 0 else { return }
         let phase = elapsed.truncatingRemainder(dividingBy: loopDuration)
         lastPass = Int(elapsed / loopDuration)
-        cursor   = eventTimes.firstIndex { $0 > phase } ?? eventTimes.count
+        cursor   = phase <= grace ? 0 : (eventTimes.firstIndex { $0 > phase } ?? eventTimes.count)
     }
 }

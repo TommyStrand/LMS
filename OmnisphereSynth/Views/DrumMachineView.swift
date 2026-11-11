@@ -48,8 +48,8 @@ struct DrumMachineView: View {
         }
         .sheet(isPresented: $showFavorites) {
             FavoritesSheet(drum: drum, favorites: favorites,
-                           theme: themeManager.current,
-                           ac: themeManager.current.accent(for: accent))
+                           theme: themeManager.base,   // a sheet: opaque theme
+                           ac: themeManager.base.accent(for: accent))
         }
     }
 

@@ -190,12 +190,17 @@ final class DrumEngine {
     @ObservationIgnored private var renderBeatFraction: Double = 0
     // Beat clock for the looper (see beatsNow()). `totalTicks` is render-thread
     // only: ticks since the loop last (re)started, NOT wrapped at the loop end.
-    // `renderBeatZeroTime` is written by the render thread and read by the main
-    // thread (same single-aligned-Double hand-off as renderBeatFraction): the
-    // host time, in seconds, at which beat 0 reached the output at the current
-    // tempo. NaN = no valid clock (stopped, or not rendered since play()).
+    // The render thread publishes an ANCHOR each buffer — the host time (seconds)
+    // at which the buffer's first frame reaches the output, and the beat count at
+    // that frame — as two plain aligned Doubles (same hand-off as
+    // renderBeatFraction). The main thread extrapolates only the few milliseconds
+    // since the anchor, using the current tempo, so a tempo change can shift the
+    // clock by at most (one buffer × Δbpm) rather than re-scaling the whole
+    // elapsed time for a buffer (which made the looper jump by seconds).
+    // anchorTime NaN = no valid clock (stopped, or not rendered since play()).
     @ObservationIgnored private var totalTicks: Double = 0
-    @ObservationIgnored private var renderBeatZeroTime: Double = .nan
+    @ObservationIgnored private var renderAnchorTime:  Double = .nan
+    @ObservationIgnored private var renderAnchorBeats: Double = 0
     private let hostTimeToSeconds: Double = {
         var tb = mach_timebase_info_data_t()
         mach_timebase_info(&tb)
@@ -241,7 +246,7 @@ final class DrumEngine {
         // Keep recent states alive on the main thread so the render thread never
         // performs the final release (free) of a hits array — see AudioEngine.retire.
         retiredStates.append(previous)
-        if retiredStates.count > 8 { retiredStates.removeFirst() }
+        if retiredStates.count > 32 { retiredStates.removeFirst() }
     }
 
     // MARK: Playback
@@ -255,19 +260,30 @@ final class DrumEngine {
     /// tracks what is actually heard rather than a UI timer. Main thread.
     func beatsNow() -> Double? {
         guard isPlaying else { return nil }
-        let zero = renderBeatZeroTime
-        guard zero.isFinite else { return nil }
-        return max(0, (CACurrentMediaTime() - zero) * bpm / 60.0)
+        // The two values are written one after the other by the render thread;
+        // re-read if a write slipped in between so the pair belongs together.
+        var beats = renderAnchorBeats
+        var time  = renderAnchorTime
+        if renderAnchorBeats != beats {
+            beats = renderAnchorBeats
+            time  = renderAnchorTime
+        }
+        guard time.isFinite else { return nil }
+        return max(0, beats + (CACurrentMediaTime() - time) * bpm / 60.0)
     }
 
     func play() {
-        renderBeatZeroTime = .nan  // old clock is void; the first new buffer sets it
+        renderAnchorTime = .nan    // old clock is void; the first new buffer sets it
         resetGeneration &+= 1      // render thread restarts the loop from tick 0
         isPlaying = true           // publishes
         beatTimer?.invalidate()
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.beatFraction = self.renderBeatFraction
+            // Publish in 64ths of the loop and only when it changes. The step
+            // highlight needs nothing finer (16 or 32 steps), and assigning an
+            // observed property 60×/s re-rendered the whole drum screen 60×/s.
+            let quantised = (self.renderBeatFraction * 64).rounded(.down) / 64
+            if quantised != self.beatFraction { self.beatFraction = quantised }
         }
         RunLoop.main.add(t, forMode: .common)
         beatTimer = t
@@ -275,7 +291,7 @@ final class DrumEngine {
 
     func stop() {
         isPlaying = false          // publishes
-        renderBeatZeroTime = .nan
+        renderAnchorTime = .nan
         beatTimer?.invalidate()
         beatTimer = nil
         beatFraction = 0
@@ -585,11 +601,11 @@ final class DrumEngine {
                                 frameCount: frameCount, loopTicks: loopTicks) { i, frame in
             spawnVoice(type: st.hits[i].voice, velocity: st.hits[i].velocity, delay: frame, bank: st.bank)
         }
-        // Beat clock: when did beat 0 reach the output, at this tempo? `hostTime`
-        // is when this buffer's first frame plays (0 if the host didn't stamp it).
-        if st.ticksPerBeat > 0, st.bpm > 0 {
-            let bufferStart = Double(hostTime != 0 ? hostTime : mach_absolute_time()) * hostTimeToSeconds
-            renderBeatZeroTime = bufferStart - (totalTicks / st.ticksPerBeat) * 60.0 / st.bpm
+        // Beat clock anchor for the looper. `hostTime` is when this buffer's first
+        // frame plays (0 if the host didn't stamp it).
+        if st.ticksPerBeat > 0 {
+            renderAnchorBeats = totalTicks / st.ticksPerBeat
+            renderAnchorTime  = Double(hostTime != 0 ? hostTime : mach_absolute_time()) * hostTimeToSeconds
         }
         totalTicks  += ticksPerFrame * Double(frameCount)
         tickPosition = (tickPosition + ticksPerFrame * Double(frameCount))

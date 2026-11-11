@@ -22,7 +22,6 @@ struct ContentView: View {
     // closed at launch so the play surface gets the room. iPhone keeps them open.
     @State private var showControls    = UIDevice.current.userInterfaceIdiom != .pad
     @State private var showSettings    = false
-    @State private var midiActivityLit = false
     @State private var showDrumMachine = false
     @State private var showShareSheet  = false
     @State private var recBlink        = false
@@ -45,7 +44,10 @@ struct ContentView: View {
                 // Instrument scene (Settings → Instrument backdrop). Decorative only.
                 // iPhone: behind the whole screen. iPad places it behind the play
                 // area instead (see ipadLayout), clear of the header and preset strip.
-                if geo.size.width <= 680 {
+                // The wide layout needs room in BOTH directions: an iPhone in
+                // landscape is wide but far too short for it.
+                let wide = geo.size.width > 680 && geo.size.height > 500
+                if !wide {
                     backdropLayer(featherTop: false)
                 }
 
@@ -54,10 +56,10 @@ struct ContentView: View {
                     ScanlinesView().ignoresSafeArea().allowsHitTesting(false)
                 }
 
-                if geo.size.width > 680 {
+                if wide {
                     ipadLayout(theme: theme, geo: geo)
                 } else {
-                    iphoneLayout(theme: theme)
+                    iphoneLayout(theme: theme, geo: geo)
                 }
             }
         }
@@ -83,12 +85,6 @@ struct ContentView: View {
                 ShareSheet(url: url)
             }
         }
-        .onChange(of: midi.activityPulse) {
-            midiActivityLit = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                midiActivityLit = false
-            }
-        }
         .onChange(of: recorder.exportURL) { _, url in
             if url != nil { showShareSheet = true }
         }
@@ -107,8 +103,12 @@ struct ContentView: View {
                 themeManager.activePresetName  = SynthPreset.presets[idx].name
                 themeManager.activePresetColor = SynthPreset.presets[idx].color
             }
-            nowPlaying.update(presetName: SynthPreset.presets[idx].name,
-                              isLiveInstrument: true, isPlaying: false)
+            // While the drum machine is showing, Now Playing belongs to the drums
+            // (title + play state) — don't overwrite it with a paused instrument.
+            if !showDrumMachine {
+                nowPlaying.update(presetName: SynthPreset.presets[idx].name,
+                                  isLiveInstrument: true, isPlaying: false)
+            }
         }
         .onChange(of: showDrumMachine) { _, drumActive in
             let title = drumActive
@@ -198,10 +198,10 @@ struct ContentView: View {
 
     // MARK: - iPhone layout
 
-    private func iphoneLayout(theme: AppTheme) -> some View {
+    private func iphoneLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
         return VStack(spacing: 0) {
-            header(theme: theme, compact: true)
+            header(theme: theme, compact: true, narrow: true)
 
             PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                 engine.applyPreset(preset)
@@ -217,7 +217,8 @@ struct ContentView: View {
             LooperView(looper: looper, theme: theme, accent: accent)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
 
-            if showControls {
+            // Not in landscape on a phone: the knobs would leave no play surface.
+            if showControls && geo.size.height > 600 {
                 ControlsView(engine: engine)
                     .padding(.top, 4)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -238,7 +239,8 @@ struct ContentView: View {
     private func ipadLayout(theme: AppTheme, geo: GeometryProxy) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
         return VStack(spacing: 0) {
-            header(theme: theme, compact: false)
+            // iPad portrait / narrow windows: fold the play-mode picker into More.
+            header(theme: theme, compact: false, narrow: geo.size.width < 900)
 
             PresetSelectorView(selectedIndex: $selectedPresetIndex, engine: engine) { preset in
                 engine.applyPreset(preset)
@@ -309,57 +311,50 @@ struct ContentView: View {
     // the visualizer, the performance meter and Settings.
     // iPhone (`compact`): one tight row of icon buttons, no menu.
 
-    private func header(theme: AppTheme, compact: Bool) -> some View {
+    private func header(theme: AppTheme, compact: Bool, narrow: Bool) -> some View {
         let accent = theme.accent(for: Color(hex: currentPreset.color))
         return HStack(spacing: compact ? 8 : 10) {
-            brandView(theme: theme, accent: accent, compact: compact)
-            Spacer(minLength: 8)
             if compact {
+                // Everything here has a fixed width; together they must fit a
+                // 375 pt screen, so there is no brand text and the play mode,
+                // visualizer and Settings live in the More menu.
                 transposeControls(theme: theme, accent: accent)
                 modeToggle(theme: theme, accent: accent, compact: true)
-                if !showDrumMachine {
-                    playModeControl(theme: theme, accent: accent, compact: true)
+                Spacer(minLength: 0)
+                HeaderMeter(compact: true, theme: theme, onlyWhenWarning: true)
+                iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
+                           label: showControls ? "Hide sound controls" : "Show sound controls",
+                           active: showControls, theme: theme) {
+                    withAnimation(.spring(response: 0.3)) { showControls.toggle() }
                 }
-                if midi.isConnected { midiChip(theme: theme, accent: accent) }
-                HeaderMeter(compact: true, theme: theme)
-                compactSystemButtons(theme: theme, accent: accent)
+                recordButton(theme: theme, accent: accent)
+                airPlayButton(theme: theme)
+                moreMenu(theme: theme, includesPlayMode: true)
             } else {
-                modeToggle(theme: theme, accent: accent, compact: false)
-                if !showDrumMachine {
+                brandView(theme: theme, accent: accent, compact: false)
+                    .layoutPriority(1)
+                Spacer(minLength: 8)
+                modeToggle(theme: theme, accent: accent, compact: narrow)
+                if !showDrumMachine && !narrow {
                     playModeControl(theme: theme, accent: accent, compact: false)
                 }
                 Spacer(minLength: 8)
                 transposeControls(theme: theme, accent: accent)
-                if midi.isConnected { midiChip(theme: theme, accent: accent) }
-                HeaderMeter(compact: false, theme: theme, onlyWhenWarning: !showMeter)
+                if midi.isConnected && !narrow {
+                    MidiActivityChip(theme: theme, accent: accent)
+                }
+                HeaderMeter(compact: narrow, theme: theme, onlyWhenWarning: !showMeter)
                 recordButton(theme: theme, accent: accent)
                 airPlayButton(theme: theme)
-                moreMenu(theme: theme)
+                moreMenu(theme: theme, includesPlayMode: narrow)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, compact ? 12 : 20)
         .padding(.top, 16)
         .padding(.bottom, 4)
     }
 
     // MARK: Header clusters
-
-    private func compactSystemButtons(theme: AppTheme, accent: Color) -> some View {
-        HStack(spacing: 8) {
-            iconButton(systemName: showControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle",
-                       active: showControls, theme: theme) {
-                withAnimation(.spring(response: 0.3)) { showControls.toggle() }
-            }
-            iconButton(systemName: "waveform.circle", active: showBlob, theme: theme) {
-                withAnimation(.spring(response: 0.4)) { showBlob.toggle() }
-            }
-            recordButton(theme: theme, accent: accent)
-            airPlayButton(theme: theme)
-            iconButton(systemName: "gearshape", active: false, theme: theme) {
-                showSettings = true
-            }
-        }
-    }
 
     private func airPlayButton(theme: AppTheme) -> some View {
         AirPlayButton(tintColor: UIColor(theme.secondaryText))
@@ -367,9 +362,20 @@ struct ContentView: View {
             .panelSurface(theme, radius: theme.chipRadius)
     }
 
-    /// iPad: the less-used actions, behind one button.
-    private func moreMenu(theme: AppTheme) -> some View {
+    /// The less-used actions, behind one button. `includesPlayMode`: narrow
+    /// headers have no room for the play-mode picker, so it moves in here.
+    private func moreMenu(theme: AppTheme, includesPlayMode: Bool) -> some View {
         Menu {
+            if includesPlayMode && !showDrumMachine {
+                Picker("Play mode", selection: Binding(
+                    get: { themeManager.playMode },
+                    set: { themeManager.selectPlayMode($0) })) {
+                    ForEach(PlayMode.allCases) { mode in
+                        Label(mode.label, systemImage: mode.icon).tag(mode)
+                    }
+                }
+                Divider()
+            }
             Toggle(isOn: $showBlob) {
                 Label("Visualizer", systemImage: "waveform.circle")
             }
@@ -464,7 +470,8 @@ struct ContentView: View {
     private func playModeControl(theme: AppTheme, accent: Color, compact: Bool) -> some View {
         if compact {
             // Compact: single cycling button (no room for a segmented control).
-            iconButton(systemName: themeManager.playMode.icon, active: false, theme: theme) {
+            iconButton(systemName: themeManager.playMode.icon,
+                       label: "Play mode: \(themeManager.playMode.label)", active: false, theme: theme) {
                 withAnimation(.spring(response: 0.3)) {
                     let modes = PlayMode.allCases
                     let idx   = modes.firstIndex(of: themeManager.playMode) ?? 0
@@ -540,23 +547,8 @@ struct ContentView: View {
         }
     }
 
-    private func midiChip(theme: AppTheme, accent: Color) -> some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(accent.opacity(midiActivityLit ? 1.0 : 0.3))
-                .frame(width: 6, height: 6)
-                .animation(.easeOut(duration: 0.2), value: midiActivityLit)
-            Text(String((midi.primaryDeviceName ?? "MIDI").prefix(12)))
-                .font(.system(size: 9, weight: .semibold, design: theme.fontDesign))
-                .foregroundColor(theme.secondaryText)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .panelSurface(theme, radius: theme.chipRadius)
-    }
-
-    private func iconButton(systemName: String, active: Bool, theme: AppTheme, action: @escaping () -> Void) -> some View {
+    private func iconButton(systemName: String, label: String, active: Bool, theme: AppTheme,
+                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 17))
@@ -566,6 +558,7 @@ struct ContentView: View {
                 .frame(width: 36, height: 36)
                 .panelSurface(theme, radius: theme.chipRadius)
         }
+        .accessibilityLabel(label)
     }
 
     @ViewBuilder
@@ -597,6 +590,40 @@ struct ContentView: View {
                           border: recorder.isRecording ? recColor.opacity(recBlink ? 0.9 : 0.3) : nil)
         }
         .disabled(recorder.isExporting)
+        .accessibilityLabel(recorder.isRecording ? "Stop recording" : "Record audio")
+    }
+}
+
+// MARK: - MIDI activity chip
+
+/// Connected-device chip whose dot flashes on incoming MIDI. Its own view on
+/// purpose: it is the only thing that reads `midi.activityPulse`, so a stream of
+/// MIDI notes re-renders this chip instead of the whole main screen.
+struct MidiActivityChip: View {
+    @Environment(MIDIController.self) private var midi
+    let theme: AppTheme
+    let accent: Color
+    @State private var lit = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(accent.opacity(lit ? 1.0 : 0.3))
+                .frame(width: 6, height: 6)
+                .animation(.easeOut(duration: 0.2), value: lit)
+            Text(String((midi.primaryDeviceName ?? "MIDI").prefix(12)))
+                .font(.system(size: 9, weight: .semibold, design: theme.fontDesign))
+                .foregroundColor(theme.secondaryText)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .panelSurface(theme, radius: theme.chipRadius)
+        .onChange(of: midi.activityPulse) {
+            lit = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { lit = false }
+        }
+        .accessibilityLabel("MIDI device \(midi.primaryDeviceName ?? "connected")")
     }
 }
 

@@ -20,6 +20,7 @@ struct LooperView: View {
 
             // ── Record ─────────────────────────────────────────────────────
             looperButton(
+                label: looper.isRecording ? "Stop loop recording" : "Record a loop",
                 icon: looper.isRecording ? "stop.fill" : "record.circle",
                 color: looper.isRecording ? .red : theme.secondaryText,
                 border: looper.isRecording ? Color.red.opacity(0.5) : theme.panelBorder
@@ -30,6 +31,7 @@ struct LooperView: View {
 
             // ── Play / Pause ────────────────────────────────────────────────
             looperButton(
+                label: looper.isPlaying ? "Pause loop" : "Play loop",
                 icon: looper.isPlaying ? "pause.fill" : "play.fill",
                 color: looper.isPlaying ? accent : (looper.hasLoop ? theme.primaryText : theme.secondaryText.opacity(0.3)),
                 border: looper.isPlaying ? accent.opacity(0.5) : theme.panelBorder
@@ -88,6 +90,7 @@ struct LooperView: View {
 
             // ── Clear ──────────────────────────────────────────────────────
             looperButton(
+                label: "Clear loop",
                 icon: "trash",
                 color: looper.hasLoop ? theme.secondaryText : theme.secondaryText.opacity(0.25),
                 border: theme.panelBorder
@@ -110,7 +113,7 @@ struct LooperView: View {
         return "EMPTY"
     }
 
-    private func looperButton(icon: String, color: Color, border: Color,
+    private func looperButton(label: String, icon: String, color: Color, border: Color,
                               action: @escaping () -> Void) -> some View {
         Button {
             action()
@@ -122,5 +125,6 @@ struct LooperView: View {
                 .frame(width: 30, height: 30)
                 .panelSurface(theme, radius: 7, border: border)
         }
+        .accessibilityLabel(label)
     }
 }

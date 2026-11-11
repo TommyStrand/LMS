@@ -112,7 +112,9 @@ struct PresetSelectorView: View {
                             value: engine.layerGain(for: idx),
                             color: accent
                         ) { engine.setLayerGain($0, for: idx) }
-                        .frame(width: 56, height: 56)
+                        // No fixed height: the iPad knob (72 pt + label) is taller
+                        // than the old 56 pt box and overflowed onto the name.
+                        .frame(minWidth: 56)
                     }
                 }
             }

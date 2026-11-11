@@ -774,8 +774,7 @@ final class ThemeManager {
                          color: BackdropPalette.RGB(hex: activePresetColor))
     }
 
-    private var activePalette: BackdropPalette? {
-        guard let source = backdrop else { return nil }
+    private func palette(for source: BackdropSource) -> BackdropPalette? {
         switch source {
         case .image(let url):         return palettes[url] ?? lastPalette
         case .abstract(_, let color): return BackdropPalette(presetColor: color)
@@ -785,13 +784,15 @@ final class ThemeManager {
     /// The theme the main screen draws with: glass surfaces, tinted to the scene,
     /// while a backdrop shows.
     var current: AppTheme {
-        backdrop == nil ? base : base.glass(palette: activePalette)
+        guard let source = backdrop else { return base }
+        return base.glass(palette: palette(for: source))
     }
 
     /// Opaque colour behind everything on the main screen: a very dark version of
     /// the scene's ambient colour while a backdrop shows, else the theme's own.
     var screenBackground: Color {
-        activePalette.map { $0.ambient.scaled(toMax: 0.07).color } ?? base.appBackground
+        guard let source = backdrop, let p = palette(for: source) else { return base.appBackground }
+        return p.ambient.scaled(toMax: 0.07).color
     }
 
     var controlStyle: ControlStyle {

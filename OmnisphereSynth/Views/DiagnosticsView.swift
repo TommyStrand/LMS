@@ -19,7 +19,7 @@ struct DiagnosticsView: View {
     private let pollTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let theme = themeManager.current
+        let theme = themeManager.base   // shown inside the Settings sheet: opaque theme
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {

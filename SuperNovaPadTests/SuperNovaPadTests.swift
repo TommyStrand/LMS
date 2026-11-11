@@ -825,4 +825,40 @@ final class SuperNovaPadTests: XCTestCase {
         // A zero-length buffer must not divide by zero.
         XCTAssertTrue(RenderParams.increment(from: from, to: to, frames: 0).phaser.isFinite)
     }
+
+    func testLoopScheduleIgnoresASlipBackAcrossTheLoopBoundary() {
+        let times = [0.1, 0.5, 0.9]
+        var s = LoopSchedule.State()
+        _ = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 0.95)   // pass 0 done
+        let wrap = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 1.01)
+        XCTAssertTrue(wrap.wrapped)
+        // The clock slips back to just before the boundary: nothing may fire —
+        // in particular not the whole loop at once.
+        let slip = LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 0.99)
+        XCTAssertEqual(slip.fire, [])
+        XCTAssertEqual(slip.tail, [])
+        XCTAssertFalse(slip.wrapped)
+        // …and playback carries on normally once time moves forward again.
+        XCTAssertEqual(LoopSchedule.advance(&s, eventTimes: times, loopDuration: 1, elapsed: 1.2).fire, [0])
+    }
+
+    func testLoopScheduleResumeGraceKeepsTheDownbeat() {
+        let times = [0.0, 0.5]
+        // Joining 0.1 s into a pass with a 0.2 s grace: the downbeat still plays.
+        var late = LoopSchedule.State(resumingAt: 4.1, eventTimes: times, loopDuration: 2, grace: 0.2)
+        XCTAssertEqual(LoopSchedule.advance(&late, eventTimes: times, loopDuration: 2, elapsed: 4.11).fire, [0])
+        // Joining well into the pass: the downbeat is history, not replayed.
+        var mid = LoopSchedule.State(resumingAt: 4.4, eventTimes: times, loopDuration: 2, grace: 0.2)
+        XCTAssertEqual(LoopSchedule.advance(&mid, eventTimes: times, loopDuration: 2, elapsed: 4.41).fire, [])
+    }
+
+    func testDistortionHasNoGainStepAtTheBypassThreshold() {
+        // Just above the 0.001 bypass the shaper must be (almost) transparent, so
+        // fading a distorted preset out does not end in a level jump.
+        let x: Float = 0.2
+        XCTAssertEqual(tubeSaturate(x, drive: 0.0011), x, accuracy: 0.005)
+        XCTAssertEqual(tubeSaturate(x, drive: 0), x)
+        // At normal settings it still drives the signal.
+        XCTAssertGreaterThan(tubeSaturate(x, drive: 0.5), x * 1.5)
+    }
 }

@@ -70,10 +70,14 @@ sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `B
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- No parameter steps on the audio path: the render thread glides `RenderParams` toward the published values
+  (per-sample ramp), AU-node levels are ramped in `applyPresetToNodes`, reverb preset / delay time change only
+  at zero wet, and a boutique effect is `reset()` once it has faded out (stale delay lines pop when re-enabled).
+  New effects need a `reset()` and must be continuous at their bypass threshold
 - Looper ↔ drums: with SYNC on (`LooperEngine.syncToDrums`, the button in the looper strip) and the drums
   running, a recorded take is snapped to bars (`LoopSync.align`) and played from the drum clock
-  (`DrumEngine.beatsNow()`, derived from the render callback's host timestamps — one Double written by the
-  render thread, like `renderBeatFraction`), so it stays locked and follows tempo. Drums stopped / SYNC off →
+  (`DrumEngine.beatsNow()`: the render thread publishes an anchor — buffer host time + beat count, two plain
+  Doubles like `renderBeatFraction` — and main extrapolates the few ms since it), so it stays locked and follows tempo. Drums stopped / SYNC off →
   free wall-clock loop. The looper records synth notes only; the header record button captures synth + drums audio
 - iPad main screen (ContentView.ipadLayout), top to bottom: header (wordmark + preset name + key/mode),
   preset strip (scene-thumbnail chips from `BackdropThumbnails`, ≤320 px via ImageIO — never the full images),

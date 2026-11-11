@@ -440,6 +440,12 @@ func tubeSaturate(_ sample: Float, drive: Float) -> Float {
     let normalize   = Float(tanh(g))
     let warmed      = tanh(Double(sample) * g + bias) - tanh(bias)
     let outputGain  = 1.0 - Double(drive) * 0.2       // gentle make-up volume drop
-    return Float(warmed * outputGain) / normalize
+    let saturated   = Float(warmed * outputGain) / normalize
+    // Even at drive → 0 the shaper above has ~1.3× small-signal gain (tanh(x) /
+    // tanh(1)), so switching it in or out at the 0.001 bypass was a 2.4 dB step —
+    // a click whenever a distorted preset faded to a clean one. Blend from the
+    // dry signal over the first 5 % of the knob so the gain is continuous.
+    let wet = min(1, drive / 0.05)
+    return sample + (saturated - sample) * wet
 }
 

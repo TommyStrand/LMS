@@ -1019,7 +1019,10 @@ final class AudioEngine {
     /// (~10 ms) the render thread can lag behind.
     private func retire(_ snapshot: RenderSnapshot) {
         retiredSnapshots.append(snapshot)
-        if retiredSnapshots.count > 8 { retiredSnapshots.removeFirst() }
+        // 64, not 8: a three-finger chord over four layers is 12 publishes inside
+        // one render buffer, which would push the snapshot the render thread still
+        // holds out of an 8-slot ring and leave IT to do the final free.
+        if retiredSnapshots.count > 64 { retiredSnapshots.removeFirst() }
     }
 
     /// When true the pad's vertical axis morphs the synth waveform (MorphWiz
@@ -1079,7 +1082,7 @@ final class AudioEngine {
     /// note is released (not every slot playing the same MIDI number).
     private func releaseSampler(_ info: (instrumentID: String, note: Int, handle: SamplerEngine.Handle?)) {
         guard let se = samplerEngines[info.instrumentID] else { return }
-        if let handle = info.handle { se.noteOff(handle) } else { se.noteOff(UInt8(info.note)) }
+        if let handle = info.handle { se.noteOff(handle) } else { se.noteOff(UInt8(clamping: info.note)) }
     }
 
     /// Sampler presets (piano, strings, flute, organ) bend by re-tuning the note's
