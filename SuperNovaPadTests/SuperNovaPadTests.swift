@@ -77,7 +77,9 @@ final class SuperNovaPadTests: XCTestCase {
     // MARK: - Sampler descriptor invariants (what SamplerEngine.load() asserts at runtime)
 
     func testEverySamplerInstrumentHasValidRootsAndContiguousVelocityLayers() {
-        let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan]
+        let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan,
+                                                .reedOrgan, .musetteAccordion, .concertChoir,
+                                                .voiceOohs, .fiddle]
         for inst in instruments {
             XCTAssertFalse(inst.rootNotes.isEmpty, "\(inst.id) has no roots")
             XCTAssertEqual(inst.rootNotes, inst.rootNotes.sorted(), "\(inst.id) roots not ascending")
@@ -992,6 +994,26 @@ final class SuperNovaPadTests: XCTestCase {
         SustainLoop.makeSeamless(&x, loop: 22050..<66150, crossfade: 4410)     // ends 441 periods apart
         for i in stride(from: 66150 - 4410, to: 66150, by: 97) {
             XCTAssertEqual(x[i], before[i], accuracy: 0.01)
+        }
+    }
+
+    // MARK: - Recorded reeds, choir, voices and fiddle
+
+    func testAcousticPresetsAreRecordingsNotSynthPatches() {
+        // These were two-oscillator synth patches and sounded like it. They must
+        // stay sampler presets (real recordings), held by a sustain loop.
+        let expected: [String: SamplerInstrument] = [
+            "Harmonium": .reedOrgan, "Musette Accordion": .musetteAccordion,
+            "Choir Ahs": .concertChoir, "Vox Humana": .voiceOohs, "Hurdy-Gurdy": .fiddle,
+        ]
+        for (name, instrument) in expected {
+            // (A sampler preset is hidden when its folder isn't bundled, e.g. in a
+            // checkout without the samples — then there is nothing to check.)
+            guard let preset = SynthPreset.presets.first(where: { $0.name == name }) else { continue }
+            XCTAssertEqual(preset.voiceMode, .sampler(instrument), "\(name) should play \(instrument.id)")
+            XCTAssertTrue(instrument.sustainLoop, "\(instrument.id) must hold while the key is down")
+            XCTAssertFalse(instrument.loops)
+            XCTAssertEqual(instrument.velocityLayers.count, 1)
         }
     }
 }

@@ -212,7 +212,7 @@ struct SettingsView: View {
                             infoRow("Play modes", value: PlayMode.allCases.map(\.label).joined(separator: " · "), theme: theme)
                             infoRow("Effects",    value: "Trem · Chorus · Drive · Phaser · A.Wah · Lo-Fi · Grit · Reverb · Delay · Shimmer · S.Echo · B.Tape · Bloom · Waver", theme: theme)
                             infoRow("Also",       value: "Looper · Drum machine · MIDI in · Recording · AirPlay", theme: theme)
-                            infoRow("Samples",    value: "Strings and flute: VSCO 2 Community Edition by Versilian Studios (CC0).", theme: theme)
+                            infoRow("Samples",    value: "Strings and flute: VSCO 2 Community Edition by Versilian Studios (CC0). Reeds, choir, voices and fiddle: GeneralUser GS by S. Christian Collins.", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)

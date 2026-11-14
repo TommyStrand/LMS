@@ -221,6 +221,54 @@ struct SamplerInstrument: Equatable, Hashable {
         sustainLoop: true,                          // attack once, then the held tone loops
         loopCrossfade: 0.2
     )
+    // ── Instruments built from the GeneralUser GS SoundFont ──────────────────────
+    // (Scripts/build_soundfont_instruments.py; in git.) Short real recordings —
+    // attack + loop — of accordion reeds, a choir, voices and a violin. They
+    // replaced two-oscillator synth patches that sounded nothing like the
+    // instruments. One velocity layer each: these instruments don't change
+    // character with touch, and one layer halves the memory.
+    static let oneLayer = [VelocityLayer(midiValue: 64, loVel: 0, hiVel: 127)]
+
+    static let reedOrgan = SamplerInstrument(
+        id: "reed_organ", displayName: "Harmonium",
+        rootNotes: [54, 58, 62, 66, 70, 74, 78, 82, 86, 90],
+        velocityLayers: oneLayer,
+        attack: 0.06, release: 0.14,      // bellows speak softly and stop quickly
+        sustainLoop: true
+    )
+    static let musetteAccordion = SamplerInstrument(
+        id: "musette_accordion", displayName: "Musette Accordion",
+        rootNotes: [54, 58, 62, 66, 70, 74, 78, 82, 86, 90],
+        velocityLayers: oneLayer,
+        attack: 0.03, release: 0.12,
+        sustainLoop: true,
+        loopCrossfade: 0.2                // three beating reeds: not a steady tone
+    )
+    static let concertChoir = SamplerInstrument(
+        id: "concert_choir", displayName: "Choir",
+        rootNotes: [45, 49, 51, 55, 59, 61, 65, 69, 71, 73, 77, 78],
+        velocityLayers: oneLayer,
+        attack: 0.12, release: 0.5,
+        sustainLoop: true,
+        loopCrossfade: 0.25
+    )
+    static let voiceOohs = SamplerInstrument(
+        id: "voice_oohs", displayName: "Voices",
+        rootNotes: [63, 69, 73, 77, 80, 83],
+        velocityLayers: oneLayer,
+        attack: 0.08, release: 0.4,
+        sustainLoop: true,
+        loopCrossfade: 0.25
+    )
+    static let fiddle = SamplerInstrument(
+        id: "fiddle", displayName: "Fiddle",
+        rootNotes: [55, 58, 63, 66, 70, 73, 76, 77, 82, 86, 90],
+        velocityLayers: oneLayer,
+        attack: 0.03, release: 0.18,
+        sustainLoop: true,
+        loopCrossfade: 0.2
+    )
+
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
     // exist only where the importer ran — so roots are discovered from the folder
@@ -557,50 +605,29 @@ extension SynthPreset {
         SynthPreset(
             name: "Harmonium",
             color: "#8B3A3A",
-            voiceMode: .synth,
-            // Free reeds: a bright, slightly nasal sawtooth tone. Two reed banks —
-            // 8' and 16' — a few cents apart; a slow bellows swell; NO tremolo and no
-            // chorus (it had both, plus distortion, and sounded like a wobbly synth).
-            osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
-            osc2Detune: -12, oscMix: 0.35,
-            filterCutoff: 1500, filterResonance: 0.3, filterEnvAmount: 0.0,
-            attack: 0.09, decay: 0.3, sustain: 0.92, release: 0.16,
-            lfoRate: 0.25, lfoDepth: 0.08, lfoTarget: .amplitude,
-            reverbMix: 0.2, delayMix: 0.0, delayTime: 0.375, chorusMix: 0.0,
-            gritAmount: 0.05,
-            unisonCents: 4, stereoWidth: 0.3, keyTrack: 0.65,
-            level: 0.75,
+            voiceMode: .sampler(.reedOrgan),      // real reeds: 8' + 16' bank, a faint beat
+            attack: 0.06, decay: 0.2, sustain: 0.9, release: 0.14,
+            reverbMix: 0.22, delayMix: 0.0, delayTime: 0.375, chorusMix: 0.0,
             iconStyle: .churchPipes
         ),
 
         SynthPreset(
             name: "Musette Accordion",
             color: "#CC4444",
-            voiceMode: .synth,
-            osc1Waveform: .sawtooth, osc2Waveform: .sawtooth,
-            osc2Detune: 12, oscMix: 0.25,
-            filterCutoff: 3200, filterResonance: 0.1, filterEnvAmount: 0.0,
-            attack: 0.03, decay: 0.1, sustain: 0.95, release: 0.3,
-            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
-            reverbMix: 0.25, delayMix: 0.05, delayTime: 0.25, chorusMix: 0.3,
-            unisonCents: 14, stereoWidth: 0.5,       // the classic musette beating
-            level: 0.8,
+            voiceMode: .sampler(.musetteAccordion),   // three real reeds, tuned apart: the musette beat
+            attack: 0.03, decay: 0.1, sustain: 0.95, release: 0.12,
+            reverbMix: 0.2, delayMix: 0.04, delayTime: 0.25, chorusMix: 0.0,
             iconStyle: .pulseBolt
         ),
 
         SynthPreset(
             name: "Hurdy-Gurdy",
             color: "#7B5C3A",
-            voiceMode: .synth,
-            osc1Waveform: .sawtooth, osc2Waveform: .square,
-            osc2Detune: -12, oscMix: 0.3,            // octave below for body (was a parallel fifth)
-            filterCutoff: 1700, filterResonance: 0.35, filterEnvAmount: 0.15,
-            attack: 0.04, decay: 0.2, sustain: 0.9, release: 0.5,
-            lfoRate: 0.0, lfoDepth: 0.0, lfoTarget: .amplitude,
-            reverbMix: 0.3, delayMix: 0.08, delayTime: 0.375, chorusMix: 0.2,
-            tremulantDepth: 0.3, gritAmount: 0.25,
-            unisonCents: 6, stereoWidth: 0.4, keyTrack: 0.6,
-            level: 0.85,
+            // A real bowed string (solo violin) — the nearest free recording to the
+            // hurdy-gurdy's wheel-bowed strings; there is no hurdy-gurdy sample set.
+            voiceMode: .sampler(.fiddle),
+            attack: 0.03, decay: 0.2, sustain: 0.9, release: 0.18,
+            reverbMix: 0.3, delayMix: 0.06, delayTime: 0.375, chorusMix: 0.0,
             iconStyle: .hammondTonewheel
         ),
 
@@ -609,31 +636,19 @@ extension SynthPreset {
         SynthPreset(
             name: "Choir Ahs",
             color: "#9B7FD4",
-            voiceMode: .synth,
-            osc1Waveform: .sawtooth, osc2Waveform: .triangle,
-            osc2Detune: 12, oscMix: 0.25,
-            filterCutoff: 1100, filterResonance: 0.35, filterEnvAmount: 0.1,   // an "ah" formant…
-            attack: 1.0, decay: 0.5, sustain: 0.85, release: 2.5,
-            lfoRate: 0.8, lfoDepth: 0.12, lfoTarget: .amplitude,
-            reverbMix: 0.8, delayMix: 0.1, delayTime: 0.666, chorusMix: 0.5,
-            shimmerAmount: 0.3, bloomAmount: 0.35,
-            unisonCents: 12, keyTrack: 0.2,                                    // …that stays put across the keys
+            voiceMode: .sampler(.concertChoir),   // a real mixed choir singing "aah"
+            attack: 0.12, decay: 0.5, sustain: 0.85, release: 0.5,
+            reverbMix: 0.75, delayMix: 0.08, delayTime: 0.666, chorusMix: 0.0,
+            shimmerAmount: 0.15,
             iconStyle: .mysticWave
         ),
 
         SynthPreset(
             name: "Vox Humana",
             color: "#E8A060",
-            voiceMode: .synth,
-            osc1Waveform: .square, osc2Waveform: .triangle,
-            osc2Detune: 12, oscMix: 0.3,
-            filterCutoff: 1300, filterResonance: 0.4, filterEnvAmount: 0.2,
-            attack: 0.2, decay: 0.3, sustain: 0.8, release: 1.0,
-            lfoRate: 5.0, lfoDepth: 0.08, lfoTarget: .amplitude,
-            reverbMix: 0.5, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.35,
-            tremulantDepth: 0.25,
-            unisonCents: 8, keyTrack: 0.3,
-            level: 0.65,
+            voiceMode: .sampler(.voiceOohs),      // real voices singing "ooh"
+            attack: 0.08, decay: 0.3, sustain: 0.8, release: 0.4,
+            reverbMix: 0.55, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.0,
             iconStyle: .churchPipes
         ),
 
@@ -643,15 +658,20 @@ extension SynthPreset {
             name: "Ondes Martenot",
             color: "#2D9E8F",
             voiceMode: .synth,
+            // The ondes IS an electronic instrument — one valve oscillator — so it
+            // stays a synth. What it had wrong was the movement: an amplitude
+            // tremolo (twice over) instead of the player's PITCH vibrato, which is
+            // the whole character of the instrument.
             osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 0, oscMix: 0.0,              // single oscillator
-            filterCutoff: 8000, filterResonance: 0.0, filterEnvAmount: 0.0,
-            attack: 0.08, decay: 0.1, sustain: 1.0, release: 0.8,
-            lfoRate: 5.5, lfoDepth: 0.18, lfoTarget: .amplitude,
-            reverbMix: 0.45, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.0,
-            tremulantDepth: 0.25,
-            fmIndex: 0.35, fmRatio: 2, fmDecay: 3.0, // a touch of warmth on the pure sine
-            level: 0.42,
+            osc2Detune: 0, oscMix: 0.0,
+            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            attack: 0.06, decay: 0.1, sustain: 1.0, release: 0.5,
+            lfoRate: 5.2, lfoDepth: 0.12, lfoTarget: .pitch,
+            reverbMix: 0.5, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.0,
+            tremulantDepth: 0.0,
+            bloomAmount: 0.15,                       // the resonating "palme" speaker
+            fmIndex: 0.45, fmRatio: 1, fmDecay: 5.0, // a little valve warmth on the sine
+            level: 0.4,
             iconStyle: .voidHole
         ),
 
