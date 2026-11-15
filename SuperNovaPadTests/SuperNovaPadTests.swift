@@ -79,7 +79,8 @@ final class SuperNovaPadTests: XCTestCase {
     func testEverySamplerInstrumentHasValidRootsAndContiguousVelocityLayers() {
         let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan,
                                                 .reedOrgan, .musetteAccordion, .concertChoir,
-                                                .voiceOohs]
+                                                .voiceOohs, .celesta, .vibraphone, .wineGlasses,
+                                                .bowedPsaltery, .churchOrgan]
         for inst in instruments {
             XCTAssertFalse(inst.rootNotes.isEmpty, "\(inst.id) has no roots")
             XCTAssertEqual(inst.rootNotes, inst.rootNotes.sorted(), "\(inst.id) roots not ascending")
@@ -914,11 +915,11 @@ final class SuperNovaPadTests: XCTestCase {
     }
 
     func testPercussiveVoiceFreesItselfWithoutARelease() {
-        // Sustain 0 (celesta, vibraphone): once decayed the voice is done, even
-        // while the key is still held — it must not occupy a polyphony slot.
-        let celesta = try! XCTUnwrap(SynthPreset.presets.first { $0.name == "Celesta" })
-        XCTAssertEqual(celesta.sustain, 0)
-        let voice = SynthVoice(note: 72, velocity: 0.8, preset: celesta, sampleRate: 44100)
+        // Sustain 0 (a plucked or struck synth patch): once decayed the voice is
+        // done, even while the key is still held — it must not occupy a polyphony slot.
+        let pluck = SynthPreset(name: "Test Pluck", color: "#FFFFFF",
+                                attack: 0.001, decay: 0.8, sustain: 0.0, release: 0.5)
+        let voice = SynthVoice(note: 72, velocity: 0.8, preset: pluck, sampleRate: 44100)
         voice.start()
         var samples = 0
         while !voice.isFinished && samples < 44_100 * 10 {
@@ -1005,7 +1006,17 @@ final class SuperNovaPadTests: XCTestCase {
         let expected: [String: SamplerInstrument] = [
             "Harmonium": .reedOrgan, "Musette Accordion": .musetteAccordion,
             "Choir Ahs": .concertChoir, "Vox Humana": .voiceOohs,
+            "Glass Harmonica": .wineGlasses, "Bowed Psaltery": .bowedPsaltery,
+            "Church Organ": .churchOrgan,
         ]
+        // Struck instruments are recordings too, but one-shots (they die away).
+        for (name, instrument) in ["Celesta": SamplerInstrument.celesta, "Vibraphone": .vibraphone] {
+            guard let preset = SynthPreset.presets.first(where: { $0.name == name }) else { continue }
+            XCTAssertEqual(preset.voiceMode, .sampler(instrument))
+            XCTAssertFalse(instrument.sustainLoop, "\(instrument.id) dies away; it must not be held by a loop")
+            XCTAssertFalse(instrument.loops)
+        }
+        XCTAssertTrue(SynthPreset(name: "t", color: "#000000", voiceMode: .sampler(.churchOrgan)).isOrgan)
         for (name, instrument) in expected {
             // (A sampler preset is hidden when its folder isn't bundled, e.g. in a
             // checkout without the samples — then there is nothing to check.)

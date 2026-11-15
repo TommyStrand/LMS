@@ -23,6 +23,8 @@ What is built (one velocity layer each, mono 16-bit 44.1 kHz, {midi}_64.wav):
                      flat — the musette "wet" beat  → Musette Accordion
   concert_choir      mixed choir "aah"              → Choir Ahs
   voice_oohs         voices "ooh"                   → Vox Humana
+  celesta            celesta, with its dying-away baked in (a one-shot)
+                                                    → Celesta
 
 Each note is rendered as attack + the SoundFont's own loop repeated to a few
 seconds, so the app's sustain loop has steady material to hold. The pitch of
@@ -228,7 +230,15 @@ INSTRUMENTS = {
     "musette_accordion": (21, 3.5, [(0, 1.0), (13, 0.8), (-11, 0.7)], False),
     "concert_choir":     (52, 3.5, [(0, 1.0)], True),
     "voice_oohs":        (53, 3.5, [(0, 1.0)], False),
+    "celesta":           (8, 3.0, [(0, 1.0)], False),
 }
+
+
+# Struck instruments: in a SoundFont the note's dying away is NOT in the
+# recording (the loop would ring for ever) but applied by the player. Here it is
+# baked in: seconds for the sound to fall to 1/e at middle C; each octave up
+# rings about 30 % shorter, as struck bars do. The result is a one-shot.
+DECAY = {"celesta": 0.7}
 
 
 def build(name: str, sf: SoundFont, tmp: Path) -> list[int]:
@@ -262,6 +272,9 @@ def build(name: str, sf: SoundFont, tmp: Path) -> list[int]:
         mixed = mix(voices)[:int(seconds * RATE)]
         if flatten:
             mixed = flatten_sustain(mixed, RATE)
+        if name in DECAY:
+            tau = DECAY[name] * 2 ** (-(note - 60) / 24) * RATE
+            mixed = [v * math.exp(-i / tau) for i, v in enumerate(mixed)]
         write_wav(out_dir / f"{note}_64.wav", mixed)
         roots.append(note)
         print(f"  {name}: MIDI {note}  (measured {measured:6.2f}, declared {sample['declared']:6.2f} "

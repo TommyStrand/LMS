@@ -1,5 +1,12 @@
 # LMS / OmnisphereSynth — Claude Code Notes
 
+## What this app is meant to be
+The owner started this project to get **the kind of sounds Spectrasonics Omnisphere is known for**, on an
+iPad touch surface: rich, organic, cinematic — real recorded sources (often unusual instruments) blended with
+synthesis, long evolving pads and textures, generous space. Judge every sound decision against that. It is
+NOT meant to be a bank of plain synth patches or a General-MIDI instrument list. Never copy Omnisphere's
+own samples or patches; build original sounds in that spirit from freely licensed recordings.
+
 ## Branch
 All development happens on `claude/ios-music-creation-app-1Bpf8`.
 
@@ -16,8 +23,8 @@ git pull origin claude/ios-music-creation-app-1Bpf8
 - `OmnisphereSynth/Views/` — SwiftUI views
 - `OmnisphereSynth/Models/` — SynthPreset, SamplerInstrument
 - `OmnisphereSynth/Resources/Samples/` — WAV samples (folder reference in Xcode; subfolders are bundled automatically). Strings and flute are REAL recordings in git (VSCO 2 Community Edition, CC0), installed by `Scripts/fetch_free_samples.py`. There is no sampled piano (removed at the owner's request). `generate_samples.py` still produces the old synthesised sets if ever needed.
-- `Scripts/fetch_free_samples.py` — downloads those recordings file by file from GitHub (raw.githubusercontent.com), converts with ffmpeg (mono 16-bit 44.1 kHz, leading silence removed, trimmed), FLATTENS the level of the held part (players swell by up to 10 dB, which pumps when looped), peak-normalises and patches the descriptors. VSCO 2 names octaves one lower than standard (its "C3" = MIDI 60)
-- `Scripts/build_soundfont_instruments.py` — builds `reed_organ`, `musette_accordion`, `concert_choir`, `voice_oohs` (one velocity layer, `{midi}_64.wav`, in git) from the GeneralUser GS SoundFont: attack + the SoundFont's own loop repeated to 3.5 s, each recording re-pitched onto an exact semitone using the bank's declared tuning (checked against a measured pitch). They back the Harmonium, Musette Accordion, Choir Ahs and Vox Humana presets. (Hurdy-Gurdy and Ondes Martenot were removed at the owner's request: no free hurdy-gurdy recording exists, and the ondes could only be a synth.) Licence caveat in CREDITS.md
+- `Scripts/fetch_free_samples.py` — also installs `vibraphone`, `wine_glasses` (→ Glass Harmonica), `bowed_psaltery` and `church_organ` from VCSL (CC0; one layer, `{midi}_64.wav`): key from the file name (VCSL also names octaves one low), fine tuning from a measured pitch; wine glasses are untuned, so there the measurement decides the key. For VSCO 2 it downloads those recordings file by file from GitHub (raw.githubusercontent.com), converts with ffmpeg (mono 16-bit 44.1 kHz, leading silence removed, trimmed), FLATTENS the level of the held part (players swell by up to 10 dB, which pumps when looped), peak-normalises and patches the descriptors. VSCO 2 names octaves one lower than standard (its "C3" = MIDI 60)
+- `Scripts/build_soundfont_instruments.py` — builds `reed_organ`, `musette_accordion`, `concert_choir`, `voice_oohs` and `celesta` (a one-shot with its decay baked in) (one velocity layer, `{midi}_64.wav`, in git) from the GeneralUser GS SoundFont: attack + the SoundFont's own loop repeated to 3.5 s, each recording re-pitched onto an exact semitone using the bank's declared tuning (checked against a measured pitch). They back the Harmonium, Musette Accordion, Choir Ahs and Vox Humana presets. (Hurdy-Gurdy and Ondes Martenot were removed at the owner's request: no free hurdy-gurdy recording exists, and the ondes could only be a synth.) Licence caveat in CREDITS.md
 - `Scripts/generate_samples.py` — regenerates the synthesised WAV samples (piano/strings/flute)
 - `Scripts/import_samples.py` — converts free sample libraries (Salamander piano, VSCO2 strings/flute, SFZ organ, or generic) to the app's mono 16-bit 44.1 kHz `{note}_{velocity}.wav` layout. Each recording is written under its OWN source note (never a target grid note — that played it out of tune), the target folder is cleared first, and for git-tracked instruments the descriptor's `rootNotes` is patched to the notes written and `loops` set to false (real recordings are one-shot). `validate_samples.py` checks folders against those declared `rootNotes`
 - `Scripts/validate_samples.py` — validates the sample library (run in QA / CI)

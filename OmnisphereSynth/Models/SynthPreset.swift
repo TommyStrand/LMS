@@ -75,8 +75,13 @@ struct SynthPreset: Identifiable, Equatable {
         case sampler(SamplerInstrument)
     }
 
+    /// Organs get the cathedral reverb. (The church and pipe organs are sampler
+    /// presets now, so the voice mode alone no longer says "organ".)
     var isOrgan: Bool {
-        voiceMode == .organChurch || voiceMode == .hammondB3
+        if case .sampler(let instrument) = voiceMode {
+            return instrument.id == "church_organ" || instrument.id == "pipe_organ"
+        }
+        return voiceMode == .organChurch || voiceMode == .hammondB3
     }
 
     enum Waveform: Int, CaseIterable {
@@ -261,6 +266,44 @@ struct SamplerInstrument: Equatable, Hashable {
         loopCrossfade: 0.25
     )
 
+    static let celesta = SamplerInstrument(
+        id: "celesta", displayName: "Celesta",
+        rootNotes: [63, 69, 78, 87],
+        velocityLayers: oneLayer          // one-shot: the dying-away is in the recording
+    )
+
+    // ── Instruments from the Versilian Community Sample Library (VCSL, CC0) ──────
+    // (Scripts/fetch_free_samples.py; in git.) Full-length real recordings.
+    static let vibraphone = SamplerInstrument(
+        id: "vibraphone", displayName: "Vibraphone",
+        rootNotes: [53, 57, 60, 64, 67, 71, 74, 77, 81, 84, 88],
+        velocityLayers: oneLayer          // one-shot: struck bars ring and die away
+    )
+    static let wineGlasses = SamplerInstrument(
+        id: "wine_glasses", displayName: "Wine Glasses",
+        rootNotes: [75, 78, 83, 86],
+        velocityLayers: oneLayer,
+        attack: 0.15, release: 0.6,       // a rubbed rim speaks and stops slowly
+        sustainLoop: true,
+        loopCrossfade: 0.25
+    )
+    static let bowedPsaltery = SamplerInstrument(
+        id: "bowed_psaltery", displayName: "Bowed Psaltery",
+        rootNotes: [70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90],
+        velocityLayers: oneLayer,
+        attack: 0.05, release: 0.4,
+        sustainLoop: true,
+        loopCrossfade: 0.25
+    )
+    static let churchOrgan = SamplerInstrument(
+        id: "church_organ", displayName: "Church Organ",
+        rootNotes: [36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72, 75, 78, 81, 84, 87, 90, 93, 96],
+        velocityLayers: oneLayer,
+        attack: 0.01, release: 0.25,      // the pipe stops quickly; the reverb carries the tail
+        sustainLoop: true,
+        loopCrossfade: 0.1
+    )
+
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
     // exist only where the importer ran — so roots are discovered from the folder
@@ -318,12 +361,9 @@ extension SynthPreset {
         SynthPreset(
             name: "Church Organ",
             color: "#C4A35A",
-            voiceMode: .organChurch,
-            filterCutoff: 8000, filterResonance: 0,
-            attack: 0.005, decay: 0, sustain: 1.0, release: 0.04,
-            lfoRate: 0, lfoDepth: 0, lfoTarget: .amplitude,
-            reverbMix: 0.65, delayMix: 0.06, delayTime: 0.5, chorusMix: 0.0,
-            tremulantDepth: 0.0,                           // a plain principal chorus has no tremulant (TREM knob adds it)
+            voiceMode: .sampler(.churchOrgan),    // a real church organ, open registration
+            attack: 0.01, decay: 0, sustain: 1.0, release: 0.25,
+            reverbMix: 0.6, delayMix: 0.05, delayTime: 0.5, chorusMix: 0.0,
             iconStyle: .churchPipes
         ),
         SynthPreset(
@@ -457,27 +497,17 @@ extension SynthPreset {
         SynthPreset(
             name: "Celesta",
             color: "#7DD3FC",
-            voiceMode: .synth,
-            osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.2,
-            filterCutoff: 7000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            voiceMode: .sampler(.celesta),        // a real celesta
             attack: 0.001, decay: 1.3, sustain: 0.0, release: 0.9,
-            reverbMix: 0.72, delayMix: 0.18, chorusMix: 0.0,
-            keyTrack: 0.3, fmIndex: 2.2, fmRatio: 4, fmDecay: 0.25,   // bright metal strike that settles fast
+            reverbMix: 0.6, delayMix: 0.15, chorusMix: 0.0,
             iconStyle: .celestialDots
         ),
         SynthPreset(
             name: "Vibraphone",
             color: "#FCD34D",
-            voiceMode: .synth,
-            osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.15,
-            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
+            voiceMode: .sampler(.vibraphone),     // a real vibraphone, hard mallets
             attack: 0.002, decay: 2.2, sustain: 0.0, release: 1.4,
-            lfoRate: 6.0, lfoDepth: 0.0, lfoTarget: .amplitude,
-            reverbMix: 0.62, delayMix: 0.10,
-            tremulantDepth: 0.4,                           // the motor tremolo (was applied twice)
-            keyTrack: 0.3, fmIndex: 1.3, fmRatio: 4, fmDecay: 0.5,    // vibe bars: a tuned 4th partial
+            reverbMix: 0.5, delayMix: 0.08,
             iconStyle: .solarRadial
         ),
 
@@ -533,15 +563,10 @@ extension SynthPreset {
         SynthPreset(
             name: "Bowed Psaltery",
             color: "#D4A843",
-            voiceMode: .synth,
-            osc1Waveform: .sawtooth, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.3,
-            filterCutoff: 2600, filterResonance: 0.2, filterEnvAmount: 0.1,
-            attack: 0.5, decay: 0.4, sustain: 0.8, release: 2.2,
-            lfoRate: 5.5, lfoDepth: 0.1, lfoTarget: .amplitude,
-            reverbMix: 0.6, delayMix: 0.1, delayTime: 0.4, chorusMix: 0.2,
-            shimmerAmount: 0.25, bloomAmount: 0.2,
-            unisonCents: 5, keyTrack: 0.6,
+            voiceMode: .sampler(.bowedPsaltery),  // a real bowed psaltery, long bow strokes
+            attack: 0.05, decay: 0.4, sustain: 0.8, release: 0.4,
+            reverbMix: 0.55, delayMix: 0.1, delayTime: 0.4, chorusMix: 0.0,
+            shimmerAmount: 0.15,
             iconStyle: .solarRadial
         ),
 
@@ -550,15 +575,10 @@ extension SynthPreset {
         SynthPreset(
             name: "Glass Harmonica",
             color: "#A8D8EA",
-            voiceMode: .synth,
-            osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 12, oscMix: 0.3,             // octave sine for glassy shimmer
-            filterCutoff: 4000, filterResonance: 0.3, filterEnvAmount: 0.1,
-            attack: 1.2, decay: 0.5, sustain: 0.8, release: 3.0,
-            lfoRate: 3.5, lfoDepth: 0.12, lfoTarget: .amplitude,
-            reverbMix: 0.85, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.3,
-            shimmerAmount: 0.45, bloomAmount: 0.35,
-            unisonCents: 4, fmIndex: 0.5, fmRatio: 3, fmDecay: 3.0,
+            voiceMode: .sampler(.wineGlasses),    // real wine glasses, rubbed on the rim
+            attack: 0.15, decay: 0.5, sustain: 0.8, release: 0.6,
+            reverbMix: 0.75, delayMix: 0.12, delayTime: 0.666, chorusMix: 0.0,
+            shimmerAmount: 0.3,
             iconStyle: .celestialDots
         ),
 

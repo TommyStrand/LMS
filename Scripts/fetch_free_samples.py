@@ -21,6 +21,10 @@ note), which is musical in a performance but ruins a sample that has to LOOP:
 each pass would swell and jump. So after the attack the level is flattened
 (`flatten_sustain`) — the app's sustain loop then repeats without pumping.
 
+Also installed here, from the Versilian Community Sample Library (VCSL, same
+studio, also CC0): Vibraphone, Wine Glasses (→ Glass Harmonica), Bowed Psaltery
+and a real church organ (→ Church Organ). See VCSL_INSTRUMENTS below.
+
 Needs: python3, curl, ffmpeg. Downloads ~60 MB into a cache folder (default
 ~/.cache/supernova-samples, override with --cache); re-runs reuse the cache.
 
@@ -34,6 +38,8 @@ from __future__ import annotations
 
 import argparse
 import array
+import math
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -203,13 +209,124 @@ def install(instrument: str, cache: Path) -> None:
     import_samples.patch_descriptor(SWIFT, instrument, roots)
 
 
+# ── VCSL instruments (measured pitch) ────────────────────────────────────────
+# Versilian Community Sample Library, https://github.com/sgossner/VCSL (CC0 1.0).
+# name → (folder in the library, file names, seconds kept, fade-out seconds,
+#         flatten the held part?, tuned to concert pitch?). One velocity layer
+#         each: {midi}_64.wav.
+# Pitch: VCSL names octaves one lower than standard (its "C3" = MIDI 60, checked
+# by measurement). The KEY comes from the file name; the measured pitch is used
+# only for fine tuning — the few cents needed to sit exactly on that key. (The
+# measurement can't supply the octave: the organ's 16' stop makes many of its
+# notes measure an octave low, and a low vibraphone bar can read a semitone off.)
+# The exception is `tuned: False` — rubbed wine glasses are not tuned to concert
+# pitch at all, so there the measured pitch decides the key too.
+
+VCSL = "https://raw.githubusercontent.com/sgossner/VCSL/master/"
+
+VCSL_INSTRUMENTS = {
+    # Struck bars ring and die away: one-shots, long fade, never flattened.
+    "vibraphone": (
+        "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets",
+        [f"Vibes_hard_{n}_v2_rr1_Main.wav" for n in
+         ["F2", "A2", "C3", "E3", "G3", "B3", "D4", "F4", "A4", "C5", "E5"]],
+        5.0, 1.5, False, True),
+    # A finger circling the rim of a wine glass — what a glass harmonica is.
+    "wine_glasses": (
+        "Idiophones/Friction Idiophones/Wine Glasses/Sustains/Slow",
+        ["glass1_D#4_Slow_1_Main.wav", "glass2_F#4_Slow_1_Main.wav",
+         "glass3_A#4_Slow_1_Main.wav", "glass4_D5_Slow_2_Main.wav"],
+        6.0, 0.05, True, False),
+    "bowed_psaltery": (
+        "Chordophones/Zithers/Psaltery, Bowed and Plucked/LongBow",
+        [f"BowedPsaltery_{n}_Main_LongBow_rr{r}.wav" for n, r in
+         [("A#3", 2), ("C4", 1), ("D4", 1), ("E4", 2), ("F#4", 1), ("G#4", 1),
+          ("A#4", 2), ("C5", 1), ("D5", 2), ("E5", 2), ("F#5", 2)]],
+        5.0, 0.05, True, True),
+    # A real church organ, open (loud) registration on the third manual.
+    "church_organ": (
+        "Aerophones/Edge-blown Aerophones/Pipe Organ/Loud",
+        [f"Rode_Man3Open_{n}{o}.wav" for o in range(1, 6) for n in ["C", "D#", "F#", "A"]]
+        + ["Rode_Man3Open_C6.wav"],
+        4.5, 0.05, False, True),
+}
+
+_NOTE_IN_NAME = re.compile(r"_([A-G]#?)(\d)(?=[_.])")
+
+
+def install_vcsl(instrument: str, cache: Path) -> list[int]:
+    # (Imported here: that module imports flatten_sustain from this one.)
+    from build_soundfont_instruments import measure_pitch, to_44k
+
+    folder, names, keep, fade, flatten, tuned_to_pitch = VCSL_INSTRUMENTS[instrument]
+    out_dir = SAMPLES / instrument
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.wav"):
+        old.unlink()
+    tmp = cache / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    roots: list[int] = []
+    for name in names:
+        src = download(VCSL + urllib.parse.quote(f"{folder}/{name}"), cache)
+        decoded = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(src), "-ac", "1", "-ar", "44100",
+             "-af", f"silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.004,atrim=0:{keep + 1:.2f}",
+             "-f", "s16le", "-"], check=True, capture_output=True).stdout
+        samples = array.array("h", decoded)
+        if sys.byteorder != "little":
+            samples.byteswap()
+        x = [float(v) for v in samples]
+        steady = x[int(0.4 * 44100):int(1.4 * 44100)]
+        hz = measure_pitch(steady, 44100)
+        exact = 69 + 12 * math.log2(hz / 440.0)
+        if tuned_to_pitch:
+            token = _NOTE_IN_NAME.search(name)
+            note = midi(token.group(1), int(token.group(2)) + 1)
+            # distance to that key, ignoring whole octaves
+            cents_off = ((exact - note + 6) % 12) - 6
+            exact = note + cents_off if abs(cents_off) < 0.5 else float(note)
+        else:
+            note = round(exact)
+        if note in roots or not 24 <= note <= 108:
+            print(f"  {instrument}: skipped {name} (MIDI {note} already covered or out of range)")
+            continue
+        tuned = to_44k(x, 44100 * 2 ** ((note - exact) / 12), tmp)[:int(keep * 44100)]
+        if flatten:
+            tuned = flatten_sustain(tuned)
+        fade_len = int(fade * 44100)
+        for k in range(min(fade_len, len(tuned))):
+            tuned[len(tuned) - 1 - k] *= k / fade_len
+        gain = 0.7 * 32767 / max(1.0, max(abs(v) for v in tuned))
+        out = array.array("h", (max(-32766, min(32766, int(round(v * gain)))) for v in tuned))
+        if sys.byteorder != "little":
+            out.byteswap()
+        with wave.open(str(out_dir / f"{note}_64.wav"), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(44100)
+            wf.writeframes(out.tobytes())
+        roots.append(note)
+        print(f"  {instrument}: MIDI {note:3d} ← {name}  ({hz:7.2f} Hz, corrected {100 * (note - exact):+5.1f} cents)")
+    return sorted(roots)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", choices=sorted(PLANS), help="install just this instrument")
+    parser.add_argument("--only", choices=sorted(list(PLANS) + list(VCSL_INSTRUMENTS)),
+                        help="install just this instrument")
     parser.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "supernova-samples")
     args = parser.parse_args()
-    for instrument in ([args.only] if args.only else list(PLANS)):
-        install(instrument, args.cache)
+    wanted = [args.only] if args.only else list(PLANS) + list(VCSL_INSTRUMENTS)
+    measured: dict[str, list[int]] = {}
+    for instrument in wanted:
+        if instrument in PLANS:
+            install(instrument, args.cache)
+        else:
+            measured[instrument] = install_vcsl(instrument, args.cache)
+    if measured:
+        print("\nrootNotes for the VCSL instruments (SynthPreset.swift):")
+        for instrument, roots in measured.items():
+            print(f"  {instrument}: {roots}")
     print("\nDone. Now run: python3 Scripts/validate_samples.py")
 
 
