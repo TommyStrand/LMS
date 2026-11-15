@@ -1027,4 +1027,40 @@ final class SuperNovaPadTests: XCTestCase {
             XCTAssertEqual(instrument.velocityLayers.count, 1)
         }
     }
+
+    // MARK: - Hybrid presets
+
+    func testHybridPartsAreRealNonHybridPresets() {
+        let hybrids = SynthPreset.presets.filter(\.isHybrid)
+        XCTAssertFalse(hybrids.isEmpty, "the hybrid blends are what the app is for")
+        for hybrid in hybrids {
+            XCTAssertGreaterThanOrEqual(hybrid.hybrid.count, 2, "\(hybrid.name) is not a blend")
+            XCTAssertEqual(Set(hybrid.hybrid.map(\.preset)).count, hybrid.hybrid.count,
+                           "\(hybrid.name) lists a part twice (one voice per preset per touch)")
+            for part in hybrid.hybrid {
+                let index = SynthPreset.indexByName[part.preset]
+                XCTAssertNotNil(index, "\(hybrid.name): no shown preset named \(part.preset)")
+                if let index {
+                    XCTAssertFalse(SynthPreset.presets[index].isHybrid,
+                                   "\(hybrid.name): a part must be an instrument, not another hybrid")
+                }
+                XCTAssertTrue((0...1).contains(part.gain))
+                XCTAssertTrue((-2...2).contains(part.octave))
+            }
+            // A blend needs at least one recording — otherwise it is just a synth stack.
+            let hasRecording = hybrid.hybrid.contains { part in
+                guard let i = SynthPreset.indexByName[part.preset] else { return false }
+                if case .sampler = SynthPreset.presets[i].voiceMode { return true }
+                return false
+            }
+            XCTAssertTrue(hasRecording, "\(hybrid.name) has no recorded part")
+        }
+    }
+
+    func testPresetIndexByNameMatchesTheList() {
+        XCTAssertEqual(SynthPreset.indexByName.count, SynthPreset.presets.count)   // names are unique
+        for (i, preset) in SynthPreset.presets.enumerated() {
+            XCTAssertEqual(SynthPreset.indexByName[preset.name], i)
+        }
+    }
 }

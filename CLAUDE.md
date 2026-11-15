@@ -72,6 +72,12 @@ sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `B
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
+- Hybrid presets (`SynthPreset.hybrid`, first in the catalog) are the app's signature sounds: a fixed blend of
+  other presets by name, each with a level and octave — at least one recording plus synthesis. A hybrid has no
+  voice of its own; its effect settings apply to the blend. In `AudioEngine`, layer mode and hybrids share one
+  path (`partsForNewNote` → `noteOnLayer` → `releaseLayered`), keyed `touchID * 1000 + presetIndex`; release
+  and bend go by what the touch STARTED, not by the current mode. A hybrid is hidden if any part is missing.
+  Add new signature sounds as hybrids of recordings, not as new oscillator patches
 - Acoustic instruments are RECORDINGS, not synth patches: the owner rejected synthesised harmonium / accordion /
   choir / vox as "generic synth sounds" twice. Don't try to fix an acoustic preset by retuning
   oscillators — find a recording (see the two sample scripts). Only genuinely electronic instruments (pads,

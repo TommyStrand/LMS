@@ -211,6 +211,8 @@ final class AudioEngine {
     @ObservationIgnored private var layerGainBoxes:     [Int: GainBox] = [:]
     // Tracks which preset indices were layered at each noteOn, for correct noteOff cleanup.
     @ObservationIgnored private var noteOnLayerIndices: [Int: [Int]]   = [:]
+    // Fixed-level gain boxes for hybrid parts, keyed by level × 1000.
+    @ObservationIgnored private var fixedGainBoxes:     [Int: GainBox] = [:]
 
     private let sampleRate: Double = 44100
 
@@ -606,21 +608,7 @@ final class AudioEngine {
     func exitLayerMode() {
         // Release any voices that were left active from layer-mode note-ons whose
         // noteOff never fired (e.g. sustain held when mode is toggled off).
-        for (touchID, layerIndices) in noteOnLayerIndices {
-            for presetIdx in layerIndices {
-                let cid    = touchID * 1000 + presetIdx
-                let preset = SynthPreset.presets[presetIdx]
-                if case .sampler = preset.voiceMode {
-                    if let info = samplerTouches[cid] {
-                        releaseSampler(info)
-                    }
-                    samplerTouches.removeValue(forKey: cid)
-                } else {
-                    retireVoice(controlID: cid, preset: preset)
-                }
-            }
-        }
-        noteOnLayerIndices.removeAll()
+        for touchID in Array(noteOnLayerIndices.keys) { releaseLayered(touchID: touchID) }
 
         isLayeringMode     = false
         activeLayerIndices = []
@@ -672,6 +660,12 @@ final class AudioEngine {
         // runs in the background), so it's ready by the first note instead of the
         // first note triggering the load.
         if case .sampler(let instrument) = preset.voiceMode { samplerEngine(for: instrument) }
+        // …and every recorded part of a hybrid.
+        for part in hybridParts(of: preset) {
+            if case .sampler(let instrument) = SynthPreset.presets[part.index].voiceMode {
+                samplerEngine(for: instrument)
+            }
+        }
         Diagnostics.shared.log("Preset → \(preset.name)")
         applyPresetToNodes(preset)
     }
@@ -858,14 +852,85 @@ final class AudioEngine {
                                           velocity: velocity, x: x, y: y) }
         touchPitches[touchID] = (note, 0)
         soundingPitch = Double(note)
-        if isLayeringMode && !activeLayerIndices.isEmpty {
-            noteOnLayer(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
+        if let parts = partsForNewNote() {
+            noteOnLayer(touchID: touchID, note: note, velocity: velocity, x: x, y: y, parts: parts)
         } else {
             noteOnSingle(touchID: touchID, note: note, velocity: velocity, x: x, y: y)
         }
     }
 
+    // MARK: - Layered notes (layer mode and hybrid presets)
+    //
+    // Two things make one touch play several presets at once: LAYER MODE (the
+    // player long-presses presets to stack them) and a HYBRID preset (a fixed
+    // blend — see SynthPreset.hybrid). Both go through the same path: a list of
+    // parts, each voiced under control id `touchID * 1000 + presetIndex`, and
+    // remembered in `noteOnLayerIndices` so the touch can be bent and released
+    // whatever mode or preset is current by then.
+
+    /// One layer of a touch: a preset (index into SynthPreset.presets), its level
+    /// (nil = the player's layer-mode gain for that preset) and octave shift.
+    private struct LayerPart {
+        let index: Int
+        let gain: Float?
+        let octave: Int
+    }
+
+    private func hybridParts(of preset: SynthPreset) -> [LayerPart] {
+        preset.hybrid.compactMap { part in
+            guard let index = SynthPreset.indexByName[part.preset] else { return nil }
+            return LayerPart(index: index, gain: part.gain, octave: part.octave)
+        }
+    }
+
+    /// The parts a new note should play, or nil for an ordinary single-voice preset.
+    private func partsForNewNote() -> [LayerPart]? {
+        var parts: [LayerPart]
+        if isLayeringMode && !activeLayerIndices.isEmpty {
+            parts = []
+            for index in activeLayerIndices {
+                let preset = SynthPreset.presets[index]
+                // A hybrid stacked as a layer contributes its parts, not itself.
+                if preset.isHybrid { parts += hybridParts(of: preset) }
+                else { parts.append(LayerPart(index: index, gain: nil, octave: 0)) }
+            }
+        } else if currentPreset.isHybrid {
+            parts = hybridParts(of: currentPreset)
+        } else {
+            return nil
+        }
+        // One voice per preset per touch (the control id is keyed by preset index).
+        var seen = Set<Int>()
+        return parts.filter { seen.insert($0.index).inserted }
+    }
+
+    /// A gain box holding a hybrid part's fixed level (cached per level).
+    private func fixedGainBox(_ gain: Float) -> GainBox {
+        let key = Int((gain * 1000).rounded())
+        if let box = fixedGainBoxes[key] { return box }
+        let box = GainBox()
+        box.value = max(0, min(1, gain))
+        fixedGainBoxes[key] = box
+        return box
+    }
+
+    /// Releases every layered voice a touch started. False if it had none.
+    @discardableResult
+    private func releaseLayered(touchID: Int) -> Bool {
+        guard let indices = noteOnLayerIndices.removeValue(forKey: touchID) else { return false }
+        for presetIdx in indices {
+            let cid = touchID * 1000 + presetIdx
+            if let info = samplerTouches.removeValue(forKey: cid) { releaseSampler(info) }
+            retireVoice(controlID: cid, preset: currentPreset)   // no-op if no synth voice
+        }
+        return true
+    }
+
     private func noteOnSingle(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
+        // A touch id that last played layers (a hybrid, then the preset changed):
+        // release those first, or noteOff would take the layered path and leave
+        // the new single voice sounding for ever.
+        releaseLayered(touchID: touchID)
         if case .sampler(let instrument) = currentPreset.voiceMode {
             releaseSingle(touchID: touchID)
             let se = samplerEngine(for: instrument)
@@ -881,41 +946,37 @@ final class AudioEngine {
                    x: x, y: y, gainBox: nil)
     }
 
-    private func noteOnLayer(touchID: Int, note: Int, velocity: Float, x: Float, y: Float) {
-        // Retire any layer voices from a previous tap on this touch ID (release, not
+    private func noteOnLayer(touchID: Int, note: Int, velocity: Float, x: Float, y: Float,
+                             parts: [LayerPart]) {
+        // Retire whatever this touch id was playing before (release, not
         // hard-remove — same anti-click reasoning as noteOnSingle).
-        if let prev = noteOnLayerIndices[touchID] {
-            for presetIdx in prev {
-                let cid = touchID * 1000 + presetIdx
-                let p   = SynthPreset.presets[presetIdx]
-                if case .sampler = p.voiceMode {
-                    if let info = samplerTouches[cid] {
-                        releaseSampler(info)
-                    }
-                    samplerTouches.removeValue(forKey: cid)
-                } else {
-                    retireVoice(controlID: cid, preset: p)
-                }
-            }
-        }
+        releaseLayered(touchID: touchID)
+        releaseSingle(touchID: touchID)
 
-        for presetIdx in activeLayerIndices {
-            // The voice/filter knobs edit `currentPreset`, which IS the primary
-            // layer's preset (the controls follow the primary). Using the stock
-            // preset here meant knob edits never reached any layered voice.
-            let preset = presetIdx == primaryLayerIndex ? currentPreset : SynthPreset.presets[presetIdx]
-            let cid    = touchID * 1000 + presetIdx
+        var started: [Int] = []
+        for part in parts {
+            let presetIdx = part.index
+            // The voice/filter knobs edit `currentPreset`, which in layer mode IS
+            // the primary layer's preset (the controls follow the primary). Using
+            // the stock preset here meant knob edits never reached any layered voice.
+            let preset = (isLayeringMode && presetIdx == primaryLayerIndex)
+                ? currentPreset : SynthPreset.presets[presetIdx]
+            guard !preset.isHybrid else { continue }      // a hybrid has no voice of its own
+            let cid     = touchID * 1000 + presetIdx
+            let pitched = max(0, min(127, note + 12 * part.octave))
             if case .sampler(let instrument) = preset.voiceMode {
-                let se = samplerEngine(for: instrument)
-                let handle = se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
-                samplerTouches[cid] = (instrument.id, note, handle)
+                let se     = samplerEngine(for: instrument)
+                let gain   = part.gain ?? ensureGainBox(presetIdx).value
+                let handle = se.noteOn(UInt8(clamping: pitched), velocity: UInt8(velocity * 127), gain: gain)
+                samplerTouches[cid] = (instrument.id, pitched, handle)
             } else {
-                let gainBox = ensureGainBox(presetIdx)
-                spawnVoice(controlID: cid, preset: preset, note: note, velocity: velocity,
+                let gainBox = part.gain.map { fixedGainBox($0) } ?? ensureGainBox(presetIdx)
+                spawnVoice(controlID: cid, preset: preset, note: pitched, velocity: velocity,
                            x: x, y: y, gainBox: gainBox)
             }
+            started.append(presetIdx)
         }
-        noteOnLayerIndices[touchID] = activeLayerIndices
+        noteOnLayerIndices[touchID] = started
     }
 
     // Shared voice-creation core. `gainBox` nil → single mode (gain = 1.0 always).
@@ -974,21 +1035,9 @@ final class AudioEngine {
         if !fromLooper { looper?.recordOff(touchID: touchID) }
         touchPitches.removeValue(forKey: touchID)
         soundingPitch = touchPitches.values.first.map { Double($0.note) + $0.bend }
-        if isLayeringMode, let layerIndices = noteOnLayerIndices[touchID] {
-            for presetIdx in layerIndices {
-                let cid    = touchID * 1000 + presetIdx
-                let preset = SynthPreset.presets[presetIdx]
-                if case .sampler = preset.voiceMode {
-                    if let info = samplerTouches[cid] {
-                        releaseSampler(info)
-                    }
-                    samplerTouches.removeValue(forKey: cid)
-                } else {
-                    retireVoice(controlID: cid, preset: preset)
-                }
-            }
-            noteOnLayerIndices.removeValue(forKey: touchID)
-        } else {
+        // Decided by how the note was STARTED (layered or single), not by the
+        // current mode — the preset or layer mode may have changed while it was held.
+        if !releaseLayered(touchID: touchID) {
             releaseSingle(touchID: touchID)
         }
     }
@@ -1067,7 +1116,7 @@ final class AudioEngine {
 
     func updateTouch(touchID: Int, x: Float, y: Float) {
         // Y → brightness + modulation, or wave morph (see applyY); X is note-only.
-        if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
+        if let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
                 if let v = liveVoice(controlID: touchID * 1000 + presetIdx) { applyY(y, to: v) }
             }
@@ -1081,7 +1130,7 @@ final class AudioEngine {
             touchPitches[touchID] = (note, Double(semitones))
             soundingPitch = Double(note) + Double(semitones)
         }
-        if isLayeringMode, let indices = noteOnLayerIndices[touchID] {
+        if let indices = noteOnLayerIndices[touchID] {
             for presetIdx in indices {
                 let cid = touchID * 1000 + presetIdx
                 bendSampler(controlID: cid, semitones: semitones)

@@ -24,7 +24,7 @@ struct ControlsView: View {
 
         if wide {
             HStack(alignment: .top, spacing: 10) {
-                if preset.voiceMode == .synth {
+                if showsVoicePanel(preset) {
                     voicePanel(preset: preset, color: color, theme: theme)
                 }
                 preFXPanel(preset: preset, color: color, theme: theme)
@@ -42,7 +42,7 @@ struct ControlsView: View {
                 // iPad: voice + pre-FX on the left, post-FX on the right
                 HStack(alignment: .top, spacing: 10) {
                     VStack(spacing: 10) {
-                        if preset.voiceMode == .synth {
+                        if showsVoicePanel(preset) {
                             voicePanel(preset: preset, color: color, theme: theme)
                         }
                         preFXPanel(preset: preset, color: color, theme: theme)
@@ -57,7 +57,7 @@ struct ControlsView: View {
             } else {
                 // iPhone: single column, vertical scroll
                 VStack(spacing: 10) {
-                    if preset.voiceMode == .synth {
+                    if showsVoicePanel(preset) {
                         voicePanel(preset: preset, color: color, theme: theme)
                     }
                     preFXPanel(preset: preset, color: color, theme: theme)
@@ -68,6 +68,12 @@ struct ControlsView: View {
             }
         }
         .frame(maxHeight: isPad ? .infinity : 330)
+    }
+
+    /// The VOICE knobs edit one synth patch. A hybrid has several parts and no
+    /// voice of its own, so they would do nothing there.
+    private func showsVoicePanel(_ preset: SynthPreset) -> Bool {
+        preset.voiceMode == .synth && !preset.isHybrid
     }
 
     // MARK: - Panel builders

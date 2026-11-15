@@ -67,8 +67,23 @@ struct SynthPreset: Identifiable, Equatable {
     /// Loudness trim so presets sit at a similar level (measured on a held chord).
     var level: Float
 
+    /// Non-empty → this is a HYBRID preset: it has no voice of its own; every note
+    /// plays all of these parts together (recordings and synth patches blended —
+    /// the Omnisphere idea). The preset's own effect settings (reverb, delay,
+    /// shimmer, chorus…) apply to the blend; its oscillator/filter fields are unused.
+    var hybrid: [HybridPart]
+
     // Preset chip icon style
     var iconStyle: IconStyle
+
+    /// One layer of a hybrid preset: another preset, by name, at a level and octave.
+    struct HybridPart: Equatable {
+        let preset: String
+        var gain: Float = 1
+        var octave: Int = 0
+    }
+
+    var isHybrid: Bool { !hybrid.isEmpty }
 
     enum VoiceMode: Equatable {
         case synth, organChurch, hammondB3, rhodes
@@ -129,6 +144,7 @@ struct SynthPreset: Identifiable, Equatable {
         modDelayAmount: Float = 0,
         unisonCents: Float = 0, stereoWidth: Float = 0.7, keyTrack: Float = 0.5,
         fmIndex: Float = 0, fmRatio: Float = 1, fmDecay: Float = 0.5, level: Float = 1,
+        hybrid: [HybridPart] = [],
         iconStyle: IconStyle = .mysticWave
     ) {
         self.id = name; self.name = name; self.color = color
@@ -154,6 +170,7 @@ struct SynthPreset: Identifiable, Equatable {
         self.modDelayAmount = modDelayAmount
         self.unisonCents = unisonCents; self.stereoWidth = stereoWidth; self.keyTrack = keyTrack
         self.fmIndex = fmIndex; self.fmRatio = fmRatio; self.fmDecay = fmDecay; self.level = level
+        self.hybrid = hybrid
         self.iconStyle = iconStyle
     }
 
@@ -327,11 +344,24 @@ extension SynthPreset {
     /// Presets shown in the app. Imported-only sampler instruments (pipe organ) are
     /// hidden when their samples aren't in this build — their WAVs aren't in git, so
     /// on any machine that hasn't run import_samples.py the preset would be silent.
-    static let presets: [SynthPreset] = catalog.filter { preset in
-        guard case .sampler(let instrument) = preset.voiceMode,
-              instrument.discoversRoots else { return true }
-        return bundleHasSamples(folder: instrument.id)
-    }
+    static let presets: [SynthPreset] = {
+        let playable = catalog.filter { preset in
+            guard !preset.isHybrid else { return false }
+            guard case .sampler(let instrument) = preset.voiceMode,
+                  instrument.discoversRoots else { return true }
+            return bundleHasSamples(folder: instrument.id)
+        }
+        // A hybrid is shown only if every one of its parts is.
+        let names = Set(playable.map(\.name))
+        return catalog.filter { preset in
+            preset.isHybrid ? preset.hybrid.allSatisfy { names.contains($0.preset) }
+                            : names.contains(preset.name)
+        }
+    }()
+
+    /// Position of each shown preset by name (hybrid parts are looked up by name).
+    static let indexByName: [String: Int] =
+        Dictionary(uniqueKeysWithValues: presets.enumerated().map { ($1.name, $0) })
 
     /// True if the app bundle contains at least one WAV inside a folder named `folder`.
     private static func bundleHasSamples(folder: String) -> Bool {
@@ -339,6 +369,83 @@ extension SynthPreset {
     }
 
     private static let catalog: [SynthPreset] = [
+        // ── Hybrids ─────────────────────────────────────────────────────────────
+        // What the app is for: real recordings blended with synthesis into one
+        // slowly moving sound, in a large space. Original blends, first in the list.
+        SynthPreset(
+            name: "Glass Cathedral",
+            color: "#7FC8E8",
+            reverbMix: 0.8, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.3,
+            shimmerAmount: 0.35, bloomAmount: 0.25,
+            hybrid: [
+                HybridPart(preset: "Glass Harmonica", gain: 1.0),
+                HybridPart(preset: "Choir Ahs", gain: 0.7),
+                HybridPart(preset: "Celestial", gain: 0.5),
+            ],
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Bowed Dawn",
+            color: "#E0B060",
+            reverbMix: 0.65, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.3,
+            shimmerAmount: 0.25, bloomAmount: 0.2,
+            hybrid: [
+                HybridPart(preset: "Bowed Psaltery", gain: 1.0),
+                HybridPart(preset: "Str. Ensemble", gain: 0.7),
+                HybridPart(preset: "Mystic Pad", gain: 0.45, octave: -1),
+            ],
+            iconStyle: .solarRadial
+        ),
+        SynthPreset(
+            name: "Breath of Voices",
+            color: "#C99BE0",
+            reverbMix: 0.7, delayMix: 0.2, delayTime: 0.5, chorusMix: 0.25,
+            shimmerAmount: 0.2, modDelayAmount: 0.2,
+            hybrid: [
+                HybridPart(preset: "Vox Humana", gain: 0.9),
+                HybridPart(preset: "Concert Flute", gain: 0.6),
+                HybridPart(preset: "Solar Wind", gain: 0.4),
+            ],
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Deep Reliquary",
+            color: "#5A6FA8",
+            reverbMix: 0.75, delayMix: 0.1, delayTime: 0.666, chorusMix: 0.2,
+            spaceEchoAmount: 0.15,
+            hybrid: [
+                HybridPart(preset: "Church Organ", gain: 0.8, octave: -1),
+                HybridPart(preset: "Choir Ahs", gain: 0.6),
+                HybridPart(preset: "Dark Matter", gain: 0.5),
+            ],
+            iconStyle: .darkVortex
+        ),
+        SynthPreset(
+            name: "Frozen Bells",
+            color: "#9FE0F0",
+            reverbMix: 0.8, delayMix: 0.3, delayTime: 0.666, chorusMix: 0.2,
+            shimmerAmount: 0.4,
+            hybrid: [
+                HybridPart(preset: "Vibraphone", gain: 0.9),
+                HybridPart(preset: "Celesta", gain: 0.6, octave: 1),
+                HybridPart(preset: "Glass Harmonica", gain: 0.5),
+                HybridPart(preset: "Celestial", gain: 0.35),
+            ],
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Tape Garden",
+            color: "#B08860",
+            reverbMix: 0.55, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.3,
+            lofiAmount: 0.1, brokenTape: 0.2,
+            hybrid: [
+                HybridPart(preset: "Str. Ensemble", gain: 0.8),
+                HybridPart(preset: "Mellotron Flutes", gain: 0.6),
+                HybridPart(preset: "Tape Strings", gain: 0.5),
+            ],
+            iconStyle: .mysticWave
+        ),
+
         SynthPreset(
             name: "Hammond B3",
             color: "#B45309",

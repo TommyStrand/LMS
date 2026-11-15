@@ -186,7 +186,7 @@ final class SamplerEngine {
     // MARK: - Playback
 
     @discardableResult
-    func noteOn(_ note: UInt8, velocity: UInt8) -> Handle? {
+    func noteOn(_ note: UInt8, velocity: UInt8, gain: Float = 1) -> Handle? {
         let midi = Int(note)
         let vel  = Int(velocity)
         guard let (root, velMidi, buf) = findBuffer(midi: midi, vel: vel) else { return nil }
@@ -210,7 +210,8 @@ final class SamplerEngine {
         let rate = Float(pow(2.0, Double(midi - root) / 12.0))
         slot.varispeed.rate = max(0.25, min(4.0, rate))
 
-        let target = max(0.3, Float(vel) / 127.0)
+        // `gain`: this note's level as one layer of a blend (hybrid presets, layer mode).
+        let target = max(0.3, Float(vel) / 127.0) * max(0, min(1, gain))
         let parts  = (!instrument.loops && instrument.sustainLoop) ? sustainParts[root]?[velMidi] : nil
 
         if instrument.loops || parts != nil {
