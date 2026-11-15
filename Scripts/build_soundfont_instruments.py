@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-build_soundfont_instruments.py — build the app's reed, choir, voice and fiddle
+build_soundfont_instruments.py — build the app's reed, choir and voice
 instruments from recordings in the GeneralUser GS SoundFont.
 
-Why: Harmonium, Musette Accordion, Choir Ahs, Vox Humana and Hurdy-Gurdy were
+Why: Harmonium, Musette Accordion, Choir Ahs and Vox Humana were
 two-oscillator synth patches and sounded like it. A SoundFont holds short REAL
 recordings (the attack of a note plus a loop cut from its sustain); this script
 turns those into the app's sample format.
@@ -23,8 +23,6 @@ What is built (one velocity layer each, mono 16-bit 44.1 kHz, {midi}_64.wav):
                      flat — the musette "wet" beat  → Musette Accordion
   concert_choir      mixed choir "aah"              → Choir Ahs
   voice_oohs         voices "ooh"                   → Vox Humana
-  fiddle             solo violin                    → Hurdy-Gurdy (nearest real
-                                                      bowed-string recording)
 
 Each note is rendered as attack + the SoundFont's own loop repeated to a few
 seconds, so the app's sustain loop has steady material to hold. The pitch of
@@ -230,7 +228,6 @@ INSTRUMENTS = {
     "musette_accordion": (21, 3.5, [(0, 1.0), (13, 0.8), (-11, 0.7)], False),
     "concert_choir":     (52, 3.5, [(0, 1.0)], True),
     "voice_oohs":        (53, 3.5, [(0, 1.0)], False),
-    "fiddle":            (110, 3.5, [(0, 1.0)], True),
 }
 
 

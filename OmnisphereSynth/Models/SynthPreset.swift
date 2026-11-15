@@ -223,7 +223,7 @@ struct SamplerInstrument: Equatable, Hashable {
     )
     // ── Instruments built from the GeneralUser GS SoundFont ──────────────────────
     // (Scripts/build_soundfont_instruments.py; in git.) Short real recordings —
-    // attack + loop — of accordion reeds, a choir, voices and a violin. They
+    // attack + loop — of accordion reeds, a choir and voices. They
     // replaced two-oscillator synth patches that sounded nothing like the
     // instruments. One velocity layer each: these instruments don't change
     // character with touch, and one layer halves the memory.
@@ -259,14 +259,6 @@ struct SamplerInstrument: Equatable, Hashable {
         attack: 0.08, release: 0.4,
         sustainLoop: true,
         loopCrossfade: 0.25
-    )
-    static let fiddle = SamplerInstrument(
-        id: "fiddle", displayName: "Fiddle",
-        rootNotes: [55, 58, 63, 66, 70, 73, 76, 77, 82, 86, 90],
-        velocityLayers: oneLayer,
-        attack: 0.03, release: 0.18,
-        sustainLoop: true,
-        loopCrossfade: 0.2
     )
 
     // Real recorded pipe organ (imported from an SFZ library via
@@ -620,17 +612,6 @@ extension SynthPreset {
             iconStyle: .pulseBolt
         ),
 
-        SynthPreset(
-            name: "Hurdy-Gurdy",
-            color: "#7B5C3A",
-            // A real bowed string (solo violin) — the nearest free recording to the
-            // hurdy-gurdy's wheel-bowed strings; there is no hurdy-gurdy sample set.
-            voiceMode: .sampler(.fiddle),
-            attack: 0.03, decay: 0.2, sustain: 0.9, release: 0.18,
-            reverbMix: 0.3, delayMix: 0.06, delayTime: 0.375, chorusMix: 0.0,
-            iconStyle: .hammondTonewheel
-        ),
-
         // ── Choir / vocal ────────────────────────────────────────────────
 
         SynthPreset(
@@ -653,27 +634,6 @@ extension SynthPreset {
         ),
 
         // ── Electronic / unique ──────────────────────────────────────────
-
-        SynthPreset(
-            name: "Ondes Martenot",
-            color: "#2D9E8F",
-            voiceMode: .synth,
-            // The ondes IS an electronic instrument — one valve oscillator — so it
-            // stays a synth. What it had wrong was the movement: an amplitude
-            // tremolo (twice over) instead of the player's PITCH vibrato, which is
-            // the whole character of the instrument.
-            osc1Waveform: .sine, osc2Waveform: .sine,
-            osc2Detune: 0, oscMix: 0.0,
-            filterCutoff: 5000, filterResonance: 0.0, filterEnvAmount: 0.0,
-            attack: 0.06, decay: 0.1, sustain: 1.0, release: 0.5,
-            lfoRate: 5.2, lfoDepth: 0.12, lfoTarget: .pitch,
-            reverbMix: 0.5, delayMix: 0.08, delayTime: 0.5, chorusMix: 0.0,
-            tremulantDepth: 0.0,
-            bloomAmount: 0.15,                       // the resonating "palme" speaker
-            fmIndex: 0.45, fmRatio: 1, fmDecay: 5.0, // a little valve warmth on the sine
-            level: 0.4,
-            iconStyle: .voidHole
-        ),
 
         // MARK: – Sample-based instruments
 

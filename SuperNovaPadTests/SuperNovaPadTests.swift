@@ -79,7 +79,7 @@ final class SuperNovaPadTests: XCTestCase {
     func testEverySamplerInstrumentHasValidRootsAndContiguousVelocityLayers() {
         let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan,
                                                 .reedOrgan, .musetteAccordion, .concertChoir,
-                                                .voiceOohs, .fiddle]
+                                                .voiceOohs]
         for inst in instruments {
             XCTAssertFalse(inst.rootNotes.isEmpty, "\(inst.id) has no roots")
             XCTAssertEqual(inst.rootNotes, inst.rootNotes.sorted(), "\(inst.id) roots not ascending")
@@ -997,14 +997,14 @@ final class SuperNovaPadTests: XCTestCase {
         }
     }
 
-    // MARK: - Recorded reeds, choir, voices and fiddle
+    // MARK: - Recorded reeds, choir and voices
 
     func testAcousticPresetsAreRecordingsNotSynthPatches() {
         // These were two-oscillator synth patches and sounded like it. They must
         // stay sampler presets (real recordings), held by a sustain loop.
         let expected: [String: SamplerInstrument] = [
             "Harmonium": .reedOrgan, "Musette Accordion": .musetteAccordion,
-            "Choir Ahs": .concertChoir, "Vox Humana": .voiceOohs, "Hurdy-Gurdy": .fiddle,
+            "Choir Ahs": .concertChoir, "Vox Humana": .voiceOohs,
         ]
         for (name, instrument) in expected {
             // (A sampler preset is hidden when its folder isn't bundled, e.g. in a

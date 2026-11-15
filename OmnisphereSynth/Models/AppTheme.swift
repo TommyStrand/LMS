@@ -589,7 +589,6 @@ enum Backdrop {
         "mellotron_flutes": "vintage_studio",
         "tape_strings":     "vintage_studio",
         "solina_strings":   "vintage_studio",
-        "ondes_martenot":   "vintage_studio",
         "str_ensemble":     "grand_piano",
         "bowed_psaltery":   "hurdy_gurdy",
         "glass_harmonica":  "cristal_baschet",
