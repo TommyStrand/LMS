@@ -68,7 +68,7 @@ to-scale), `LoopSchedule` (looper event firing/wrap, resuming mid-loop), `LoopSy
 (wiggle → vibrato on a locked note), `PitchColor` (pitch → blob hue), `WaveMorph` (sine→tri→saw→square), `DrumSchedule` (which
 drum hits land on which frame of a buffer), `MoodGrooves` (mood drum
 patterns stay on the 32-step grid at a playable tempo), `SustainLoop` (attack + seamless
-sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `Backdrop.imageSlug` / `AbstractScene` (scene colours, image names, borrowed and generated scenes), `SynthVoice` / `RhodesVoice` (every preset renders finite, bounded, and ends), `RenderParams` (preset →
+sustain loop found in real recordings), `BackdropPalette` / `Backdrop.slug` / `Backdrop.imageSlug` / `AbstractScene` (scene colours, image names, borrowed and generated scenes), `SynthVoice` / `RhodesVoice` (every preset renders finite, bounded, and ends), `GrainCloudCore` / `GrainRegion` (grain clouds: bounded, stereo, end after release, click-free voice stealing), `RenderParams` (preset →
 audio-thread scalars), plus descriptor and scale invariants.
 
 ## Key decisions
@@ -78,6 +78,14 @@ audio-thread scalars), plus descriptor and scale invariants.
   path (`partsForNewNote` → `noteOnLayer` → `releaseLayered`), keyed `touchID * 1000 + presetIndex`; release
   and bend go by what the touch STARTED, not by the current mode. A hybrid is hidden if any part is missing.
   Add new signature sounds as hybrids of recordings, not as new oscillator patches
+- Grain clouds (`Audio/GranularEngine.swift`): `SamplerInstrument.grains` (a `GrainCloud`, set with
+  `.cloud(...)`) makes a sampler preset play its recordings as overlapping grains taken from the held part
+  (`GrainRegion`), each detuned a few cents, optionally an octave up/down (octaves only), panned. `GrainCloudCore`
+  is pure (tested) and renders in an AVAudioSourceNode: main sends note commands under an `os_unfair_lock`, the
+  render thread drains them with trylock; all voice/grain memory is allocated in `init`. AudioEngine sees both
+  engines as `RecordedInstrumentEngine`, keyed by `instrument.engineKey` (folder, or folder+"+grains") — `id`
+  stays the folder. Level is normalised per recording (region RMS) and by overlap; a single cloud note
+  fluctuates 4–10 dB by nature (that is the movement). Cloud presets are the moving layer of hybrids
 - Acoustic instruments are RECORDINGS, not synth patches: the owner rejected synthesised harmonium / accordion /
   choir / vox as "generic synth sounds" twice. Don't try to fix an acoustic preset by retuning
   oscillators — find a recording (see the two sample scripts). Only genuinely electronic instruments (pads,

@@ -184,7 +184,7 @@ final class AudioEngine {
     @ObservationIgnored private var controlToVoiceID: [Int: Int] = [:]
 
     // Sampler nodes (one per instrument, lazily created)
-    @ObservationIgnored private var samplerEngines: [String: SamplerEngine] = [:]
+    @ObservationIgnored private var samplerEngines: [String: RecordedInstrumentEngine] = [:]
     // touchID → (instrumentID, midiNote) for single mode; compound ID for layer mode
     // `handle` lets a glide bend exactly this note (nil if the note-on was dropped).
     @ObservationIgnored private var samplerTouches: [Int: (instrumentID: String, note: Int, handle: SamplerEngine.Handle?)] = [:]
@@ -827,12 +827,15 @@ final class AudioEngine {
     /// sample generators we can call per-frame, so they can't be fed through that
     /// loop without rendering them manually. Intentional limitation, not a bug.
     @discardableResult
-    private func samplerEngine(for instrument: SamplerInstrument) -> SamplerEngine {
-        if let existing = samplerEngines[instrument.id] { return existing }
-        let se = SamplerEngine(instrument: instrument)
+    private func samplerEngine(for instrument: SamplerInstrument) -> RecordedInstrumentEngine {
+        // Keyed by engineKey, not the folder: a grain cloud of a folder is a
+        // different engine from the plain sampler playing the same recordings.
+        if let existing = samplerEngines[instrument.engineKey] { return existing }
+        let se: RecordedInstrumentEngine = instrument.grains == nil
+            ? SamplerEngine(instrument: instrument) : GranularEngine(instrument: instrument)
         se.attach(to: engine)
         engine.connect(se.outputNode, to: voiceMixer, format: nil)
-        samplerEngines[instrument.id] = se
+        samplerEngines[instrument.engineKey] = se
         se.load()
         return se
     }
@@ -934,8 +937,8 @@ final class AudioEngine {
         if case .sampler(let instrument) = currentPreset.voiceMode {
             releaseSingle(touchID: touchID)
             let se = samplerEngine(for: instrument)
-            let handle = se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127))
-            samplerTouches[touchID] = (instrument.id, note, handle)
+            let handle = se.noteOn(UInt8(clamping: note), velocity: UInt8(velocity * 127), gain: 1)
+            samplerTouches[touchID] = (instrument.engineKey, note, handle)
             return
         }
         // Retire any note still sounding on this touch (e.g. a rapid re-tap that
@@ -968,7 +971,7 @@ final class AudioEngine {
                 let se     = samplerEngine(for: instrument)
                 let gain   = part.gain ?? ensureGainBox(presetIdx).value
                 let handle = se.noteOn(UInt8(clamping: pitched), velocity: UInt8(velocity * 127), gain: gain)
-                samplerTouches[cid] = (instrument.id, pitched, handle)
+                samplerTouches[cid] = (instrument.engineKey, pitched, handle)
             } else {
                 let gainBox = part.gain.map { fixedGainBox($0) } ?? ensureGainBox(presetIdx)
                 spawnVoice(controlID: cid, preset: preset, note: pitched, velocity: velocity,

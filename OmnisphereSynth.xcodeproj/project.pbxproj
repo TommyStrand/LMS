@@ -37,6 +37,7 @@
 		A100001C /* DrumSamples in Resources */       = {isa = PBXBuildFile; fileRef = A2000025 /* DrumSamples */; };
 		A100001D /* NowPlayingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* NowPlayingManager.swift */; };
 		A100001E /* SamplerEngine.swift in Sources */    = {isa = PBXBuildFile; fileRef = A2000027 /* SamplerEngine.swift */; };
+		A1000029 /* GranularEngine.swift in Sources */    = {isa = PBXBuildFile; fileRef = A2000033 /* GranularEngine.swift */; };
 		A100001F /* Samples in Resources */              = {isa = PBXBuildFile; fileRef = A2000028 /* Samples */; };
 		A1000020 /* Diagnostics.swift in Sources */      = {isa = PBXBuildFile; fileRef = A2000029 /* Diagnostics.swift */; };
 		A1000021 /* DiagnosticsView.swift in Sources */  = {isa = PBXBuildFile; fileRef = A200002A /* DiagnosticsView.swift */; };
@@ -83,6 +84,7 @@
 		A2000025 /* DrumSamples */            = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/DrumSamples;   sourceTree = "<group>"; };
 		A2000026 /* NowPlayingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingManager.swift; sourceTree = "<group>"; };
 		A2000027 /* SamplerEngine.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SamplerEngine.swift; sourceTree = "<group>"; };
+		A2000033 /* GranularEngine.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GranularEngine.swift; sourceTree = "<group>"; };
 		A2000028 /* Samples */                = {isa = PBXFileReference; lastKnownFileType = folder;           path = Resources/Samples;   sourceTree = "<group>"; };
 		A2000029 /* Diagnostics.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift;     sourceTree = "<group>"; };
 		A200002A /* DiagnosticsView.swift */  = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 				A2000023 /* GrooveImporter.swift */,
 				A2000026 /* NowPlayingManager.swift */,
 				A2000027 /* SamplerEngine.swift */,
+				A2000033 /* GranularEngine.swift */,
 				A2000029 /* Diagnostics.swift */,
 				A200002D /* LooperEngine.swift */,
 				A2000031 /* BundleIndex.swift */,
@@ -350,6 +353,7 @@
 				A100001B /* FavoritesStore.swift in Sources */,
 				A100001D /* NowPlayingManager.swift in Sources */,
 				A100001E /* SamplerEngine.swift in Sources */,
+				A1000029 /* GranularEngine.swift in Sources */,
 				A1000020 /* Diagnostics.swift in Sources */,
 				A1000021 /* DiagnosticsView.swift in Sources */,
 				A1000023 /* LooperEngine.swift in Sources */,

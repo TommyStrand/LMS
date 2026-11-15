@@ -211,6 +211,20 @@ struct SamplerInstrument: Equatable, Hashable {
     /// Length (seconds) of the crossfade at the sustain-loop seam. 80 ms suits a
     /// steady pipe; ensembles and vibrato need longer (see `SustainLoop`).
     var loopCrossfade = 0.08
+    /// Non-nil → the recordings are played as a GRAIN CLOUD (GranularEngine)
+    /// instead of note by note: an evolving texture in the instrument's colour.
+    var grains: GrainCloud? = nil
+
+    /// One audio engine per instrument AND playback kind: the plain sampler and
+    /// a cloud of the same folder are different engines. (`id` stays the folder.)
+    var engineKey: String { grains == nil ? id : id + "+grains" }
+
+    /// This instrument's recordings as a grain cloud.
+    func cloud(_ settings: GrainCloud) -> SamplerInstrument {
+        var copy = self
+        copy.grains = settings
+        return copy
+    }
 
     struct VelocityLayer: Equatable, Hashable {
         let midiValue: Int   // velocity used when generating the sample (file suffix)
@@ -600,6 +614,57 @@ extension SynthPreset {
             iconStyle: .voidHole
         ),
 
+        // Hybrids with a grain cloud as the moving layer.
+        SynthPreset(
+            name: "Glass Nebula",
+            color: "#9AD4EC",
+            reverbMix: 0.85, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.25,
+            shimmerAmount: 0.35, bloomAmount: 0.25,
+            hybrid: [
+                HybridPart(preset: "Glass Cloud", gain: 1.0),
+                HybridPart(preset: "Glass Harmonica", gain: 0.5),
+                HybridPart(preset: "Celestial", gain: 0.35),
+            ],
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Frozen Choir",
+            color: "#B8A0E0",
+            reverbMix: 0.85, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.2,
+            shimmerAmount: 0.3, bloomAmount: 0.2,
+            hybrid: [
+                HybridPart(preset: "Choir Vapor", gain: 1.0),
+                HybridPart(preset: "Choir Ahs", gain: 0.45),
+                HybridPart(preset: "Mystic Pad", gain: 0.35, octave: -1),
+            ],
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "String Aurora",
+            color: "#D09860",
+            reverbMix: 0.75, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.25,
+            shimmerAmount: 0.25, modDelayAmount: 0.15,
+            hybrid: [
+                HybridPart(preset: "String Mist", gain: 1.0),
+                HybridPart(preset: "Tremolo Strings", gain: 0.4),
+                HybridPart(preset: "Metal Haze", gain: 0.4, octave: 1),
+                HybridPart(preset: "Solar Wind", gain: 0.3),
+            ],
+            iconStyle: .solarRadial
+        ),
+        SynthPreset(
+            name: "Harp Stardust",
+            color: "#7CC8B4",
+            reverbMix: 0.8, delayMix: 0.3, delayTime: 0.5, chorusMix: 0.2,
+            shimmerAmount: 0.3,
+            hybrid: [
+                HybridPart(preset: "Concert Harp", gain: 0.9),
+                HybridPart(preset: "Harp Dust", gain: 0.7),
+                HybridPart(preset: "Breath Cloud", gain: 0.45),
+            ],
+            iconStyle: .celestialDots
+        ),
+
         SynthPreset(
             name: "Hammond B3",
             color: "#B45309",
@@ -933,6 +998,69 @@ extension SynthPreset {
             attack: 0.03, decay: 0.2, sustain: 0.85, release: 0.4,
             reverbMix: 0.32, delayMix: 0.08, delayTime: 0.375,
             iconStyle: .fluteShape
+        ),
+        // ── Grain clouds ────────────────────────────────────────────────────────
+        // The same recordings, played as clouds of short overlapping grains
+        // (GranularEngine): no attack, no fixed shape — a texture that keeps moving.
+        // They are the moving layer of the hybrids above and playable on their own.
+        SynthPreset(
+            name: "Glass Cloud",
+            color: "#B8E4F0",
+            voiceMode: .sampler(SamplerInstrument.wineGlasses.cloud(
+                GrainCloud(size: 0.45, density: 12, spray: 0.8, drift: 0.04, pitchJitter: 6,
+                           octaveUp: 0.15, spread: 1.0, attack: 0.8, release: 2.5))),
+            reverbMix: 0.8, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.0,
+            shimmerAmount: 0.3,
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "String Mist",
+            color: "#A8704A",
+            voiceMode: .sampler(SamplerInstrument.stringEnsemble.cloud(
+                GrainCloud(size: 0.35, density: 18, spray: 0.7, drift: 0.06, pitchJitter: 8,
+                           spread: 0.9, attack: 0.6, release: 2.0))),
+            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.0,
+            iconStyle: .stringBow
+        ),
+        SynthPreset(
+            name: "Choir Vapor",
+            color: "#C8A8E0",
+            voiceMode: .sampler(SamplerInstrument.concertChoir.cloud(
+                GrainCloud(size: 0.3, density: 18, spray: 0.9, drift: 0.05, pitchJitter: 7,
+                           octaveDown: 0.1, spread: 1.0, attack: 0.9, release: 2.5))),
+            reverbMix: 0.8, delayMix: 0.12, delayTime: 0.666, chorusMix: 0.0,
+            shimmerAmount: 0.2,
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Breath Cloud",
+            color: "#9CC8D8",
+            voiceMode: .sampler(SamplerInstrument.concertFlute.cloud(
+                GrainCloud(size: 0.22, density: 22, spray: 0.8, drift: 0.08, pitchJitter: 5,
+                           octaveUp: 0.1, spread: 0.9, attack: 0.5, release: 1.8))),
+            reverbMix: 0.7, delayMix: 0.2, delayTime: 0.5, chorusMix: 0.0,
+            shimmerAmount: 0.15,
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Metal Haze",
+            color: "#90A8C0",
+            voiceMode: .sampler(SamplerInstrument.bowedVibraphone.cloud(
+                GrainCloud(size: 0.4, density: 12, spray: 0.9, drift: 0.03, pitchJitter: 4,
+                           octaveUp: 0.2, octaveDown: 0.1, spread: 1.0, attack: 1.0, release: 3.0))),
+            reverbMix: 0.8, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.0,
+            shimmerAmount: 0.3,
+            iconStyle: .voidHole
+        ),
+        SynthPreset(
+            name: "Harp Dust",
+            color: "#88C8B0",
+            voiceMode: .sampler(SamplerInstrument.concertHarp.cloud(
+                GrainCloud(size: 0.12, density: 30, spray: 1.0, drift: 0.1, pitchJitter: 4,
+                           octaveUp: 0.25, spread: 1.0, attack: 0.3, release: 2.0))),
+            reverbMix: 0.75, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.0,
+            shimmerAmount: 0.25,
+            iconStyle: .celestialDots
         ),
         SynthPreset(
             name: "Bowed Vibes",

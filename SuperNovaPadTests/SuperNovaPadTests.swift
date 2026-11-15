@@ -1066,4 +1066,110 @@ final class SuperNovaPadTests: XCTestCase {
             XCTAssertEqual(SynthPreset.indexByName[preset.name], i)
         }
     }
+
+    // MARK: - Grain clouds
+
+    /// A steady 220 Hz tone with a 100 ms attack and release, as a stand-in recording.
+    private func grainTestSources(seconds: Double = 2.0) -> GrainSources {
+        let sr = 44100.0
+        let n = Int(seconds * sr)
+        var x = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let t = Double(i) / sr
+            let env = min(1, t / 0.1) * min(1, (seconds - t) / 0.1)
+            x[i] = Float(0.5 * env * sin(2 * .pi * 220 * t))
+        }
+        return GrainSources(recordings: [(midi: 57, samples: x)], sampleRate: sr)
+    }
+
+    private func renderCloud(_ core: GrainCloudCore, frames: Int) -> (l: [Float], r: [Float]) {
+        var l = [Float](repeating: 0, count: frames), r = l
+        var done = 0
+        while done < frames {                       // in buffers, as the audio thread does
+            let n = min(512, frames - done)
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in
+                    core.render(left: lp.baseAddress! + done, right: rp.baseAddress! + done, frames: n)
+                }
+            }
+            done += n
+        }
+        return (l, r)
+    }
+
+    func testGrainRegionIsTheHeldPartOfTheRecording() {
+        let sources = grainTestSources()
+        XCTAssertEqual(sources.rootCount, 1)
+        let root = sources.roots[0]
+        XCTAssertGreaterThan(root.lo, Int(0.1 * 44100), "grains must not be taken from the attack")
+        XCTAssertLessThanOrEqual(root.hi, root.count)
+        XCTAssertGreaterThan(root.hi - root.lo, 44100 / 2)
+        XCTAssertEqual(sources.index(nearest: 60), 0)
+    }
+
+    func testGrainCloudRendersFiniteBoundedStereoAndEnds() {
+        let cloud = GrainCloud(attack: 0.05, release: 0.2)
+        let core = GrainCloudCore(cloud: cloud)
+        core.setSources(grainTestSources())
+        core.send(.init(kind: .on, voice: 0, token: 1, root: 0, pitch: 1, gain: 1))
+        let held = renderCloud(core, frames: 44100)
+        XCTAssertTrue(held.l.allSatisfy { $0.isFinite } && held.r.allSatisfy { $0.isFinite })
+        let peak = max(held.l.map(abs).max() ?? 0, held.r.map(abs).max() ?? 0)
+        XCTAssertGreaterThan(peak, 0.02, "a held note must sound")
+        XCTAssertLessThan(peak, 1.5)
+        XCTAssertNotEqual(held.l, held.r, "grains are spread across the stereo field")
+
+        core.send(.init(kind: .off, voice: 0, token: 1))
+        let tail = renderCloud(core, frames: 44100)
+        XCTAssertTrue(tail.l.suffix(4410).allSatisfy { $0 == 0 }, "a released cloud must end")
+    }
+
+    func testGrainCloudIgnoresAStaleNoteOffAndStealsWithoutAStep() {
+        let core = GrainCloudCore(cloud: GrainCloud(attack: 0.01, release: 0.2))
+        core.setSources(grainTestSources())
+        core.send(.init(kind: .on, voice: 0, token: 1, root: 0, pitch: 1, gain: 1))
+        _ = renderCloud(core, frames: 22050)
+        // A new note takes the voice; the old note's release arrives afterwards.
+        core.send(.init(kind: .on, voice: 0, token: 2, root: 0, pitch: 2, gain: 1))
+        core.send(.init(kind: .off, voice: 0, token: 1))
+        let out = renderCloud(core, frames: 44100)
+        var biggestStep: Float = 0
+        for i in 1..<out.l.count { biggestStep = max(biggestStep, abs(out.l[i] - out.l[i - 1])) }
+        XCTAssertLessThan(biggestStep, 0.25, "stealing a voice must fade, not cut")
+        XCTAssertTrue(out.l.suffix(4410).contains { $0 != 0 }, "the new note must still be held")
+    }
+
+    func testGrainCloudLevelDoesNotDependOnDensity() {
+        func rms(_ cloud: GrainCloud) -> Float {
+            let core = GrainCloudCore(cloud: cloud)
+            core.setSources(grainTestSources())
+            core.send(.init(kind: .on, voice: 0, token: 1, root: 0, pitch: 1, gain: 1))
+            let out = renderCloud(core, frames: 3 * 44100)
+            let steady = out.l.suffix(2 * 44100).map { $0 * $0 }.reduce(0, +)
+                       + out.r.suffix(2 * 44100).map { $0 * $0 }.reduce(0, +)
+            return (steady / Float(2 * 44100)).squareRoot()
+        }
+        let thin  = rms(GrainCloud(size: 0.2, density: 10, pitchJitter: 20, attack: 0.05))
+        let thick = rms(GrainCloud(size: 0.2, density: 40, pitchJitter: 20, attack: 0.05))
+        XCTAssertEqual(thick / thin, 1, accuracy: 0.45)
+    }
+
+    func testCloudPresetsPlayARecordingThroughTheGrainEngine() {
+        let clouds = SynthPreset.presets.filter {
+            if case .sampler(let instrument) = $0.voiceMode { return instrument.grains != nil }
+            return false
+        }
+        XCTAssertFalse(clouds.isEmpty)
+        for preset in clouds {
+            guard case .sampler(let instrument) = preset.voiceMode, let grains = instrument.grains else { continue }
+            XCTAssertNotEqual(instrument.engineKey, instrument.id, "a cloud needs its own engine")
+            XCTAssertFalse(instrument.rootNotes.isEmpty)
+            XCTAssertGreaterThanOrEqual(grains.overlap, 2, "\(preset.name): too few grains overlap to be smooth")
+            XCTAssertLessThanOrEqual(grains.overlap, Double(GrainCloudCore.grainsPerVoice) * 0.6,
+                                     "\(preset.name): more grains than a voice can hold")
+            XCTAssertLessThanOrEqual(grains.octaveUp + grains.octaveDown, 0.5)
+            XCTAssertTrue((0...1).contains(grains.spray) && (0...1).contains(grains.spread))
+        }
+        XCTAssertEqual(SamplerInstrument.wineGlasses.engineKey, "wine_glasses")
+    }
 }
