@@ -17,6 +17,15 @@ contributors; the organ was sampled by Simon Dalzell of Ivy Audio. Released unde
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 Source: <https://github.com/sgossner/VCSL>. Also installed by `Scripts/fetch_free_samples.py`.
 
+**Bowed Vibes, Concert Harp, Kalimba, Tubular Bells, Hand Chimes** and **Ocarina** —
+also from *VCSL* (CC0). **French Horn, Tremolo Strings** and **Clarinet** — also from
+*VSCO 2 Community Edition* (CC0).
+
+**Bowed Bass** — a 1958 Otto Rubner double bass, played and recorded by D. Smolken.
+"Royalty-free for all commercial and non-commercial use"; the repository's licence is
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Source: <https://github.com/sfzinstruments/dsmolken.double-bass>.
+
 **Harmonium, Musette Accordion, Choir Ahs, Vox Humana** and **Celesta** — built
 from recordings in *GeneralUser GS 2.0.3* by S. Christian Collins
 (<https://github.com/mrbumpy409/GeneralUser-GS>, <https://www.schristiancollins.com>).

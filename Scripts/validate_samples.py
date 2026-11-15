@@ -171,6 +171,20 @@ def main():
                 if problems:
                     fail(f"{folder}/{name}: " + ", ".join(problems))
                     bad += 1
+            # An instrument in git with an explicit rootNotes list (everything but
+            # the locally imported pipe organ): the notes on disk must be exactly
+            # the ones the app declares, or SamplerEngine's loaded == expected
+            # assert fires on a device. A missing descriptor is an orphan folder.
+            if not app_declares(folder):
+                fail(f"{folder}: sample folder has no SamplerInstrument descriptor in SynthPreset.swift")
+            elif not discovers_roots(folder):
+                declared = descriptor_roots(folder)
+                on_disk = sorted({int(n.split("_")[0]) for n in wavs if NAME_RE.match(n)})
+                if declared is None:
+                    fail(f"{folder}: could not read rootNotes from SynthPreset.swift")
+                elif sorted(declared) != on_disk:
+                    fail(f"{folder}: rootNotes in SynthPreset.swift {sorted(declared)} "
+                         f"!= notes on disk {on_disk}")
             print(f"  {folder:16} {len(wavs)-bad}/{len(wavs)} files OK (imported)")
 
     # Imported-only instruments declared in the app but absent here (not in git, not

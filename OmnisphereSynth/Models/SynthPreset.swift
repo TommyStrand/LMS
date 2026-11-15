@@ -321,6 +321,75 @@ struct SamplerInstrument: Equatable, Hashable {
         loopCrossfade: 0.1
     )
 
+    // More VCSL / VSCO 2 recordings — sources for blends as much as instruments.
+    static let bowedVibraphone = SamplerInstrument(
+        id: "bowed_vibraphone", displayName: "Bowed Vibraphone",
+        rootNotes: [64, 67, 74, 81, 88],
+        velocityLayers: oneLayer          // one-shot: a bowed bar swells and rings on
+    )
+    static let concertHarp = SamplerInstrument(
+        id: "concert_harp", displayName: "Concert Harp",
+        rootNotes: [31, 35, 38, 41, 45, 48, 52, 55, 59, 62, 65, 69, 72, 76, 79, 83, 86, 89, 93],
+        velocityLayers: oneLayer
+    )
+    static let kalimba = SamplerInstrument(
+        id: "kalimba", displayName: "Kalimba",
+        rootNotes: [44, 46, 49, 51, 53, 56, 59, 61, 64, 65, 67, 70, 73, 74, 75, 77, 79, 82, 83, 85, 88, 90, 92, 97],
+        velocityLayers: oneLayer
+    )
+    static let tubularBells = SamplerInstrument(
+        id: "tubular_bells", displayName: "Tubular Bells",
+        rootNotes: [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77],
+        velocityLayers: oneLayer
+    )
+    static let handChimes = SamplerInstrument(
+        id: "hand_chimes", displayName: "Hand Chimes",
+        rootNotes: [60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 81, 84, 86, 88, 90, 92, 94, 96],
+        velocityLayers: oneLayer
+    )
+    static let ocarina = SamplerInstrument(
+        id: "ocarina", displayName: "Ocarina",
+        rootNotes: [69, 71, 73, 74, 76, 78, 80, 81, 82, 84, 85],
+        velocityLayers: oneLayer,
+        attack: 0.03, release: 0.25,
+        sustainLoop: true,
+        loopCrossfade: 0.2
+    )
+    static let frenchHorn = SamplerInstrument(
+        id: "french_horn", displayName: "French Horn",
+        rootNotes: [33, 36, 39, 43, 46, 50, 53, 57, 60, 74, 77],
+        velocityLayers: oneLayer,
+        attack: 0.05, release: 0.3,
+        sustainLoop: true,
+        loopCrossfade: 0.2
+    )
+    static let tremoloStrings = SamplerInstrument(
+        id: "tremolo_strings", displayName: "Tremolo Strings",
+        rootNotes: [36, 40, 43, 47, 50, 53, 55, 59, 62, 66, 69, 72, 76, 79, 83, 86],
+        velocityLayers: oneLayer,
+        attack: 0.08, release: 0.4,
+        sustainLoop: true,
+        loopCrossfade: 0.25
+    )
+    static let clarinet = SamplerInstrument(
+        id: "clarinet", displayName: "Clarinet",
+        rootNotes: [50, 53, 58, 62, 65, 70, 74, 77, 82, 86, 89],
+        velocityLayers: oneLayer,
+        attack: 0.03, release: 0.2,
+        sustainLoop: true,
+        loopCrossfade: 0.2
+    )
+
+    // A 1958 Otto Rubner double bass, bowed (D. Smolken, CC0).
+    static let bowedBass = SamplerInstrument(
+        id: "bowed_bass", displayName: "Bowed Double Bass",
+        rootNotes: [24, 27, 29, 31, 34, 36, 38, 41, 45, 48, 52, 55, 57, 60, 64, 69],
+        velocityLayers: oneLayer,
+        attack: 0.06, release: 0.35,
+        sustainLoop: true,
+        loopCrossfade: 0.2
+    )
+
     // Real recorded pipe organ (imported from an SFZ library via
     // Scripts/import_samples.py --source sfz). The samples are NOT in git — they
     // exist only where the importer ran — so roots are discovered from the folder
@@ -444,6 +513,91 @@ extension SynthPreset {
                 HybridPart(preset: "Tape Strings", gain: 0.5),
             ],
             iconStyle: .mysticWave
+        ),
+
+        SynthPreset(
+            name: "Horn Horizon",
+            color: "#D08A4A",
+            reverbMix: 0.7, delayMix: 0.12, delayTime: 0.5, chorusMix: 0.25,
+            shimmerAmount: 0.15, bloomAmount: 0.2,
+            hybrid: [
+                HybridPart(preset: "French Horn", gain: 0.9),
+                HybridPart(preset: "Tremolo Strings", gain: 0.6),
+                HybridPart(preset: "Mystic Pad", gain: 0.4, octave: -1),
+            ],
+            iconStyle: .solarRadial
+        ),
+        SynthPreset(
+            name: "Glass Kalimba",
+            color: "#8FD8C8",
+            reverbMix: 0.65, delayMix: 0.3, delayTime: 0.375, chorusMix: 0.2,
+            shimmerAmount: 0.3,
+            hybrid: [
+                HybridPart(preset: "Kalimba", gain: 1.0),
+                HybridPart(preset: "Hand Chimes", gain: 0.5),
+                HybridPart(preset: "Celestial", gain: 0.4),
+            ],
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Bowed Metal",
+            color: "#8AA0B8",
+            reverbMix: 0.8, delayMix: 0.2, delayTime: 0.666, chorusMix: 0.3,
+            shimmerAmount: 0.35, phaserAmount: 0.2,
+            hybrid: [
+                HybridPart(preset: "Bowed Vibes", gain: 1.0),
+                HybridPart(preset: "Glass Harmonica", gain: 0.5),
+                HybridPart(preset: "Void Walker", gain: 0.35),
+            ],
+            iconStyle: .voidHole
+        ),
+        SynthPreset(
+            name: "Harp Lagoon",
+            color: "#6FB8A0",
+            reverbMix: 0.7, delayMix: 0.25, delayTime: 0.5, chorusMix: 0.25,
+            shimmerAmount: 0.2, modDelayAmount: 0.15,
+            hybrid: [
+                HybridPart(preset: "Concert Harp", gain: 1.0),
+                HybridPart(preset: "Ocarina", gain: 0.4),
+                HybridPart(preset: "Solar Wind", gain: 0.35),
+            ],
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Bell Tower Fog",
+            color: "#7A6FA0",
+            reverbMix: 0.85, delayMix: 0.15, delayTime: 0.666, chorusMix: 0.2,
+            shimmerAmount: 0.25,
+            hybrid: [
+                HybridPart(preset: "Tubular Bells", gain: 0.9),
+                HybridPart(preset: "Church Organ", gain: 0.4, octave: -1),
+                HybridPart(preset: "Dark Matter", gain: 0.4),
+            ],
+            iconStyle: .darkVortex
+        ),
+        SynthPreset(
+            name: "Wood and Breath",
+            color: "#A88A60",
+            reverbMix: 0.6, delayMix: 0.1, delayTime: 0.5, chorusMix: 0.25,
+            brokenTape: 0.12,
+            hybrid: [
+                HybridPart(preset: "Clarinet", gain: 0.8),
+                HybridPart(preset: "Concert Flute", gain: 0.5),
+                HybridPart(preset: "Tape Strings", gain: 0.45),
+            ],
+            iconStyle: .mysticWave
+        ),
+        SynthPreset(
+            name: "Undertow",
+            color: "#3F5A78",
+            reverbMix: 0.75, delayMix: 0.12, delayTime: 0.666, chorusMix: 0.2,
+            bloomAmount: 0.25,
+            hybrid: [
+                HybridPart(preset: "Bowed Bass", gain: 0.9),
+                HybridPart(preset: "Tremolo Strings", gain: 0.5, octave: 1),
+                HybridPart(preset: "Void Walker", gain: 0.35),
+            ],
+            iconStyle: .voidHole
         ),
 
         SynthPreset(
@@ -779,6 +933,87 @@ extension SynthPreset {
             attack: 0.03, decay: 0.2, sustain: 0.85, release: 0.4,
             reverbMix: 0.32, delayMix: 0.08, delayTime: 0.375,
             iconStyle: .fluteShape
+        ),
+        SynthPreset(
+            name: "Bowed Vibes",
+            color: "#9FB4C8",
+            voiceMode: .sampler(.bowedVibraphone),   // a vibraphone bar drawn with a bow
+            attack: 0.05, decay: 2.0, sustain: 0.0, release: 1.5,
+            reverbMix: 0.7, delayMix: 0.15, delayTime: 0.666,
+            shimmerAmount: 0.2,
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Concert Harp",
+            color: "#D8B870",
+            voiceMode: .sampler(.concertHarp),   // a real concert harp
+            attack: 0.001, decay: 2.0, sustain: 0.0, release: 1.5,
+            reverbMix: 0.5, delayMix: 0.1, delayTime: 0.375,
+            iconStyle: .solarRadial
+        ),
+        SynthPreset(
+            name: "Kalimba",
+            color: "#C89060",
+            voiceMode: .sampler(.kalimba),   // a Tanzanian kalimba, in its own tuning
+            attack: 0.001, decay: 1.2, sustain: 0.0, release: 0.8,
+            reverbMix: 0.45, delayMix: 0.2, delayTime: 0.375,
+            iconStyle: .pulseBolt
+        ),
+        SynthPreset(
+            name: "Tubular Bells",
+            color: "#B8A070",
+            voiceMode: .sampler(.tubularBells),   // real tubular bells
+            attack: 0.001, decay: 3.0, sustain: 0.0, release: 2.0,
+            reverbMix: 0.65, delayMix: 0.1, delayTime: 0.666,
+            iconStyle: .churchPipes
+        ),
+        SynthPreset(
+            name: "Hand Chimes",
+            color: "#A8D0D8",
+            voiceMode: .sampler(.handChimes),   // real hand chimes
+            attack: 0.001, decay: 2.5, sustain: 0.0, release: 1.5,
+            reverbMix: 0.6, delayMix: 0.15, delayTime: 0.5,
+            iconStyle: .celestialDots
+        ),
+        SynthPreset(
+            name: "Ocarina",
+            color: "#7FB890",
+            voiceMode: .sampler(.ocarina),   // a real ocarina
+            attack: 0.03, decay: 0.2, sustain: 0.9, release: 0.25,
+            reverbMix: 0.45, delayMix: 0.1, delayTime: 0.375,
+            iconStyle: .fluteShape
+        ),
+        SynthPreset(
+            name: "French Horn",
+            color: "#C88838",
+            voiceMode: .sampler(.frenchHorn),   // a real French horn
+            attack: 0.05, decay: 0.3, sustain: 0.9, release: 0.3,
+            reverbMix: 0.55, delayMix: 0.06, delayTime: 0.5,
+            iconStyle: .solarRadial
+        ),
+        SynthPreset(
+            name: "Tremolo Strings",
+            color: "#8A4A2A",
+            voiceMode: .sampler(.tremoloStrings),   // string sections playing tremolo
+            attack: 0.08, decay: 0.3, sustain: 0.9, release: 0.4,
+            reverbMix: 0.55, delayMix: 0.08, delayTime: 0.5,
+            iconStyle: .stringBow
+        ),
+        SynthPreset(
+            name: "Clarinet",
+            color: "#6A5040",
+            voiceMode: .sampler(.clarinet),   // a real clarinet
+            attack: 0.03, decay: 0.2, sustain: 0.9, release: 0.2,
+            reverbMix: 0.4, delayMix: 0.06, delayTime: 0.375,
+            iconStyle: .fluteShape
+        ),
+        SynthPreset(
+            name: "Bowed Bass",
+            color: "#5A4030",
+            voiceMode: .sampler(.bowedBass),   // a real 1958 double bass, bowed
+            attack: 0.06, decay: 0.3, sustain: 0.9, release: 0.35,
+            reverbMix: 0.45, delayMix: 0.04, delayTime: 0.5,
+            iconStyle: .stringBow
         ),
         SynthPreset(
             name: "Pipe Organ",

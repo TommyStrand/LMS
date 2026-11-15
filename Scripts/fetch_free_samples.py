@@ -212,8 +212,10 @@ def install(instrument: str, cache: Path) -> None:
 # ── VCSL instruments (measured pitch) ────────────────────────────────────────
 # Versilian Community Sample Library, https://github.com/sgossner/VCSL (CC0 1.0).
 # name → (folder in the library, file names, seconds kept, fade-out seconds,
-#         flatten the held part?, tuned to concert pitch?). One velocity layer
-#         each: {midi}_64.wav.
+#         flatten the held part?, key from the file name?, options). One
+#         velocity layer each: {midi}_64.wav. Options: "source": "vsco" (else
+#         VCSL), "octave": octave-name offset (default +1), "tune": "strict"
+#         (default) | "loose" | "none" — see install_vcsl.
 # Pitch: VCSL names octaves one lower than standard (its "C3" = MIDI 60, checked
 # by measurement). The KEY comes from the file name; the measured pitch is used
 # only for fine tuning — the few cents needed to sit exactly on that key. (The
@@ -249,16 +251,99 @@ VCSL_INSTRUMENTS = {
         [f"Rode_Man3Open_{n}{o}.wav" for o in range(1, 6) for n in ["C", "D#", "F#", "A"]]
         + ["Rode_Man3Open_C6.wav"],
         4.5, 0.05, False, True),
+
+    # ── More sources for blends (the unusual and the orchestral) ─────────────
+    # A vibraphone bar drawn with a bow: a slow swell that rings on.
+    "bowed_vibraphone": (
+        "Idiophones/Struck Idiophones/Vibraphone/Bowed",
+        # (The library's "A2" take is left out: it measures a fourth away from its name.)
+        [f"Vibes_bowed_{n}_rr1_Main.wav" for n in ["E3", "G3", "D4", "A4", "E5"]],
+        6.0, 1.5, False, True),
+    "concert_harp": (
+        "Chordophones/Composite Chordophones/Concert Harp",
+        [f"KSHarp_{n}_f{r}.wav" for n, r in
+         [("G1", 1), ("B1", 1), ("D2", 1), ("F2", 1), ("A2", 1), ("C3", 2), ("E3", 1), ("G3", 1),
+          ("B3", 1), ("D4", 1), ("F4", 1), ("A4", 1), ("C5", 1), ("E5", 1), ("G5", 1), ("B5", 1),
+          ("D6", 1), ("F6", 1), ("A6", 1)]],
+        4.5, 1.5, False, True, {"octave": 0}),      # the harp files use standard octave names
+    # A Tanzanian kalimba in its own tuning — the measurement decides each key.
+    "kalimba": (
+        "Idiophones/Plucked Idiophones/Kalimba, Tanzania",
+        [f"MBira3_pluck_Main_{n}_k{k}_50_100_rr2.wav" for n, k in
+         [("G1", 12), ("G#1", 11), ("B1", 13), ("C#2", 10), ("D#2", 14), ("F2", "9alt"), ("G2", 15),
+          ("A#2", 8), ("C#3", 16), ("D#3", 7), ("F3", 17), ("G3", 6), ("A#3", 18), ("C#4", 5),
+          ("D4", 19), ("D#4", 20), ("F4", 21), ("G4", 22), ("A#4", 2), ("B4", 23), ("C#5", 24),
+          ("E5", 25), ("F#5", 1), ("G#5", 26), ("C#6", 27)]],
+        3.0, 1.0, False, True, {"tune": "loose"}),
+    "tubular_bells": (
+        "Idiophones/Struck Idiophones/Tubular Bells 2",
+        [f"TB_hit_{n}_v4_{r}.wav" for n, r in
+         [("C4", 1), ("D4", 2), ("E4", 1), ("F4", 1), ("G4", 1), ("A4", 1), ("B4", 1),
+          ("C5", 1), ("D5", 1), ("E5", 2), ("F5", 1)]],
+        # Standard octave names. A bell's pitch is a "strike tone" the ear builds
+        # from its partials, not a partial that can be measured — so no fine tuning.
+        6.0, 2.0, False, True, {"octave": 0, "tune": "none"}),
+    "hand_chimes": (
+        "Idiophones/Struck Idiophones/Hand Chimes",
+        [f"sus_{n}_r01_main.wav" for n in
+         ["C3", "D3", "E3", "F#3", "G#3", "A#3", "C4", "D4", "E4", "F#4", "G#4", "A4",
+          "C5", "D5", "E5", "F#5", "G#5", "A#5", "C6"]],
+        5.0, 1.5, False, True),
+    "ocarina": (
+        "Aerophones/Edge-blown Aerophones/Ocarina, Typical/Sustains/Sus",
+        [f"StdOcarina_Sus_{n}.wav" for n in
+         ["A3", "B3", "C#4", "D4", "E4", "F#4", "G#4", "A4", "A#4", "C5", "C#5"]],
+        4.0, 0.05, True, True),
+
+    # From VSCO 2 Community Edition (same studio, CC0).
+    "french_horn": (
+        "Brass/F Horn/sus",
+        [f"MOHorn_sus_{n}_v{v}_1.wav" for n, v in
+         [("A0", 1), ("C1", 2), ("D#1", 2), ("G1", 2), ("A#1", 2), ("D2", 2), ("F2", 2),
+          ("A2", 2), ("C3", 2), ("D4", 1), ("F4", 1)]],
+        5.0, 0.05, True, True, {"source": "vsco"}),
+    "tremolo_strings": (
+        "Strings",
+        [f"Cello Section/trem/trem_{n}_v{v}_1.wav" for n, v in
+         [("C1", 2), ("E1", 2), ("G1", 2), ("B1", 1), ("D2", 2), ("F2", 2)]]
+        + [f"Violin Section/Trem/VlnEns_Trem_{n}_v{v}.wav" for n, v in
+           [("G2", 2), ("B2", 2), ("D3", 2), ("F#3", 1), ("A3", 2), ("C4", 2), ("E4", 2),
+            ("G4", 2), ("B4", 2), ("D5", 2)]],
+        5.0, 0.05, True, True, {"source": "vsco"}),
+    "clarinet": (
+        "Woodwinds/Clarinet/susLong",
+        [f"DCClar_susLong_{n}_v2_rr1_sum.wav" for n in
+         ["D2", "F2", "A#2", "D3", "F3", "A#3", "D4", "F4", "A#4", "D5", "F#5"]],
+        5.0, 0.05, True, True, {"source": "vsco"}),
+
+    # A 1958 Otto Rubner double bass, bowed — played and recorded by D. Smolken
+    # (https://github.com/sfzinstruments/dsmolken.double-bass, CC0 1.0).
+    "bowed_bass": (
+        "arco",
+        [f"arco_{n}_mf_down.wav" for n in
+         ["c1", "eb1", "f1", "g1", "bb1", "c2", "d2", "f2", "a2", "c3", "e3", "g3", "a3",
+          "c4", "e4", "a4"]],
+        5.0, 0.05, True, True, {"source": "bass", "octave": 0, "lowest": 28.0}),
 }
 
-_NOTE_IN_NAME = re.compile(r"_([A-G]#?)(\d)(?=[_.])")
+SOURCES = {
+    "vsco": VSCO,
+    "bass": "https://raw.githubusercontent.com/sfzinstruments/dsmolken.double-bass/master/",
+}
+
+_NOTE_IN_NAME = re.compile(r"_([A-Ga-g][#b]?)(\d)(?=[_.])")
+_FLATS = {"Bb": "A#", "Eb": "D#", "Ab": "G#", "Db": "C#", "Gb": "F#"}
 
 
 def install_vcsl(instrument: str, cache: Path) -> list[int]:
     # (Imported here: that module imports flatten_sustain from this one.)
     from build_soundfont_instruments import measure_pitch, to_44k
 
-    folder, names, keep, fade, flatten, tuned_to_pitch = VCSL_INSTRUMENTS[instrument]
+    folder, names, keep, fade, flatten, tuned_to_pitch, *extra = VCSL_INSTRUMENTS[instrument]
+    options = extra[0] if extra else {}
+    base = SOURCES.get(options.get("source"), VCSL)
+    octave_shift = options.get("octave", 1)      # most files name octaves one low
+    tune = options.get("tune", "strict")
     out_dir = SAMPLES / instrument
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.wav"):
@@ -267,7 +352,7 @@ def install_vcsl(instrument: str, cache: Path) -> list[int]:
     tmp.mkdir(parents=True, exist_ok=True)
     roots: list[int] = []
     for name in names:
-        src = download(VCSL + urllib.parse.quote(f"{folder}/{name}"), cache)
+        src = download(base + urllib.parse.quote(f"{folder}/{name}"), cache)
         decoded = subprocess.run(
             ["ffmpeg", "-v", "error", "-i", str(src), "-ac", "1", "-ar", "44100",
              "-af", f"silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.004,atrim=0:{keep + 1:.2f}",
@@ -277,14 +362,32 @@ def install_vcsl(instrument: str, cache: Path) -> list[int]:
             samples.byteswap()
         x = [float(v) for v in samples]
         steady = x[int(0.4 * 44100):int(1.4 * 44100)]
-        hz = measure_pitch(steady, 44100)
+        hz = measure_pitch(steady, 44100, options.get("lowest", 55.0))
         exact = 69 + 12 * math.log2(hz / 440.0)
         if tuned_to_pitch:
             token = _NOTE_IN_NAME.search(name)
-            note = midi(token.group(1), int(token.group(2)) + 1)
-            # distance to that key, ignoring whole octaves
-            cents_off = ((exact - note + 6) % 12) - 6
-            exact = note + cents_off if abs(cents_off) < 0.5 else float(note)
+            letter = token.group(1).capitalize()            # "bb" → "Bb", "a" → "A"
+            note = midi(_FLATS.get(letter, letter), int(token.group(2)) + octave_shift)
+            # distance from that key to what was measured, ignoring whole octaves
+            off = ((exact - note + 6) % 12) - 6
+            if tune == "none":
+                exact = float(note)
+            elif tune == "loose":
+                # An instrument in its own tuning (kalimba): the name is only the
+                # nearest Western note. Follow the measurement when it lands within
+                # two semitones of the name; otherwise it has locked onto an
+                # overtone — keep the named key, untuned.
+                if abs(exact - note) <= 2:
+                    note = round(exact)
+                else:
+                    exact = float(note)
+            elif abs(off) <= 1.5:
+                # In tune, or mislabelled by a semitone (one clarinet take is):
+                # the measurement names the key and supplies the cents.
+                note += round(off)
+                exact = note + (off - round(off))
+            else:
+                exact = float(note)                # measurement unusable: trust the name
         else:
             note = round(exact)
         if note in roots or not 24 <= note <= 108:
@@ -306,7 +409,9 @@ def install_vcsl(instrument: str, cache: Path) -> list[int]:
             wf.setframerate(44100)
             wf.writeframes(out.tobytes())
         roots.append(note)
-        print(f"  {instrument}: MIDI {note:3d} ← {name}  ({hz:7.2f} Hz, corrected {100 * (note - exact):+5.1f} cents)")
+        heard = 69 + 12 * math.log2(hz / 440.0)
+        print(f"  {instrument}: MIDI {note:3d} ← {name.split('/')[-1]}  (measures as MIDI {heard:6.2f}, "
+              f"corrected {100 * (note - exact):+5.1f} cents)")
     return sorted(roots)
 
 

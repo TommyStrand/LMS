@@ -212,7 +212,7 @@ struct SettingsView: View {
                             infoRow("Play modes", value: PlayMode.allCases.map(\.label).joined(separator: " · "), theme: theme)
                             infoRow("Effects",    value: "Trem · Chorus · Drive · Phaser · A.Wah · Lo-Fi · Grit · Reverb · Delay · Shimmer · S.Echo · B.Tape · Bloom · Waver", theme: theme)
                             infoRow("Also",       value: "Looper · Drum machine · MIDI in · Recording · AirPlay", theme: theme)
-                            infoRow("Samples",    value: "Strings, flute, vibraphone, wine glasses, psaltery and church organ: Versilian Studios (VSCO 2 CE and VCSL, CC0). Reeds, choir, voices and celesta: GeneralUser GS by S. Christian Collins.", theme: theme)
+                            infoRow("Samples",    value: "Orchestral, mallet, bell, glass, harp, kalimba and organ recordings: Versilian Studios (VSCO 2 CE and VCSL, CC0). Bowed double bass: D. Smolken (CC0). Reeds, choir, voices and celesta: GeneralUser GS by S. Christian Collins.", theme: theme)
                         }
                         .padding(16)
                         .background(theme.panelBackground)

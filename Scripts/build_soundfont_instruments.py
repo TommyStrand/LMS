@@ -133,12 +133,13 @@ def render(sample: dict, seconds: float) -> list[float]:
     return out[:total]
 
 
-def measure_pitch(x: list[float], rate: float) -> float:
+def measure_pitch(x: list[float], rate: float, lowest: float = 55.0) -> float:
     """Fundamental (Hz) of the steady part: the lag that minimises the mean
     squared difference (as in YIN), refined between lags by a parabola."""
-    n = min(len(x) // 2, int(rate * 0.12))
+    # `lowest`: the lowest fundamental to look for (a double bass needs ~28 Hz).
+    n = min(len(x) // 2, int(rate * 0.12 * max(1.0, 55.0 / lowest)))
     seg = x[len(x) // 2:len(x) // 2 + 2 * n]
-    lo, hi = int(rate / 1500), min(n - 1, int(rate / 55))
+    lo, hi = int(rate / 1500), min(n - 1, int(rate / lowest))
     diffs, running = [], 0.0
     best, best_val = lo, float("inf")
     for lag in range(1, hi + 1):

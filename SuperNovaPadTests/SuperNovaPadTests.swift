@@ -80,7 +80,10 @@ final class SuperNovaPadTests: XCTestCase {
         let instruments: [SamplerInstrument] = [.stringEnsemble, .concertFlute, .pipeOrgan,
                                                 .reedOrgan, .musetteAccordion, .concertChoir,
                                                 .voiceOohs, .celesta, .vibraphone, .wineGlasses,
-                                                .bowedPsaltery, .churchOrgan]
+                                                .bowedPsaltery, .churchOrgan,
+                                                .bowedVibraphone, .concertHarp, .kalimba, .tubularBells,
+                                                .handChimes, .ocarina, .frenchHorn, .tremoloStrings,
+                                                .clarinet, .bowedBass]
         for inst in instruments {
             XCTAssertFalse(inst.rootNotes.isEmpty, "\(inst.id) has no roots")
             XCTAssertEqual(inst.rootNotes, inst.rootNotes.sorted(), "\(inst.id) roots not ascending")
